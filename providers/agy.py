@@ -156,9 +156,17 @@ class AGYProvider(AIProvider):
             cli = self.cli_path if Path(self.cli_path).exists() else None
         return cli is not None
 
-    def _build_command(self, prompt: str, output_format: str = "text", yolo: Optional[bool] = None) -> list[str]:
+    def _build_command(
+        self,
+        prompt: str,
+        output_format: str = "text",
+        yolo: Optional[bool] = None,
+        print_timeout: Optional[str] = "20m0s"
+    ) -> list[str]:
         use_yolo = self.yolo if yolo is None else yolo
         cmd = [self.cli_path, "-p", prompt, "--output-format", output_format]
+        if print_timeout:
+            cmd.extend(["--print-timeout", print_timeout])
         if use_yolo:
             cmd.append("--dangerously-skip-permissions")
         if self.model and self.model != "inherit":
@@ -167,11 +175,100 @@ class AGYProvider(AIProvider):
             cmd.extend(["--effort", self.effort])
         return cmd
 
+    def _format_stream_event(self, line: str) -> Optional[str]:
+        """Парсит stream-json событие от AGY и форматирует его в читаемый лог для GUI."""
+        line = line.strip()
+        if not line:
+            return None
+        if not line.startswith("{"):
+            return line + "\n"
+
+        try:
+            data = json.loads(line)
+            event = data.get("event")
+
+            if event == "init":
+                init_data = data.get("init", {})
+                cwd = init_data.get("cwd", "")
+                return f"⚡ [AGY Init] Сессия AGY запущена в: {cwd}\n"
+
+            elif event == "step_update":
+                su = data.get("step_update", {})
+                stype = su.get("step_type")
+                state = su.get("state")
+                tool_name = su.get("tool_name")
+                tool_info = su.get("tool_info", {})
+                text_delta = su.get("text_delta")
+
+                if text_delta:
+                    return text_delta
+
+                if stype == "tool" or tool_name:
+                    params = tool_info.get("parameters", {})
+                    if state == "ACTIVE":
+                        if tool_name == "write_to_file":
+                            target = params.get("TargetFile", "")
+                            desc = params.get("Description", "")
+                            return f"📝 [AGY] Создание файла: {target} ({desc})\n" if desc else f"📝 [AGY] Создание файла: {target}\n"
+                        elif tool_name in ("replace_file_content", "multi_replace_file_content"):
+                            target = params.get("TargetFile", "")
+                            desc = params.get("Description", "")
+                            return f"✏️ [AGY] Правка файла: {target} ({desc})\n" if desc else f"✏️ [AGY] Правка файла: {target}\n"
+                        elif tool_name == "run_command":
+                            cmd = params.get("CommandLine", "")
+                            return f"💻 [AGY] Выполнение команды: {cmd}\n"
+                        elif tool_name == "view_file":
+                            target = params.get("AbsolutePath", "")
+                            return f"🔍 [AGY] Чтение файла: {target}\n"
+                        elif tool_name == "list_dir":
+                            target = params.get("DirectoryPath", "")
+                            return f"📂 [AGY] Просмотр каталога: {target}\n"
+                        elif tool_name == "grep_search":
+                            q = params.get("Query", "")
+                            return f"🔎 [AGY] Поиск в файлах: '{q}'\n"
+                        else:
+                            param_str = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
+                            return f"🔧 [AGY] Инструмент: {tool_name}({param_str})\n"
+                    elif state == "DONE":
+                        duration = su.get("duration_seconds", 0)
+                        output = tool_info.get("output", "")
+                        if output and len(str(output).strip()) > 0:
+                            out_clean = str(output).strip().replace("\r", "")
+                            if len(out_clean) > 250:
+                                out_clean = out_clean[:250] + "..."
+                            return f"   ↪ Результат: {out_clean} ({duration:.2f}s)\n"
+                        return f"   ↪ Завершено ({duration:.2f}s)\n"
+
+                elif stype == "agent_response":
+                    usage = su.get("usage", {})
+                    out_tok = usage.get("output_tokens", 0)
+                    dur = su.get("duration_seconds", 0)
+                    if state == "DONE" and out_tok > 0:
+                        return f"💭 [AGY Model] Ответ сгенерирован ({out_tok} токенов, {dur:.2f}s)\n"
+
+            elif event == "result":
+                res = data.get("result", {})
+                status = res.get("status", "SUCCESS")
+                response = res.get("response", "")
+                usage = res.get("usage", {})
+                dur = res.get("duration_seconds", 0)
+                total_tok = usage.get("total_tokens", 0)
+
+                msg = f"\n{'═'*50}\n✅ [AGY Result] Статус: {status} | Всего токенов: {total_tok} | Время: {dur:.2f}s\n{'═'*50}\n"
+                if response and response.strip():
+                    msg += f"\n{response.strip()}\n"
+                return msg
+
+        except Exception:
+            return line + "\n"
+
+        return None
+
     def _run_agy(self, prompt: str, output_format: str = "text", yolo: Optional[bool] = None, cwd: Optional[Path] = None) -> str:
         if not self.is_available():
             raise RuntimeError(f"Исполняемый файл Antigravity CLI '{self.cli_path}' не найден в PATH.")
 
-        cmd = self._build_command(prompt, output_format=output_format, yolo=yolo)
+        cmd = self._build_command(prompt, output_format=output_format, yolo=yolo, print_timeout="10m0s")
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
 
@@ -202,17 +299,19 @@ class AGYProvider(AIProvider):
         cwd: Optional[Path] = None,
         stop_check_fn: Optional[Callable[[], bool]] = None
     ) -> tuple[int, str]:
-        """Запускает задачу в agy с непрерывным стримингом вывода в реальном времени."""
+        """Запускает задачу в agy с потоковым stream-json выводом всех действий и ответов в реальном времени."""
+        import io
         import time
 
         if not self.is_available():
             raise RuntimeError(f"Antigravity CLI '{self.cli_path}' не найден.")
 
-        cmd = self._build_command(prompt, output_format="text", yolo=yolo)
+        # Используем stream-json для получения всех промежуточных событий и действий
+        cmd = self._build_command(prompt, output_format="stream-json", yolo=yolo, print_timeout="25m0s")
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-        
+
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
         proc = subprocess.Popen(
@@ -226,6 +325,7 @@ class AGYProvider(AIProvider):
         )
 
         collected = []
+        reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
 
         try:
             while True:
@@ -233,22 +333,19 @@ class AGYProvider(AIProvider):
                     proc.kill()
                     on_line("\n⏹️ Процесс принудительно остановлен.\n")
                     break
-                
-                chunk = proc.stdout.read1(1024) if hasattr(proc.stdout, "read1") else proc.stdout.read(512)
-                if not chunk:
+
+                line = reader.readline()
+                if not line:
                     if proc.poll() is not None:
-                        remainder = proc.stdout.read() if proc.stdout else b""
-                        if remainder:
-                            text = remainder.decode("utf-8", errors="replace")
-                            collected.append(text)
-                            on_line(text)
                         break
                     time.sleep(0.02)
                     continue
-                
-                text = chunk.decode("utf-8", errors="replace")
-                collected.append(text)
-                on_line(text)
+
+                collected.append(line)
+                formatted = self._format_stream_event(line)
+                if formatted:
+                    on_line(formatted)
+
         finally:
             if proc.stdout and not proc.stdout.closed:
                 try:

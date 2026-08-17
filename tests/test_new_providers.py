@@ -97,3 +97,20 @@ def test_idea_brainstormer():
         assert idea.genre
         assert idea.hook
         assert idea.prompt_seed
+
+def test_agy_stream_event_formatting():
+    prov = AGYProvider()
+    
+    # Test tool call active
+    tool_event = '{"event":"step_update","step_update":{"state":"ACTIVE","step_type":"tool","tool_name":"write_to_file","tool_info":{"parameters":{"TargetFile":"src/main.ts","Description":"Entrypoint"}}}}'
+    formatted = prov._format_stream_event(tool_event)
+    assert formatted is not None
+    assert "src/main.ts" in formatted
+    assert "Entrypoint" in formatted
+    
+    # Test result event
+    result_event = '{"event":"result","result":{"status":"SUCCESS","response":"Done!","duration_seconds":2.5,"usage":{"total_tokens":500}}}'
+    formatted_res = prov._format_stream_event(result_event)
+    assert formatted_res is not None
+    assert "SUCCESS" in formatted_res
+    assert "500" in formatted_res
