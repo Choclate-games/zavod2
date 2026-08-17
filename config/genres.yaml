@@ -1,0 +1,104 @@
+# Genre definitions and defaults
+
+genres:
+  gladiator_action:
+    name: "Gladiator Action / Arena Combat"
+    default_renderer: "threejs"
+    default_orientation: "landscape"
+    camera_perspective: "Third-Person Isometric / Action Cam"
+    core_mechanics:
+      - "physics_ragdoll_combat"
+      - "parry_and_dash"
+      - "weapon_weight_physics"
+      - "arena_hazards"
+      - "crowd_favor_system"
+    typical_references:
+      - "Gladihoppers"
+      - "Toribash"
+      - "GORN"
+      - "Severed Steel"
+    target_audience: "Midcore action gamers, casual physics enthusiasts, web arena players"
+
+  survivor_roguelite:
+    name: "Survivor Roguelite"
+    default_renderer: "pixijs"
+    default_orientation: "portrait"
+    camera_perspective: "Top-Down 2D / 2.5D Orthographic"
+    core_mechanics:
+      - "auto_shooting"
+      - "wave_spawning"
+      - "upgrade_selection_cards"
+      - "gem_xp_attractor"
+      - "bullet_hell_dodging"
+    typical_references:
+      - "Vampire Survivors"
+      - "Brotato"
+      - "Magic Survival"
+      - "20 Minutes Till Dawn"
+    target_audience: "Casual to midcore mobile and web players"
+
+  base_defense_survivor:
+    name: "Base Defense Survivor / Hybrid Action"
+    default_renderer: "threejs"
+    default_orientation: "landscape"
+    camera_perspective: "Top-Down / Isometric 3D"
+    core_mechanics:
+      - "twin_stick_movement"
+      - "grid_base_building"
+      - "wave_survival"
+      - "resource_mining"
+      - "turret_automation"
+    typical_references:
+      - "Dome Keeper"
+      - "The Riftbreaker"
+      - "Vampire Survivors"
+      - "Mindustry"
+    target_audience: "Strategy & action players"
+
+  physics_puzzle_arcade:
+    name: "Physics Arcade / Destruction"
+    default_renderer: "threejs"
+    default_orientation: "portrait"
+    camera_perspective: "Front-Angle 3D / Side-View 3D"
+    core_mechanics:
+      - "physics_destruction"
+      - "drag_and_launch"
+      - "chain_reaction"
+      - "material_durability"
+    typical_references:
+      - "Angry Birds"
+      - "Crush the Castle"
+      - "Teardown"
+    target_audience: "Hypercasual to casual players"
+
+  card_battler_roguelike:
+    name: "Deckbuilder / Card Roguelike"
+    default_renderer: "pixijs"
+    default_orientation: "portrait"
+    camera_perspective: "2D Flat UI Canvas"
+    core_mechanics:
+      - "card_synergy"
+      - "turn_based_combat"
+      - "deck_pruning"
+      - "relic_stacking"
+    typical_references:
+      - "Slay the Spire"
+      - "Balatro"
+      - "Inscryption"
+    target_audience: "Tactical, midcore strategy gamers"
+
+  auto_battler:
+    name: "Auto Battler / Squad Strategy"
+    default_renderer: "pixijs"
+    default_orientation: "landscape"
+    camera_perspective: "Top-Down Grid / Isometric 2D"
+    core_mechanics:
+      - "synergy_buffs"
+      - "shop_reroll"
+      - "unit_placement"
+      - "automated_rounds"
+    typical_references:
+      - "Teamfight Tactics"
+      - "Auto Chess"
+      - "Super Auto Pets"
+    target_audience: "Strategy and casual theorycrafters"

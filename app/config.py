@@ -1,0 +1,50 @@
+import os
+from pathlib import Path
+from typing import Any, Dict
+import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_DIR = BASE_DIR / "config"
+KNOWLEDGE_DIR = BASE_DIR / "knowledge"
+TEMPLATES_DIR = BASE_DIR / "templates"
+DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
+
+def load_yaml(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+class AppConfig:
+    def __init__(self):
+        self.base_dir = BASE_DIR
+        self.config_dir = CONFIG_DIR
+        self.knowledge_dir = KNOWLEDGE_DIR
+        self.templates_dir = TEMPLATES_DIR
+        self.output_dir = Path(os.getenv("OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
+        
+        # Load yaml configs
+        self.factory_cfg = load_yaml(CONFIG_DIR / "factory.yaml")
+        self.models_cfg = load_yaml(CONFIG_DIR / "models.yaml")
+        self.genres_cfg = load_yaml(CONFIG_DIR / "genres.yaml")
+        self.mechanics_cfg = load_yaml(CONFIG_DIR / "mechanics.yaml")
+        self.references_cfg = load_yaml(CONFIG_DIR / "references.yaml")
+        self.playgama_cfg = load_yaml(CONFIG_DIR / "playgama.yaml")
+        
+        self.default_provider = os.getenv("DEFAULT_PROVIDER", "local")
+        self.default_mode = os.getenv("DEFAULT_MODE", "standard")
+        
+        # Provider & GUI settings
+        self.opencode_api_key = os.getenv("OPENCODE_API_KEY", "")
+        self.opencode_base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
+        self.opencode_model = os.getenv("OPENCODE_MODEL", "opencode-zen")
+        self.agy_cli_path = os.getenv("AGY_CLI_PATH", "agy")
+        self.agy_model = os.getenv("AGY_MODEL", "")
+        self.agy_effort = os.getenv("AGY_EFFORT", "high")
+        self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
+        self.gui_port = int(os.getenv("GUI_PORT", "7860"))
+
+config = AppConfig()

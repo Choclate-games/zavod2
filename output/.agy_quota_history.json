@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": 1786987503.682734,
+    "datetime": "2026-08-17T22:25:03.682740",
+    "prompt_len": 23,
+    "model": "default"
+  },
+  {
+    "timestamp": 1786987608.755243,
+    "datetime": "2026-08-17T22:26:48.755250",
+    "prompt_len": 2682,
+    "model": "default"
+  },
+  {
+    "timestamp": 1786988156.837853,
+    "datetime": "2026-08-17T22:35:56.837859",
+    "prompt_len": 2714,
+    "model": "default"
+  },
+  {
+    "timestamp": 1786989985.863765,
+    "datetime": "2026-08-17T23:06:25.863771",
+    "prompt_len": 2679,
+    "model": "default"
+  },
+  {
+    "timestamp": 1786990461.51726,
+    "datetime": "2026-08-17T23:14:21.517265",
+    "prompt_len": 2610,
+    "model": "default"
+  },
+  {
+    "timestamp": 1786991067.737125,
+    "datetime": "2026-08-17T23:24:27.737130",
+    "prompt_len": 2895,
+    "model": "default"
+  }
+]

@@ -1,0 +1,68 @@
+# Mechanics Catalog and Compatibility Matrix
+
+mechanics:
+  physics_ragdoll_combat:
+    name: "Physics Ragdoll Combat"
+    category: "combat"
+    preferred_renderer: "threejs"
+    physics_engine: "rapier3d"
+    description: "Active physical joints with dynamic balance, weapon impact momentum, and knockback calculations."
+    strengths: ["High replayability", "Emergent comedy and satisfaction", "Streamable/viral appeal"]
+    weaknesses: ["Higher CPU budget on mobile", "Requires careful joint stabilization"]
+
+  weapon_weight_physics:
+    name: "Weapon Weight & Inertia Physics"
+    category: "combat"
+    preferred_renderer: "threejs"
+    physics_engine: "rapier3d"
+    description: "Weapon mass alters recovery times, angular torque, player center-of-mass, and swing momentum."
+    strengths: ["Tactile hit feedback", "Deep mastery curve"]
+    weaknesses: ["Can feel sluggish if tuned poorly"]
+
+  parry_and_dash:
+    name: "Precise Parry & Dash Mechanics"
+    category: "movement_defense"
+    preferred_renderer: "both"
+    description: "Tight i-frame dodge and timing-based parry triggering enemy stagger and critical counter window."
+    strengths: ["High skill ceiling", "Intense risk/reward"]
+    weaknesses: ["Needs forgiving input buffers on touch screens"]
+
+  wave_survival:
+    name: "Wave Survival & Swarm Spawning"
+    category: "gameplay_loop"
+    preferred_renderer: "both"
+    description: "Procedural enemy waves scaling over time with density control, elite mini-bosses, and arena boundaries."
+    strengths: ["Addictive pacing", "Clear milestone satisfaction"]
+    weaknesses: ["Can become repetitive without variety"]
+
+  upgrade_choices:
+    name: "3-Card Roguelike Upgrade Choice"
+    category: "progression"
+    preferred_renderer: "both"
+    description: "Level-up modal presenting three random upgrades with synergies, rarity tiers, and reroll options."
+    strengths: ["Instant gratification", "Synergy experimentation"]
+    weaknesses: ["Requires rich pool of distinct modifiers"]
+
+  physics_destruction:
+    name: "Destructible Arena & Environmental Hazards"
+    category: "environment"
+    preferred_renderer: "threejs"
+    description: "Pillars, spike traps, barricades, and pits that interact with physical impacts and ragdolls."
+    strengths: ["Dynamic arena changes", "Tactical positioning value"]
+    weaknesses: ["Mesh fragment pooling required for web"]
+
+  crowd_favor_system:
+    name: "Colosseum Crowd Favor / Hype Meter"
+    category: "meta_system"
+    preferred_renderer: "both"
+    description: "Performing stylish parries, disarms, or multi-kills charges crowd hype, unlocking buffs or gold drops."
+    strengths: ["Drives aggressive, flashy play", "Theme reinforcement"]
+    weaknesses: ["Secondary system, shouldn't distract from core combat"]
+
+  base_building:
+    name: "Grid/Freeform Base & Turret Defense"
+    category: "building"
+    preferred_renderer: "both"
+    description: "Placing defensive walls, power conduits, automated turrets, and repair stations."
+    strengths: ["Dual-phase gameplay variety", "Deep player expression"]
+    weaknesses: ["UI overhead on mobile"]

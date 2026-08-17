@@ -1,0 +1,47 @@
+# Reference Games Catalog
+
+references:
+  gladihoppers:
+    name: "Gladihoppers"
+    genre: "2D/3D Physics Gladiator Battler"
+    core_loop: "Equip gear -> Fight arena match -> Earn gold/fame -> Upgrade stats and gear -> Face champion"
+    core_mechanic: "Hop physics, weapon stance switching, directional strikes, shield blocking"
+    pros: ["Tactile combat feel", "Fun ragdoll reactions", "Clear equipment progression"]
+    cons: ["Can become button-mashy without stamina limits"]
+    lessons: "Stance-based physics strikes make arena combat endlessly replayable."
+
+  toribash:
+    name: "Toribash"
+    genre: "Turn-based Physics Combat Simulator"
+    core_loop: "Adjust joint states -> Step physics simulation -> Land impact -> Calculate score/dismemberment"
+    core_mechanic: "Joint contraction, relaxation, and momentum manipulation"
+    pros: ["Infinite emergent combat depth", "Pure physics expression"]
+    cons: ["Steep learning curve"]
+    lessons: "Active physical balance and limb momentum make hits feel heavy and grounded."
+
+  vampire_survivors:
+    name: "Vampire Survivors"
+    genre: "Auto-shooter Roguelite"
+    core_loop: "Move -> Avoid enemies -> Auto-attack -> Collect XP gems -> Select 1 of 3 upgrades -> Survive 30 mins"
+    core_mechanic: "Exponential power curve, weapon evolution synergies, dopamine slot-machine audio/visuals"
+    pros: ["Zero entry barrier", "Massive addiction loop", "Clear goal"]
+    cons: ["Low individual skill ceiling"]
+    lessons: "Upgrades must change visual scale and feedback immediately to satisfy the player."
+
+  brotato:
+    name: "Brotato"
+    genre: "Arena Roguelite Shooter"
+    core_loop: "Survive 60s wave -> Enter shop -> Buy weapons/items -> Reroll shop -> Lock items -> Start next wave"
+    core_mechanic: "Shop economy, stat trade-offs (+attack speed, -armor), multi-weapon scaling"
+    pros: ["Very high build variety", "Compact 20-wave format"]
+    cons: ["Visual simplicity"]
+    lessons: "Clear short waves with structured shop phases create natural pacing and retention hooks."
+
+  dome_keeper:
+    name: "Dome Keeper"
+    genre: "Roguelike Base Defense & Mining"
+    core_loop: "Dig underground for resources -> Transport ore to dome -> Upgrade tech -> Return to surface -> Defend against wave"
+    core_mechanic: "Time-management tension between exploration and defense urgency"
+    pros: ["Masterful tension pacing", "Atmospheric audio/visuals"]
+    cons: ["Longer session times"]
+    lessons: "A dual-phase loop (preparation vs defense) creates immense engagement."

@@ -1,0 +1,83 @@
+# AI Game Prompt Factory Main Configuration
+
+factory:
+  name: "AI Game Prompt Factory"
+  version: "1.0.0"
+  default_provider: "local"
+  default_mode: "standard"
+  output_dir: "output"
+  templates_dir: "templates"
+  knowledge_dir: "knowledge"
+
+modes:
+  fast:
+    description: "Fast generation: essential docs, preview prompt, preview image, and AI developer prompt"
+    include_deep_qa: false
+    include_extra_skills: false
+    detailed_tables: false
+  standard:
+    description: "Standard generation: full specification suite, preview image, core skills, complete DoD"
+    include_deep_qa: true
+    include_extra_skills: true
+    detailed_tables: true
+  deep:
+    description: "Deep generation: exhaustive analysis of references, edge cases, risks, deep balance formulas, custom specialized skills"
+    include_deep_qa: true
+    include_extra_skills: true
+    detailed_tables: true
+    deep_balance: true
+
+scoring:
+  categories:
+    - fun
+    - originality
+    - replayability
+    - development_cost
+    - visual_appeal
+    - mobile_fit
+    - monetization
+    - platform_fit
+  weights:
+    fun: 0.20
+    originality: 0.15
+    replayability: 0.15
+    mobile_fit: 0.15
+    monetization: 0.10
+    platform_fit: 0.10
+    development_cost: 0.05
+    visual_appeal: 0.10
+
+documents:
+  required:
+    - README.md
+    - GAME_DESIGN_DOCUMENT.md
+    - GAMEPLAY_SPECIFICATION.md
+    - CORE_LOOP.md
+    - MECHANICS.md
+    - PROGRESSION.md
+    - LEVEL_DESIGN.md
+    - DIFFICULTY_DESIGN.md
+    - TECHNICAL_SPECIFICATION.md
+    - ARCHITECTURE_DOCUMENT.md
+    - THREEJS_OR_PIXI_ARCHITECTURE.md
+    - ART_DIRECTION.md
+    - UI_UX_SPECIFICATION.md
+    - MOBILE_CONTROLS.md
+    - AUDIO_DESIGN.md
+    - MONETIZATION.md
+    - PLAYGAMA_INTEGRATION.md
+    - PERFORMANCE.md
+    - QA_PLAN.md
+    - DEVELOPMENT_ROADMAP.md
+    - REFERENCE_ANALYSIS.md
+    - RISKS.md
+    - PREVIEW_PROMPT.md
+    - GAME_DATA.yaml
+    - AI_DEVELOPER_PROMPT.md
+
+skills:
+  core:
+    - GAME_SKILL.md
+    - GAMEPLAY_SKILL.md
+    - RENDERER_SKILL.md
+    - PLAYGAMA_SKILL.md

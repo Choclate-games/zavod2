@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Game Prompt Factory 🎮⚡ | AGY & OpenCode Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <!-- Markdown parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="dark-theme">
+  <div class="app-layout">
+    
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-logo">
+          <div class="logo-icon">🎮</div>
+          <div class="brand-text">
+            <span class="brand-title">GAME PROMPT FACTORY</span>
+            <span class="brand-subtitle">AGY CLI ⚡ OpenCode Go Studio</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="tab-studio">
+          <span class="tab-icon">🚀</span> Студия генерации
+        </button>
+        <button class="nav-tab" data-tab="tab-projects">
+          <span class="tab-icon">📁</span> Проекты (<span id="projects-count-badge">0</span>)
+        </button>
+        <button class="nav-tab" data-tab="tab-agy">
+          <span class="tab-icon">⚡</span> AGY CLI Runner
+        </button>
+        <button class="nav-tab" data-tab="tab-settings">
+          <span class="tab-icon">⚙️</span> Настройки API
+        </button>
+      </nav>
+
+      <div class="header-right">
+        <div class="status-pill" id="header-provider-badge">
+          <span class="pulse-dot"></span>
+          <span id="active-provider-label">Provider: AGY CLI</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Body -->
+    <main class="app-main">
+      
+      <!-- TAB 1: STUDIO GENERATOR -->
+      <section id="tab-studio" class="tab-content active">
+        <div class="studio-grid">
+          
+          <!-- Generator Configuration & Input Panel -->
+          <div class="glass-card generator-panel">
+            <div class="panel-header">
+              <h2>💡 Опишите идею вашей игры</h2>
+              <span class="badge-hint">AGY деконструирует задачу &rarr; Python соберет полную документацию</span>
+            </div>
+
+            <!-- Quick Preset Chips -->
+            <div class="presets-container">
+              <span class="presets-title">Быстрые шаблоны:</span>
+              <div class="chips-row">
+                <button class="chip" onclick="setIdeaPrompt('3D гладиаторский roguelike арена-экшен с ragdoll физикой, кастомизацией брони и волнами боссов на Яндекс Игры')">
+                  ⚔️ 3D Гладиаторы (Three.js)
+                </button>
+                <button class="chip" onclick="setIdeaPrompt('2D космический автобатлер и кликер базы с Playgama Cloud Save, лидербордами и Rewarded видео')">
+                  🌌 Космо-Кликер (PixiJS)
+                </button>
+                <button class="chip" onclick="setIdeaPrompt('Vampire Survivors-like орда-выживание с комбо-магией, 500+ врагов на экране и touch управлением для мобилок')">
+                  🧟 Horde Survival (PixiJS)
+                </button>
+                <button class="chip" onclick="setIdeaPrompt('3D физические гонки на разрушение машин с аренами-ловушками, апгрейдом нитро и мультиплеером')">
+                  🚗 Demolition Derby (Three.js)
+                </button>
+                <button class="chip" onclick="setIdeaPrompt('2D карточный рогалик с механикой драфта колоды, синергией артефактов и процедурным подземельем')">
+                  🃏 Карточный Roguelike (PixiJS)
+                </button>
+              </div>
+            </div>
+
+            <!-- Main Idea Textarea -->
+            <div class="input-group">
+              <textarea id="idea-input" rows="5" placeholder="Введите идею игры, жанр, особые механики, платформу, визуальный стиль..."></textarea>
+            </div>
+
+            <!-- Settings Grid -->
+            <div class="config-grid">
+              <div class="form-field">
+                <label for="select-provider">🤖 AI Provider</label>
+                <select id="select-provider">
+                  <option value="agy" selected>⚡ Antigravity CLI (agy)</option>
+                  <option value="opencode">💎 OpenCode Go (Zen API)</option>
+                  <option value="local">💻 Offline Local Expert (Instant)</option>
+                  <option value="openai">🧠 OpenAI (GPT-4o)</option>
+                  <option value="anthropic">🟣 Claude 3.5 Sonnet</option>
+                  <option value="google">🔷 Google Gemini Pro</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="select-renderer">🎨 Движок рендеринга</label>
+                <select id="select-renderer">
+                  <option value="auto" selected>✨ Auto (Smart AI Decision)</option>
+                  <option value="threejs">Three.js + Rapier3D (3D)</option>
+                  <option value="pixijs">PixiJS + Matter.js (2D)</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="select-mode">📊 Глубина спецификации</label>
+                <select id="select-mode">
+                  <option value="standard" selected>Standard (Полный пакет 25+ доков)</option>
+                  <option value="deep">Deep (Максимальная детализация систем)</option>
+                  <option value="fast">Fast (Быстрый прототип)</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="select-img-provider">🖼️ Concept Preview</label>
+                <select id="select-img-provider">
+                  <option value="local" selected>Local Procedural Pixel Canvas</option>
+                  <option value="openai">OpenAI DALL-E 3</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-row">
+              <button id="btn-generate" class="btn btn-primary btn-glow" onclick="startGeneration()">
+                <span class="btn-icon">⚡</span>
+                <span class="btn-text">Сгенерировать ТЗ и Master Prompt</span>
+              </button>
+              <button class="btn btn-secondary" onclick="clearStudioInput()">
+                Очистить
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Progress & Agent Pipeline Tracker -->
+          <div class="glass-card pipeline-monitor-panel">
+            <div class="panel-header">
+              <h2>📡 Realtime Agent Pipeline</h2>
+              <span id="pipeline-status-badge" class="badge-status idle">Ожидание</span>
+            </div>
+
+            <div class="progress-bar-container">
+              <div class="progress-bar" id="pipeline-progress-bar" style="width: 0%"></div>
+            </div>
+            <div class="step-label" id="pipeline-step-label">Готов к запуску пайплайна...</div>
+
+            <!-- 14 Agent Steps Grid -->
+            <div class="agent-steps-grid" id="agent-steps-container">
+              <div class="agent-step-item" id="step-1"><span class="step-num">1</span> <span class="step-name">Idea Analyzer</span></div>
+              <div class="agent-step-item" id="step-2"><span class="step-num">2</span> <span class="step-name">Game Designer</span></div>
+              <div class="agent-step-item" id="step-3"><span class="step-num">3</span> <span class="step-name">Reference Analyst</span></div>
+              <div class="agent-step-item" id="step-4"><span class="step-num">4</span> <span class="step-name">Mechanics Architect</span></div>
+              <div class="agent-step-item" id="step-5"><span class="step-num">5</span> <span class="step-name">Renderer Selector</span></div>
+              <div class="agent-step-item" id="step-6"><span class="step-num">6</span> <span class="step-name">Technical Architect</span></div>
+              <div class="agent-step-item" id="step-7"><span class="step-num">7</span> <span class="step-name">Playgama Specialist</span></div>
+              <div class="agent-step-item" id="step-8"><span class="step-num">8</span> <span class="step-name">Monetization Designer</span></div>
+              <div class="agent-step-item" id="step-9"><span class="step-num">9</span> <span class="step-name">Art & UX</span></div>
+              <div class="agent-step-item" id="step-10"><span class="step-num">10</span> <span class="step-name">Preview Designer</span></div>
+              <div class="agent-step-item" id="step-11"><span class="step-num">11</span> <span class="step-name">Skill Generator</span></div>
+              <div class="agent-step-item" id="step-12"><span class="step-num">12</span> <span class="step-name">Critic & DoD</span></div>
+              <div class="agent-step-item" id="step-13"><span class="step-num">13</span> <span class="step-name">Package Generator</span></div>
+              <div class="agent-step-item" id="step-14"><span class="step-num">14</span> <span class="step-name">Validator Suite</span></div>
+            </div>
+
+            <!-- Live Logs Console -->
+            <div class="live-console-wrapper">
+              <div class="console-top">
+                <span>Журнал генерации</span>
+                <button class="btn-mini" onclick="clearLogs()">Очистить логи</button>
+              </div>
+              <div class="console-box" id="live-console">
+                <div class="log-line dim">[00:00:00] Готов к созданию спецификаций...</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- TAB 2: PROJECTS EXPLORER -->
+      <section id="tab-projects" class="tab-content">
+        <div class="projects-layout">
+          
+          <!-- Left Sidebar: Project List -->
+          <aside class="projects-sidebar glass-card">
+            <div class="sidebar-header">
+              <h3>📦 Сгенерированные игры</h3>
+              <button class="btn-mini" onclick="loadProjectsList()">🔄 Обновить</button>
+            </div>
+            <div class="projects-list-container" id="projects-list">
+              <!-- Dynamically rendered projects list -->
+              <div class="empty-state">Загрузка проектов...</div>
+            </div>
+          </aside>
+
+          <!-- Right Content: Project Inspector & Document Viewer -->
+          <div class="project-view glass-card" id="project-inspector">
+            
+            <div class="empty-selection" id="no-project-selected">
+              <div class="empty-icon">📁</div>
+              <h3>Выберите проект из списка слева</h3>
+              <p>Вы сможете просматривать GDD, архитектуру, AI Developer Prompt, запускать AGY и перегенерировать отдельные разделы.</p>
+            </div>
+
+            <!-- Active Project Container -->
+            <div class="project-details-container" id="active-project-container" style="display: none;">
+              
+              <!-- Project Meta Banner -->
+              <div class="project-header-banner">
+                <div class="banner-title-area">
+                  <h2 id="proj-title">Game Title</h2>
+                  <div class="proj-badges">
+                    <span class="badge badge-slug" id="proj-slug">slug</span>
+                    <span class="badge badge-genre" id="proj-genre">Genre</span>
+                    <span class="badge badge-renderer" id="proj-renderer">THREEJS</span>
+                    <span class="badge badge-score" id="proj-score">⭐ 8.5/10</span>
+                  </div>
+                </div>
+
+                <div class="banner-actions">
+                  <button class="btn btn-sm btn-primary" onclick="copyMasterPrompt()">
+                    📋 Скопировать Master Prompt
+                  </button>
+                  <button class="btn btn-sm btn-cyan" onclick="sendPromptToAgyRunner()">
+                    ⚡ Отправить в AGY CLI
+                  </button>
+                  <button class="btn btn-sm btn-secondary" onclick="openCurrentFolder()">
+                    📂 Открыть в проводнике
+                  </button>
+                  <button class="btn btn-sm btn-secondary" onclick="exportCurrentZip()">
+                    📦 Скачать ZIP
+                  </button>
+                  <button class="btn btn-sm btn-secondary" onclick="validateCurrentProject()">
+                    ✅ Валидация
+                  </button>
+                </div>
+              </div>
+
+              <!-- Secondary Navigation Tabs for Documents -->
+              <div class="doc-subtabs">
+                <button class="doc-tab active" data-doc="AI_DEVELOPER_PROMPT.md">🤖 Master AI Prompt</button>
+                <button class="doc-tab" data-doc="GAME_DESIGN_DOCUMENT.md">📖 GDD</button>
+                <button class="doc-tab" data-doc="MECHANICS.md">⚙️ Механики</button>
+                <button class="doc-tab" data-doc="ARCHITECTURE_DOCUMENT.md">🏗️ Архитектура</button>
+                <button class="doc-tab" data-doc="PLAYGAMA_INTEGRATION.md">🎮 Playgama SDK</button>
+                <button class="doc-tab" data-doc="MONETIZATION.md">💰 Монетизация</button>
+                <button class="doc-tab" data-doc="preview">🎨 Превью / Арт</button>
+                <button class="doc-tab" data-doc="skills/GAME_SKILL.md">🧩 Скиллы</button>
+                <button class="doc-tab" data-doc="rebuild">🔄 Перегенерация секций</button>
+              </div>
+
+              <!-- Document Viewer Body -->
+              <div class="doc-viewer-body">
+                
+                <!-- Markdown/Text Viewer Pane -->
+                <div id="doc-pane-content" class="doc-content-pane">
+                  <div class="doc-toolbar">
+                    <span class="doc-filename" id="doc-active-filename">AI_DEVELOPER_PROMPT.md</span>
+                    <div class="doc-tools">
+                      <button class="btn-mini" onclick="copyCurrentDocContent()">📋 Копировать файл</button>
+                      <button class="btn-mini" onclick="toggleRawMarkdown()">📝 Исходный Markdown</button>
+                    </div>
+                  </div>
+                  
+                  <div class="markdown-render" id="markdown-viewer"></div>
+                  <pre class="raw-render" id="raw-viewer" style="display: none;"></pre>
+                </div>
+
+                <!-- Preview Screenshot Pane -->
+                <div id="doc-pane-preview" class="doc-content-pane" style="display: none;">
+                  <div class="preview-center">
+                    <img id="concept-preview-img" src="" alt="Concept Preview Screenshot" class="concept-preview-image">
+                    <div class="preview-prompt-box">
+                      <h4>Промпт концепт-арта (`PREVIEW_PROMPT.md`):</h4>
+                      <pre id="preview-prompt-text"></pre>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Section Rebuilder Pane -->
+                <div id="doc-pane-rebuild" class="doc-content-pane" style="display: none;">
+                  <div class="rebuilder-panel">
+                    <h3>Точечная перегенерация разделов игры</h3>
+                    <p>Обновите конкретную часть спецификации без сброса всего проекта:</p>
+                    
+                    <div class="rebuild-buttons-grid">
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('monetization')">
+                        💰 Перегенерировать Монетизацию & Рекламу
+                      </button>
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('architecture')">
+                        🏗️ Перегенерировать Техническую Архитектуру
+                      </button>
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('gameplay')">
+                        ⚙️ Перегенерировать Механики и Core Loop
+                      </button>
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('playgama')">
+                        🎮 Перегенерировать Playgama Bridge
+                      </button>
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('preview')">
+                        🎨 Перегенерировать Концепт-Превью
+                      </button>
+                      <button class="btn btn-outline" onclick="triggerRebuildSection('skills')">
+                        🧩 Перегенерировать AI Скиллы
+                      </button>
+                    </div>
+
+                    <div id="rebuild-status-msg" class="status-box" style="display: none;"></div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      <!-- TAB 3: AGY CLI RUNNER -->
+      <section id="tab-agy" class="tab-content">
+        <div class="agy-runner-layout glass-card">
+          <div class="panel-header">
+            <h2>⚡ Antigravity CLI (AGY) Interactive Terminal</h2>
+            <span class="badge-hint">Прямой вызов CLI `agy` для разработки, анализа и кодинга</span>
+          </div>
+
+          <div class="agy-runner-grid">
+            <div class="agy-input-side">
+              <div class="form-field">
+                <label>Прикрепить контекст проекта:</label>
+                <select id="agy-project-select">
+                  <option value="">Без контекста проекта (Чистый промпт)</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label>Промпт / Задача для AGY CLI:</label>
+                <textarea id="agy-prompt-input" rows="8" placeholder="Например: Разработай начальную структуру файлов Three.js проекта и напиши bootstrap main.ts с инициализацией Playgama Bridge..."></textarea>
+              </div>
+
+              <div class="action-row">
+                <button class="btn btn-primary btn-glow" id="btn-run-agy" onclick="executeAgyPrompt()">
+                  ⚡ Отправить задачу в AGY CLI
+                </button>
+                <button class="btn btn-secondary" onclick="document.getElementById('agy-prompt-input').value=''">
+                  Очистить
+                </button>
+              </div>
+            </div>
+
+            <div class="agy-output-side">
+              <div class="console-top">
+                <span>Вывод AGY CLI</span>
+                <button class="btn-mini" onclick="document.getElementById('agy-console-output').textContent=''">Очистить</button>
+              </div>
+              <pre class="agy-terminal-box" id="agy-console-output">Готов к запуску AGY команд...</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: SETTINGS & API KEYS -->
+      <section id="tab-settings" class="tab-content">
+        <div class="settings-layout glass-card">
+          <div class="panel-header">
+            <h2>⚙️ Настройки провайдеров и API ключей</h2>
+            <span class="badge-hint">Конфигурация OpenCode Go, Antigravity CLI, OpenAI, Gemini, Claude</span>
+          </div>
+
+          <div class="settings-grid">
+            
+            <!-- OpenCode Go Card -->
+            <div class="settings-card">
+              <div class="card-title-row">
+                <span class="card-icon">💎</span>
+                <h3>OpenCode Go / Zen Подписка</h3>
+              </div>
+              <p class="card-desc">Доступ к оптимизированным моделям кодинга через OpenAI-совместимый API шлюз OpenCode.</p>
+              
+              <div class="form-field">
+                <label>OpenCode API Key (Bearer token)</label>
+                <input type="password" id="cfg-opencode-key" placeholder="sk-...">
+              </div>
+              <div class="form-field">
+                <label>OpenCode Base URL</label>
+                <input type="text" id="cfg-opencode-url" value="https://opencode.ai/zen/v1">
+              </div>
+              <div class="form-field">
+                <label>Модель OpenCode</label>
+                <input type="text" id="cfg-opencode-model" value="opencode-zen" placeholder="opencode-zen, claude-3-5-sonnet, deepseek-coder">
+              </div>
+              <button class="btn btn-sm btn-outline" onclick="testProviderConnection('opencode')">
+                🔌 Проверить подключение OpenCode Go
+              </button>
+            </div>
+
+            <!-- AGY CLI Card -->
+            <div class="settings-card">
+              <div class="card-title-row">
+                <span class="card-icon">⚡</span>
+                <h3>Antigravity CLI (agy)</h3>
+              </div>
+              <p class="card-desc">Интеграция с локальным Google Antigravity CLI агентом.</p>
+              
+              <div class="form-field">
+                <label>Путь к исполняемому файлу CLI</label>
+                <input type="text" id="cfg-agy-path" value="agy" placeholder="agy">
+              </div>
+              <div class="form-field">
+                <label>AGY Model (опционально)</label>
+                <input type="text" id="cfg-agy-model" placeholder="inherit, gemini-2.5-pro, flash...">
+              </div>
+              <div class="form-field">
+                <label>Reasoning Effort</label>
+                <select id="cfg-agy-effort">
+                  <option value="high" selected>high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </div>
+              <button class="btn btn-sm btn-outline" onclick="testProviderConnection('agy')">
+                🔌 Проверить подключение AGY CLI
+              </button>
+            </div>
+
+            <!-- Other LLM Providers -->
+            <div class="settings-card">
+              <div class="card-title-row">
+                <span class="card-icon">🌐</span>
+                <h3>Другие AI Провайдеры</h3>
+              </div>
+              
+              <div class="form-field">
+                <label>OpenAI API Key</label>
+                <input type="password" id="cfg-openai-key" placeholder="sk-...">
+              </div>
+              <div class="form-field">
+                <label>Anthropic API Key</label>
+                <input type="password" id="cfg-anthropic-key" placeholder="sk-ant-...">
+              </div>
+              <div class="form-field">
+                <label>Google Gemini API Key</label>
+                <input type="password" id="cfg-gemini-key" placeholder="AIzaSy...">
+              </div>
+            </div>
+
+            <!-- General Settings -->
+            <div class="settings-card">
+              <div class="card-title-row">
+                <span class="card-icon">🛠️</span>
+                <h3>Общие параметры</h3>
+              </div>
+              
+              <div class="form-field">
+                <label>Провайдер по умолчанию</label>
+                <select id="cfg-default-provider">
+                  <option value="agy">Antigravity CLI (agy)</option>
+                  <option value="opencode">OpenCode Go (Zen API)</option>
+                  <option value="local">Local Expert (Offline)</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google Gemini</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label>Папка для вывода проектов</label>
+                <input type="text" id="cfg-output-dir" value="output" readonly>
+              </div>
+
+              <div class="action-row" style="margin-top: 1.5rem;">
+                <button class="btn btn-primary" onclick="saveSettings()">
+                  💾 Сохранить настройки в .env
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <div id="settings-status-box" class="status-box" style="display: none; margin-top: 1.5rem;"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Global Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

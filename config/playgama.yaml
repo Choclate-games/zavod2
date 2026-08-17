@@ -1,0 +1,72 @@
+# Playgama Bridge Configuration & SDK Best Practices
+
+playgama:
+  sdk_name: "Playgama Bridge"
+  cdn_script: "https://cdn.jsdelivr.net/npm/@playgama/bridge@1.x/dist/bridge.min.js"
+  npm_package: "@playgama/bridge"
+  version: "1.x"
+
+  modules:
+    advertisement:
+      interstitial:
+        method: "bridge.advertisement.showInterstitial()"
+        state_property: "bridge.advertisement.interstitialState"
+        cooldown_seconds: 90
+        allowed_states: ["loading", "opened", "closed", "failed"]
+        rules:
+          - "Never trigger mid-action or during high-intensity combat"
+          - "Only show between completed waves, run game over, or main menu transitions"
+          - "Check cooldown timer before invoking"
+          - "Mute audio and pause game simulation on 'opened', resume on 'closed'"
+      rewarded:
+        method: "bridge.advertisement.showRewarded()"
+        state_property: "bridge.advertisement.rewardedState"
+        reward_triggers:
+          - id: "revive_run"
+            name: "Second Chance Revive"
+            benefit: "Restore 50% HP + 3s invulnerability once per run"
+          - id: "double_end_gold"
+            name: "Double Run Spoils"
+            benefit: "2x gold earned in current session"
+          - id: "free_upgrade_reroll"
+            name: "Reroll Upgrade Choices"
+            benefit: "Reroll current 3 cards for a guaranteed Rare+"
+          - id: "daily_chest_bonus"
+            name: "Claim Extra Daily Chest"
+            benefit: "Unlock premium gear crate"
+
+    storage:
+      methods:
+        get: "bridge.storage.get(keys, storageType)"
+        set: "bridge.storage.set(keys, values, storageType)"
+        delete: "bridge.storage.delete(keys, storageType)"
+      storage_types:
+        local: "StorageType.LOCAL_STORAGE"
+        platform_internal: "StorageType.PLATFORM_INTERNAL"
+      sync_strategy: "Debounced save (2s) on meta state changes, immediate save on run finish/exit"
+      saved_state_keys:
+        - "meta_save_v1"
+        - "audio_settings"
+        - "control_settings"
+
+    platform:
+      properties:
+        id: "bridge.platform.id" # 'yandex', 'crazy_games', 'vk', 'game_distribution', etc.
+        language: "bridge.platform.language" # 'ru', 'en', 'tr', etc.
+        payload: "bridge.platform.payload"
+      messages:
+        game_ready: "bridge.platform.sendMessage(PlatformMessage.GAME_READY)"
+
+    device:
+      properties:
+        type: "bridge.device.type" # 'mobile', 'tablet', 'desktop'
+
+    leaderboard:
+      methods:
+        set_score: "bridge.leaderboard.setScore(options)"
+        get_entries: "bridge.leaderboard.getEntries(options)"
+
+    social:
+      methods:
+        share: "bridge.social.share(options)"
+        invite: "bridge.social.invite(options)"
