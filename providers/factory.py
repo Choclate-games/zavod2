@@ -8,6 +8,7 @@ from providers.anthropic import AnthropicProvider
 from providers.google import GoogleProvider
 from providers.agy import AGYProvider, AGYImageProvider
 from providers.opencode import OpenCodeProvider
+from providers.qwen import QwenImageProvider
 
 class ProviderFactory:
     @staticmethod
@@ -45,6 +46,9 @@ class ProviderFactory:
         
         if name in ("none", "skip", "off", "no", "without"):
             return NoneImageProvider()
+        elif name in ("qwen", "dashscope", "wan"):
+            # Самое дешёвое превью: text-to-image DashScope (wan2.2-t2i-flash).
+            return QwenImageProvider()
         elif name in ("agy", "antigravity"):
             cli_path = os.getenv("AGY_CLI_PATH", "agy")
             return AGYImageProvider(cli_path=cli_path)

@@ -59,6 +59,28 @@ def project_dir(slug: str) -> Path:
     return ensure_inside_workspace(workspace_root() / slug)
 
 
+def legacy_docs_dir(slug: str) -> Path:
+    """Старое место спецификаций — output/<slug>/ (до переезда проектов в workspace)."""
+    return (config.base_dir / "output" / slug).resolve()
+
+
+def docs_dir(slug: str) -> Path:
+    """
+    Каталог с документацией проекта.
+
+    Проекты живут в workspace/, но у игр, созданных до переезда, спецификация
+    осталась в output/<slug>/. Поэтому сначала ищем документы рядом с кодом и
+    только затем — в старом каталоге; без этого вкладки ТЗ выглядели пустыми.
+    """
+    project = project_dir(slug)
+    if (project / "GAME_DATA.yaml").exists() or (project / "AI_DEVELOPER_PROMPT.md").exists():
+        return project
+    legacy = legacy_docs_dir(slug)
+    if (legacy / "GAME_DATA.yaml").exists() or (legacy / "AI_DEVELOPER_PROMPT.md").exists():
+        return legacy
+    return project
+
+
 def list_projects() -> list[Path]:
     """Каталоги проектов в workspace (спека и/или исходники), свежие сверху."""
     root = workspace_root()
@@ -70,6 +92,15 @@ def list_projects() -> list[Path]:
         and not p.name.startswith(".")
         and ((p / "GAME_DATA.yaml").exists() or (p / "package.json").exists())
     ]
+    # Игры, оставшиеся только в старом output/, тоже должны быть в списке —
+    # иначе их спецификация пропадает из интерфейса.
+    known = {p.name for p in projects}
+    legacy_root = config.base_dir / "output"
+    if legacy_root.exists():
+        for p in legacy_root.iterdir():
+            if (p.is_dir() and not p.name.startswith(".")
+                    and p.name not in known and (p / "GAME_DATA.yaml").exists()):
+                projects.append(p)
     return sorted(projects, key=lambda p: p.stat().st_mtime, reverse=True)
 
 

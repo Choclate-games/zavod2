@@ -23,29 +23,28 @@ class AGYQuotaTracker:
     """
 
     # Порядок важен: в таком виде семейства выводятся в интерфейсе.
-    FAMILIES = ("claude", "gemini", "other")
+    # Групп ровно две — как в терминале Antigravity: Gemini и «Claude и GPT».
+    FAMILIES = ("gemini", "claude")
     FAMILY_TITLES = {
-        "claude": "Claude",
-        "gemini": "Gemini",
-        "other": "Прочие модели",
+        "gemini": "GEMINI MODELS",
+        "claude": "CLAUDE AND GPT MODELS",
     }
     FAMILY_DEFAULT_LIMITS = {
         # Значения по умолчанию; переопределяются переменными окружения
         # AGY_LIMIT_5H_CLAUDE / AGY_LIMIT_WEEKLY_CLAUDE и т. д.
         "claude": (50, 500),
         "gemini": (50, 500),
-        "other": (50, 500),
     }
 
     @staticmethod
     def model_family(model: Optional[str]) -> str:
-        """Семейство квоты по идентификатору модели ('claude-sonnet-4-6' -> 'claude')."""
-        name = (model or "").strip().lower()
-        if name.startswith("claude") or "sonnet" in name or "opus" in name or "haiku" in name:
-            return "claude"
-        if name.startswith("gemini") or "gemini" in name:
-            return "gemini"
-        return "other"
+        """
+        Группа квоты по идентификатору модели.
+
+        Gemini расходует свой пул, всё остальное (Claude, GPT-OSS) — общий второй,
+        поэтому отдельной корзины «прочие» больше нет.
+        """
+        return "gemini" if "gemini" in (model or "").strip().lower() else "claude"
 
     # Единый файл истории для всех экземпляров трекера. Раньше путь был
     # относительным ("output/..."), поэтому GUI и провайдер писали/читали разные
@@ -124,12 +123,14 @@ class AGYQuotaTracker:
             "limit_5h": limit_5h,
             "remaining_5h": max(0, limit_5h - used_5h),
             "pct_5h": min(100.0, (used_5h / max(1, limit_5h)) * 100),
+            "pct_left_5h": max(0.0, 100.0 - min(100.0, (used_5h / max(1, limit_5h)) * 100)),
             "reset_5h_str": f"{reset_5h // 3600}ч {(reset_5h % 3600) // 60}м" if reset_5h > 0 else "0м",
             "reset_5h_at": datetime.fromtimestamp(now_ts + reset_5h).strftime("%d.%m %H:%M") if reset_5h else "—",
             "used_weekly": used_weekly,
             "limit_weekly": limit_weekly,
             "remaining_weekly": max(0, limit_weekly - used_weekly),
             "pct_weekly": min(100.0, (used_weekly / max(1, limit_weekly)) * 100),
+            "pct_left_weekly": max(0.0, 100.0 - min(100.0, (used_weekly / max(1, limit_weekly)) * 100)),
             "reset_weekly_str": f"{reset_weekly // 86400}д {(reset_weekly % 86400) // 3600}ч" if reset_weekly else "0д",
             "reset_weekly_at": datetime.fromtimestamp(now_ts + reset_weekly).strftime("%d.%m %H:%M") if reset_weekly else "—",
             "last_model": last_model,

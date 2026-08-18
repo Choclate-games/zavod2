@@ -16,10 +16,12 @@ from app.config import config, BASE_DIR
 from app.context import GenerationContext
 from app.models import GameConcept
 from app.pipeline import Pipeline
-from app import sandbox, chat_store
+from app import sandbox, chat_store, notify
 from app.gui.game_runner import DevServer, detect_start_command, open_internal_browser
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
+from providers.quota_probe import read_live_quota
+from app.chat_jobs import ChatJobManager
 from app.gui.chat_terminal import ChatTerminal
 from providers.opencode import OpenCodeProvider
 from providers.base import NoneImageProvider
@@ -391,7 +393,22 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._agy_history: Dict[str, List[Dict[str, str]]] = {}
         self.active_chat_session = None          # chat_store.ChatSession
         self.active_chat_slug: Optional[str] = None
+        # Реестр параллельных задач: каждый чат работает сам по себе.
+        self.chat_jobs = ChatJobManager()
         self._quota_job = None
+        # Кэш живых квот с language server Antigravity (None = сервер недоступен)
+        self._live_quota: Optional[Dict[str, Any]] = None
+        self._quota_probe_running = False
+        # Превью проектов кэшируем по mtime файла: пересборка картинок на каждый
+        # рефреш списка — главный источник рывков в интерфейсе.
+        self._project_thumbs: Dict[str, ctk.CTkImage] = {}
+        self._thumb_cache: Dict[str, Any] = {}
+        # Подпись текущего состояния списка чатов: перерисовываем его только
+        # когда что-то реально изменилось.
+        self._chats_state: Optional[str] = None
+        # Проект, к которому относится последняя завершённая задача чата —
+        # его можно запустить прямо из чата кнопкой «Играть».
+        self._last_finished_slug: Optional[str] = None
 
         # Register global logging listener so all agent/CLI logs appear in GUI console
         register_log_listener(self._on_global_log_event)
@@ -400,6 +417,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._show_tab("studio")
         self._load_settings_to_ui()
         self._refresh_projects_list()
+        # Список моделей подтягиваем сразу: переключатель в чате должен работать
+        # без ручного нажатия «🔄».
+        self._reload_agy_models(quiet=True)
 
     def _on_global_log_event(self, level: str, message: str):
         """Dispatches real-time logs from any agent or CLI to the active console."""
@@ -464,7 +484,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         self.btn_nav_agy = ctk.CTkButton(
             self.sidebar_frame,
-            text="⚡ AGY CLI Терминал",
+            text="💬 Чаты разработки",
             anchor="w",
             height=40,
             fg_color="transparent",
@@ -599,6 +619,8 @@ class GamePromptFactoryGUI(ctk.CTk):
             self._refresh_projects_list()
         elif tab_name == "agy":
             self._populate_agy_projects_dropdown()
+            self._refresh_chats_list()
+            self._update_chat_run_indicator()
         elif tab_name == "play":
             self._populate_play_projects_dropdown()
         elif tab_name == "quota":
@@ -717,11 +739,12 @@ class GamePromptFactoryGUI(ctk.CTk):
         ctk.CTkLabel(col4, text="🖼️ Превью Арт", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8").pack(anchor="w")
         self.combo_img_provider = ctk.CTkComboBox(
             col4,
-            values=["⚡ agy (Antigravity AI/Canvas)", "🚫 none (Без превью)", "💻 local (Procedural Pixel)", "🧠 openai (DALL-E 3)"],
+            values=["🐉 qwen (DashScope, дёшево)", "⚡ agy (Antigravity AI/Canvas)", "🚫 none (Без превью)",
+                    "💻 local (Procedural Pixel)", "🧠 openai (DALL-E 3)"],
             height=32,
             fg_color="#0e1626"
         )
-        self.combo_img_provider.set("⚡ agy (Antigravity AI/Canvas)")
+        self.combo_img_provider.set("🐉 qwen (DashScope, дёшево)")
         self.combo_img_provider.pack(fill="x", pady=(2, 0))
 
         # Buttons Row: 1-Click Game Creation + Spec Only + Analyze
@@ -937,6 +960,7 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _get_selected_image_provider_key(self) -> str:
         val = self.combo_img_provider.get().lower()
         if "none" in val or "без превью" in val: return "none"
+        if "qwen" in val or "dashscope" in val: return "qwen"
         if "agy" in val: return "agy"
         if "openai" in val: return "openai"
         return "local"
@@ -1439,6 +1463,18 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.preview_image_frame = ctk.CTkScrollableFrame(self.doc_viewer_container, fg_color="#080d16")
         self.lbl_preview_status_badge = ctk.CTkLabel(self.preview_image_frame, text="", font=ctk.CTkFont(size=12, weight="bold"))
         self.lbl_preview_status_badge.pack(pady=(10, 5))
+
+        self.btn_gen_preview = ctk.CTkButton(
+            self.preview_image_frame,
+            text="🎨 Сгенерировать превью (Qwen)",
+            height=32,
+            fg_color="#00f0ff",
+            hover_color="#00c8d6",
+            text_color="#050b14",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._generate_preview_for_current_project
+        )
+        self.btn_gen_preview.pack(pady=(0, 8))
         self.lbl_preview_img = ctk.CTkLabel(self.preview_image_frame, text="Превью не загружено")
         self.lbl_preview_img.pack(pady=5)
         self.txt_preview_prompt = ctk.CTkTextbox(self.preview_image_frame, height=140, font=ctk.CTkFont(family="Consolas", size=11))
@@ -1495,9 +1531,13 @@ class GamePromptFactoryGUI(ctk.CTk):
             ).pack(pady=20)
             return
 
+        # Ссылки на превью держим у окна: CTkImage без ссылки собирает GC и картинка исчезает.
+        self._project_thumbs = {}
+
         for p in projects:
+            docs = sandbox.docs_dir(p.name)
             data = {}
-            yaml_path = p / "GAME_DATA.yaml"
+            yaml_path = docs / "GAME_DATA.yaml"
             if yaml_path.exists():
                 try:
                     with open(yaml_path, "r", encoding="utf-8") as f:
@@ -1511,74 +1551,188 @@ class GamePromptFactoryGUI(ctk.CTk):
             score = data.get("scores", {}).get("overall_score", "-")
             has_code = "💻 код" if (p / "package.json").exists() else "📄 только ТЗ"
 
-            card = ctk.CTkButton(
-                self.scroll_projects_list,
-                text=f"🎮 {title}\n{genre} | {renderer} | ⭐ {score}/10 | {has_code}",
-                height=58,
-                anchor="w",
-                fg_color="#131c2e",
-                hover_color="#1a263e",
-                text_color="#f0f4fc",
-                font=ctk.CTkFont(size=11),
-                command=lambda s=p.name: self._select_project_by_slug(s)
+            thumb = self._load_project_thumb(p.name)
+            if thumb is not None:
+                self._project_thumbs[p.name] = thumb
+
+            self._build_project_card(
+                slug=p.name, thumb=thumb,
+                title=title,
+                subtitle=f"{genre} · {renderer} · ⭐ {score}/10 · {has_code}",
             )
-            card.pack(fill="x", pady=3)
+
+    def _build_project_card(self, *, slug: str, thumb, title: str, subtitle: str):
+        """Карточка проекта: крупное превью сверху, название и метки под ним."""
+        card = ctk.CTkFrame(self.scroll_projects_list, fg_color="#131c2e", corner_radius=10)
+        card.pack(fill="x", pady=(0, 8))
+
+        parts = [card]
+
+        if thumb is not None:
+            cover = ctk.CTkLabel(card, text="", image=thumb)
+            cover.pack(fill="x", padx=6, pady=(6, 4))
+            parts.append(cover)
+        else:
+            cover = ctk.CTkLabel(
+                card, text="🖼 превью ещё не создано", height=54,
+                fg_color="#0e1626", corner_radius=8,
+                font=ctk.CTkFont(size=11), text_color="#475569"
+            )
+            cover.pack(fill="x", padx=6, pady=(6, 4))
+            parts.append(cover)
+
+        name = ctk.CTkLabel(
+            card, text=f"🎮 {title}", anchor="w", justify="left",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#f0f4fc",
+            wraplength=232
+        )
+        name.pack(fill="x", padx=10)
+        parts.append(name)
+
+        meta = ctk.CTkLabel(
+            card, text=subtitle, anchor="w", justify="left",
+            font=ctk.CTkFont(size=10), text_color="#8ea3c0", wraplength=232
+        )
+        meta.pack(fill="x", padx=10, pady=(0, 8))
+        parts.append(meta)
+
+        # Карточка — не кнопка (кнопка не умеет «картинка сверху, текст снизу»),
+        # поэтому клик и подсветку вешаем на неё саму и на все её части.
+        def select(_event=None):
+            self._select_project_by_slug(slug)
+
+        def hover(color):
+            def handler(_event=None):
+                try:
+                    card.configure(fg_color=color)
+                except Exception:
+                    pass
+            return handler
+
+        for widget in parts:
+            widget.bind("<Button-1>", select)
+            widget.bind("<Enter>", hover("#1a263e"))
+            widget.bind("<Leave>", hover("#131c2e"))
+
+    def _load_project_thumb(self, slug: str) -> Optional[ctk.CTkImage]:
+        """Крупное превью для карточки проекта (None — превью ещё нет)."""
+        path = sandbox.docs_dir(slug) / "preview" / "concept_preview.png"
+        if not path.exists():
+            return None
+
+        # Кэш по времени изменения файла: пересобирать картинку на каждый
+        # рефреш списка дорого и заметно подтормаживает окно.
+        try:
+            key = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            return None
+        cached = self._thumb_cache.get(slug)
+        if cached and cached[0] == key:
+            return cached[1]
+
+        try:
+            img = Image.open(path)
+            img.thumbnail((248, 140))
+            image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+        except Exception:
+            return None
+        self._thumb_cache[slug] = (key, image)
+        return image
 
     # ── Чаты проекта ──────────────────────────────────────────────────
-    def _refresh_chats_list(self):
-        """Перерисовывает список бесед выбранного проекта."""
-        for widget in self.scroll_chats_list.winfo_children():
-            widget.destroy()
+    def _chats_signature(self, sessions) -> str:
+        """Отпечаток состояния списка: пока он не меняется, перерисовка не нужна."""
+        active = self.active_chat_session.id if self.active_chat_session else ""
+        rows = "|".join(
+            f"{s.id}:{s.updated_at}:{s.message_count}:{s.model or ''}:"
+            f"{int(self.chat_jobs.is_running(s.id))}"
+            for s in sessions
+        )
+        return f"{self.current_project_slug}#{active}#{rows}"
+
+    def _refresh_chats_list(self, force: bool = False):
+        """
+        Перерисовывает список бесед в обеих панелях (проекты и чат).
+
+        Список пересобирается при каждом событии задачи, а полный destroy/create
+        десятков виджетов — это как раз то мерцание, которое видно в окне.
+        Поэтому сначала сверяем отпечаток и выходим, если ничего не изменилось.
+        """
+        sessions = chat_store.list_sessions(self.current_project_slug) if self.current_project_slug else []
+        signature = self._chats_signature(sessions)
+        if not force and signature == self._chats_state:
+            return
+        self._chats_state = signature
+
+        containers = [c for c in (getattr(self, "scroll_chats_list", None),
+                                  getattr(self, "scroll_chats_list_agy", None)) if c is not None]
+        for container in containers:
+            for widget in container.winfo_children():
+                widget.destroy()
 
         if not self.current_project_slug:
             self.lbl_chats_title.configure(text="💬 Чаты проекта")
-            ctk.CTkLabel(
-                self.scroll_chats_list,
-                text="Выберите проект,\nчтобы увидеть его чаты",
-                text_color="#64748b", font=ctk.CTkFont(size=11), justify="left"
-            ).pack(pady=16, padx=10, anchor="w")
+            if getattr(self, "lbl_agy_chats_title", None):
+                self.lbl_agy_chats_title.configure(text="💬 Чаты")
+            for container in containers:
+                ctk.CTkLabel(
+                    container,
+                    text="Выберите проект,\nчтобы увидеть его чаты",
+                    text_color="#64748b", font=ctk.CTkFont(size=11), justify="left"
+                ).pack(pady=16, padx=10, anchor="w")
             return
 
-        sessions = chat_store.list_sessions(self.current_project_slug)
         self.lbl_chats_title.configure(text=f"💬 Чаты ({len(sessions)})")
+        if getattr(self, "lbl_agy_chats_title", None):
+            self.lbl_agy_chats_title.configure(text=f"💬 Чаты ({len(sessions)})")
 
         if not sessions:
-            ctk.CTkLabel(
-                self.scroll_chats_list,
-                text="Чатов пока нет.\nНажмите «➕ Новый», чтобы начать\nразработку с агентом.",
-                text_color="#64748b", font=ctk.CTkFont(size=11), justify="left"
-            ).pack(pady=16, padx=10, anchor="w")
+            for container in containers:
+                ctk.CTkLabel(
+                    container,
+                    text="Чатов пока нет.\nНажмите «➕», чтобы начать\nразработку с агентом.",
+                    text_color="#64748b", font=ctk.CTkFont(size=11), justify="left"
+                ).pack(pady=16, padx=10, anchor="w")
             return
 
-        for session in sessions:
-            active = self.active_chat_session and self.active_chat_session.id == session.id
-            row = ctk.CTkFrame(
-                self.scroll_chats_list,
-                fg_color="#1a2942" if active else "#131c2e",
-                corner_radius=8,
-                border_width=1 if active else 0,
-                border_color="#00f0ff"
-            )
-            row.pack(fill="x", pady=3)
-            row.grid_columnconfigure(0, weight=1)
+        for container in containers:
+            for session in sessions:
+                self._render_chat_row(container, session)
 
-            when = session.updated_at[5:16].replace("T", " ")
-            resumable = "🔗" if session.conversation_id else "•"
-            ctk.CTkButton(
-                row,
-                text=f"{session.title}\n{resumable} {when} · сообщений: {session.message_count}",
-                anchor="w", height=46,
-                fg_color="transparent", hover_color="#243454",
-                text_color="#f0f4fc", font=ctk.CTkFont(size=11),
-                command=lambda s=session.id: self._open_chat_session(s)
-            ).grid(row=0, column=0, sticky="ew", padx=(4, 0), pady=2)
+    def _render_chat_row(self, container, session):
+        """Карточка беседы: активная подсвечена, работающая помечена ⏳."""
+        active = self.active_chat_session and self.active_chat_session.id == session.id
+        running = self.chat_jobs.is_running(session.id)
 
-            ctk.CTkButton(
-                row, text="🗑", width=28, height=28,
-                fg_color="transparent", hover_color="#3f1422", text_color="#ff4d79",
-                font=ctk.CTkFont(size=12),
-                command=lambda s=session.id: self._delete_chat_session(s)
-            ).grid(row=0, column=1, padx=(0, 4))
+        row = ctk.CTkFrame(
+            container,
+            fg_color="#1a2942" if active else "#131c2e",
+            corner_radius=8,
+            border_width=1 if (active or running) else 0,
+            border_color="#fbbf24" if running else "#00f0ff"
+        )
+        row.pack(fill="x", pady=3)
+        row.grid_columnconfigure(0, weight=1)
+
+        when = session.updated_at[5:16].replace("T", " ")
+        resumable = "🔗" if session.conversation_id else "•"
+        state = "⏳ работает" if running else f"сообщений: {session.message_count}"
+        model_note = f" · {session.model}" if session.model else ""
+        ctk.CTkButton(
+            row,
+            text=f"{session.title}\n{resumable} {when} · {state}{model_note}",
+            anchor="w", height=46,
+            fg_color="transparent", hover_color="#243454",
+            text_color="#fbbf24" if running else "#f0f4fc", font=ctk.CTkFont(size=11),
+            command=lambda s=session.id: self._open_chat_session(s)
+        ).grid(row=0, column=0, sticky="ew", padx=(4, 0), pady=2)
+
+        ctk.CTkButton(
+            row, text="🗑", width=28, height=28,
+            fg_color="transparent", hover_color="#3f1422", text_color="#ff4d79",
+            font=ctk.CTkFont(size=12),
+            command=lambda s=session.id: self._delete_chat_session(s)
+        ).grid(row=0, column=1, padx=(0, 4))
 
     def _new_chat_session(self):
         if not self.current_project_slug:
@@ -1600,6 +1754,11 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._show_tab("agy")
         self._populate_agy_projects_dropdown()
         self.combo_agy_proj.set(self.current_project_slug)
+        if session.model:
+            values = list(self.combo_agy_model.cget("values") or [])
+            if session.model not in values:
+                self.combo_agy_model.configure(values=values + [session.model])
+            self.combo_agy_model.set(session.model)
 
         # Восстанавливаем переписку в ленте
         self.chat_agy.clear()
@@ -1616,11 +1775,35 @@ class GamePromptFactoryGUI(ctk.CTk):
             else:
                 self.chat_agy.push({"kind": "system", "icon": "ℹ️", "text": message.text})
 
+        # Если в этом чате прямо сейчас работает агент — доигрываем его события,
+        # чтобы вернуться к задаче ровно там, где её оставили.
+        job = self.chat_jobs.get(session.id)
+        if job and job.status == "running":
+            self.chat_agy.push({
+                "kind": "system", "icon": "⏳",
+                "text": f"Агент работает в этом чате уже {job.duration_str} — показываю ход задачи."
+            })
+            for event in list(job.events):
+                self.chat_agy.push(event)
+            self.chat_agy.show_typing()
+            self.lbl_agy_term_status.configure(text="● Выполнение...", text_color="#00f0ff")
+        else:
+            self.chat_agy.hide_typing()
+            self.lbl_agy_term_status.configure(text="● Готов", text_color="#00ff88")
+
         self._update_agy_session_label()
+        self._update_chat_run_indicator()
+        self._update_play_button()
         self._refresh_chats_list()
 
     def _delete_chat_session(self, session_id: str):
         if not self.current_project_slug:
+            return
+        if self.chat_jobs.is_running(session_id):
+            self.chat_agy.push({
+                "kind": "error",
+                "text": "Нельзя удалить чат, пока в нём работает агент — сначала нажмите «⏹ Стоп»."
+            })
             return
         chat_store.delete_session(self.current_project_slug, session_id)
         if self.active_chat_session and self.active_chat_session.id == session_id:
@@ -1642,12 +1825,24 @@ class GamePromptFactoryGUI(ctk.CTk):
             )
 
     def _ensure_chat_session(self, slug: str):
-        """Возвращает активную беседу проекта, создавая её при необходимости."""
-        if (self.active_chat_session is None
-                or self.active_chat_slug != slug):
-            self.active_chat_session = chat_store.create_session(slug)
-            self.active_chat_slug = slug
-            self._update_agy_session_label()
+        """
+        Активная беседа проекта.
+
+        Если чат не выбран, продолжаем последнюю свободную беседу проекта, а не
+        плодим новую на каждое сообщение — иначе переписка рассыпается по десяткам
+        пустых чатов и «прошлые сообщения» действительно негде показать.
+        """
+        if self.active_chat_session is not None and self.active_chat_slug == slug:
+            return self.active_chat_session
+
+        session = None
+        for candidate in chat_store.list_sessions(slug):
+            if not self.chat_jobs.is_running(candidate.id):
+                session = candidate
+                break
+        self.active_chat_session = session or chat_store.create_session(slug)
+        self.active_chat_slug = slug
+        self._update_agy_session_label()
         return self.active_chat_session
 
     def _select_project_by_slug(self, slug: str):
@@ -1659,7 +1854,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
 
         self.current_project_slug = slug
-        yaml_path = folder / "GAME_DATA.yaml"
+        yaml_path = sandbox.docs_dir(slug) / "GAME_DATA.yaml"
         if yaml_path.exists():
             try:
                 with open(yaml_path, "r", encoding="utf-8") as f:
@@ -1687,13 +1882,28 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         self._show_tab("projects")
         self._refresh_chats_list()
+        self._update_play_button()
         self._on_doc_tab_selected(self.doc_selector.get())
+
+    def _resolve_doc_path(self, filename: str) -> Path:
+        """
+        Путь к документу проекта.
+
+        DEVLOG/CHANGELOG агент ведёт рядом с кодом в workspace/, а спецификация
+        старых игр могла остаться в output/. Поэтому проверяем оба каталога.
+        """
+        slug = self.current_project_slug or ""
+        candidates = [sandbox.project_dir(slug) / filename, sandbox.docs_dir(slug) / filename]
+        for path in candidates:
+            if path.exists():
+                return path
+        return candidates[1]
 
     def _on_doc_tab_selected(self, tab_key: str):
         if not self.current_project_slug:
             return
 
-        folder = config.output_dir / self.current_project_slug
+        folder = sandbox.docs_dir(self.current_project_slug)
 
         self.md_viewer.grid_forget()
         self.preview_image_frame.grid_forget()
@@ -1746,7 +1956,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         filename = doc_map.get(tab_key, "AI_DEVELOPER_PROMPT.md")
         self.active_doc_filename = filename
-        target_file = folder / filename
+        target_file = self._resolve_doc_path(filename)
 
         self.md_viewer.grid(row=0, column=0, sticky="nsew")
 
@@ -1759,10 +1969,37 @@ class GamePromptFactoryGUI(ctk.CTk):
         else:
             self.md_viewer.set_content(filename, f"Файл {filename} не найден в {folder.name}")
 
+    def _generate_preview_for_current_project(self):
+        """Рисует концепт-превью выбранной игры выбранным провайдером изображений."""
+        if not self.current_project_slug:
+            return
+        slug = self.current_project_slug
+        self.btn_gen_preview.configure(state="disabled", text="⏳ Рисуем превью...")
+
+        def run():
+            try:
+                docs = sandbox.docs_dir(slug)
+                self.pipeline.rebuild_preview(docs.name, docs.parent)
+                done_text = "✅ Превью готово"
+            except Exception as exc:
+                done_text = f"❌ Не вышло: {exc}"
+
+            def finish():
+                self.btn_gen_preview.configure(state="normal", text="🎨 Сгенерировать превью (Qwen)")
+                self.lbl_preview_status_badge.configure(
+                    text=done_text, text_color="#00ff88" if done_text.startswith("✅") else "#ff4d79"
+                )
+                self._on_doc_tab_selected(self.doc_selector.get())
+                self._refresh_projects_list()
+
+            self.after(0, finish)
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _copy_master_prompt(self):
         if not self.current_project_slug:
             return
-        prompt_file = config.output_dir / self.current_project_slug / "AI_DEVELOPER_PROMPT.md"
+        prompt_file = sandbox.docs_dir(self.current_project_slug) / "AI_DEVELOPER_PROMPT.md"
         if prompt_file.exists():
             content = prompt_file.read_text(encoding="utf-8")
             self.clipboard_clear()
@@ -1799,7 +2036,7 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _validate_current_project(self):
         if not self.current_project_slug:
             return
-        folder = config.output_dir / self.current_project_slug
+        folder = sandbox.docs_dir(self.current_project_slug)
         valid = OutputValidator().run_all(folder)
         if valid:
             self.btn_val_pkg.configure(text="✅ 100% Валиден", fg_color="#00ff88", text_color="#050b14")
@@ -1821,17 +2058,29 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _project_is_playable(self, slug: Optional[str]) -> bool:
+        """Игру можно запустить, когда агент уже создал package.json."""
+        if not slug:
+            return False
+        try:
+            return (sandbox.project_dir(slug) / "package.json").exists()
+        except sandbox.SandboxViolation:
+            return False
+
     def _play_current_project(self):
-        """Поднимает dev-сервер выбранного проекта и открывает игру во внутреннем браузере."""
-        if not self.current_project_slug:
+        self._play_project(self.current_project_slug)
+
+    def _play_project(self, slug: Optional[str]):
+        """Поднимает dev-сервер проекта и открывает игру во внутреннем браузере."""
+        if not slug:
             return
         self._show_tab("play")
         self._populate_play_projects_dropdown()
-        self.combo_play_proj.set(self.current_project_slug)
+        self.combo_play_proj.set(slug)
 
         # Сервер уже поднят для этого же проекта — просто открываем окно.
         if (self.dev_server and self.dev_server.is_running
-                and self.dev_server.project_dir.name == self.current_project_slug
+                and self.dev_server.project_dir.name == slug
                 and self.preview_url):
             self._open_preview_window()
             return
@@ -1867,10 +2116,35 @@ class GamePromptFactoryGUI(ctk.CTk):
     # =================================================================
     def _build_agy_tab(self):
         self.tab_agy_frame.grid_rowconfigure(0, weight=1)
-        self.tab_agy_frame.grid_columnconfigure(0, weight=1)
+        self.tab_agy_frame.grid_columnconfigure(1, weight=1)
+
+        # ── Слева: чаты проекта (как в привычных мессенджерах/ИИ-клиентах) ──
+        side = ctk.CTkFrame(self.tab_agy_frame, fg_color="#121a2b", corner_radius=12, width=250)
+        side.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=0)
+        side.grid_rowconfigure(1, weight=1)
+        side.grid_columnconfigure(0, weight=1)
+        side.grid_propagate(False)
+
+        side_head = ctk.CTkFrame(side, fg_color="transparent")
+        side_head.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
+
+        self.lbl_agy_chats_title = ctk.CTkLabel(
+            side_head, text="💬 Чаты", font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.lbl_agy_chats_title.pack(side="left")
+
+        ctk.CTkButton(
+            side_head, text="➕", width=34, height=26,
+            fg_color="#00f0ff", hover_color="#00c8d6", text_color="#050b14",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._new_chat_session
+        ).pack(side="right")
+
+        self.scroll_chats_list_agy = ctk.CTkScrollableFrame(side, fg_color="#0e1626", corner_radius=8)
+        self.scroll_chats_list_agy.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
         agy_box = ctk.CTkFrame(self.tab_agy_frame, fg_color="#121a2b", corner_radius=12)
-        agy_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=0)
+        agy_box.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=0)
         agy_box.grid_rowconfigure(2, weight=1)   # лента чата растягивается
         agy_box.grid_columnconfigure(0, weight=1)
 
@@ -1880,7 +2154,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="⚡ Antigravity CLI — Консоль разработки",
+            text="💬 Чат разработки (Antigravity CLI)",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color="#e2e8f0"
         ).pack(side="left")
@@ -1900,6 +2174,11 @@ class GamePromptFactoryGUI(ctk.CTk):
             text_color="#64748b"
         )
         self.lbl_agy_session.pack(side="left", padx=(14, 0))
+
+        self.lbl_agy_running = ctk.CTkLabel(
+            header, text="", font=ctk.CTkFont(size=11), text_color="#64748b"
+        )
+        self.lbl_agy_running.pack(side="left", padx=(14, 0))
 
         # ── Options Row ──
         opt_container = ctk.CTkFrame(agy_box, fg_color="transparent")
@@ -2028,6 +2307,33 @@ class GamePromptFactoryGUI(ctk.CTk):
         )
         self.lbl_agy_term_status.pack(side="left", padx=10)
 
+        # Игру можно запустить прямо отсюда: после ответа агента не нужно идти
+        # на вкладку предпросмотра и заново выбирать проект.
+        self.btn_agy_play = ctk.CTkButton(
+            term_bar,
+            text="▶ Играть",
+            height=20, width=80,
+            fg_color="#0d3320",
+            hover_color="#155c37",
+            text_color="#00ff88",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            state="disabled",
+            command=self._play_chat_project
+        )
+        self.btn_agy_play.pack(side="left", padx=(4, 0), pady=2)
+
+        self.chk_agy_notify = ctk.CTkCheckBox(
+            term_bar,
+            text="🔔 Уведомления",
+            font=ctk.CTkFont(size=10),
+            text_color="#94a3b8",
+            checkbox_width=16, checkbox_height=16,
+            command=self._toggle_notifications
+        )
+        if notify.notifications_enabled():
+            self.chk_agy_notify.select()
+        self.chk_agy_notify.pack(side="left", padx=(12, 0))
+
         self.btn_stop_agy = ctk.CTkButton(
             term_bar,
             text="⏹ Стоп",
@@ -2124,6 +2430,41 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _clear_agy_chat(self):
         self.chat_agy.clear()
 
+    def _toggle_notifications(self):
+        """Галочка «🔔 Уведомления» в чате — выбор сохраняется в .env."""
+        self._apply_notifications_setting(bool(self.chk_agy_notify.get()))
+
+    def _toggle_notifications_setting(self):
+        """Та же настройка со вкладки «Настройки»."""
+        self._apply_notifications_setting(bool(self.chk_notify_settings.get()))
+
+    def _apply_notifications_setting(self, enabled: bool):
+        notify.set_notifications_enabled(enabled)
+        self._persist_env_value(notify.ENV_KEY, "1" if enabled else "0")
+        for checkbox in (getattr(self, "chk_agy_notify", None), getattr(self, "chk_notify_settings", None)):
+            if checkbox is None:
+                continue
+            if bool(checkbox.get()) != enabled:
+                (checkbox.select if enabled else checkbox.deselect)()
+
+    def _play_chat_project(self):
+        """Кнопка «▶ Играть» в чате: запускает игру того проекта, над которым идёт работа."""
+        slug = self.active_chat_slug or self._last_finished_slug or self.current_project_slug
+        if not slug:
+            return
+        self._play_project(slug)
+
+    def _update_play_button(self):
+        """Кнопка запуска активна, когда у проекта чата уже есть код игры."""
+        if not getattr(self, "btn_agy_play", None):
+            return
+        slug = self.active_chat_slug or self._last_finished_slug or self.current_project_slug
+        playable = self._project_is_playable(slug)
+        self.btn_agy_play.configure(
+            state="normal" if playable else "disabled",
+            text="▶ Играть" if playable else "▶ Нет кода"
+        )
+
     def _toggle_agy_autoscroll(self):
         self.chat_agy.autoscroll = bool(self.chk_agy_autoscroll.get())
 
@@ -2135,9 +2476,15 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _on_agy_model_changed(self):
         model = self._selected_agy_model()
         config.agy_model = model or ""
+        # Модель запоминается за беседой: разные чаты могут идти на разных моделях.
+        if self.active_chat_session and self.active_chat_slug:
+            self.active_chat_session.model = model
+            chat_store.save_session(self.active_chat_slug, self.active_chat_session)
+            self._refresh_chats_list()
         self.chat_agy.push({
             "kind": "system", "icon": "🧠",
-            "text": f"Модель: {model}" if model else "Модель: по умолчанию (флаг --model не передаётся)"
+            "text": f"Модель этого чата: {model}" if model
+                    else "Модель: по умолчанию (флаг --model не передаётся)"
         })
 
     def _launch_agy_login(self):
@@ -2149,18 +2496,18 @@ class GamePromptFactoryGUI(ctk.CTk):
                     "затем нажмите 🔄, чтобы загрузить список моделей."
         })
 
-    def _reload_agy_models(self):
+    def _reload_agy_models(self, quiet: bool = False):
         """Тянет список моделей из `agy models` в фоне."""
         self.btn_reload_models.configure(state="disabled", text="⏳")
 
         def run():
             prov = AGYProvider(cli_path=config.agy_cli_path)
             res = prov.list_models()
-            self.after(0, lambda: self._apply_agy_models(res))
+            self.after(0, lambda: self._apply_agy_models(res, quiet=quiet))
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _apply_agy_models(self, res: Dict[str, Any]):
+    def _apply_agy_models(self, res: Dict[str, Any], quiet: bool = False):
         self.btn_reload_models.configure(state="normal", text="🔄")
         models = res.get("models") or []
         current = self.combo_agy_model.get()
@@ -2169,8 +2516,11 @@ class GamePromptFactoryGUI(ctk.CTk):
             self.combo_agy_model.configure(values=[MODEL_DEFAULT] + models)
             if current not in models:
                 self.combo_agy_model.set(MODEL_DEFAULT)
-            self.chat_agy.push({"kind": "system", "icon": "🧠",
-                                "text": f"Список моделей обновлён: {', '.join(models)}"})
+            if not quiet:
+                self.chat_agy.push({"kind": "system", "icon": "🧠",
+                                    "text": f"Список моделей обновлён: {', '.join(models)}"})
+        elif quiet:
+            return
         else:
             self.chat_agy.push({
                 "kind": "error",
@@ -2439,19 +2789,20 @@ class GamePromptFactoryGUI(ctk.CTk):
             command=self._refresh_agy_quota_display
         ).pack(side="right")
 
-        ctk.CTkLabel(
+        self.lbl_quota_source = ctk.CTkLabel(
             head,
-            text="У Claude и Gemini лимиты считаются раздельно, поэтому и показаны они по отдельности.",
+            text="",
             font=ctk.CTkFont(size=11), text_color="#94a3b8"
-        ).grid(row=1, column=0, sticky="w", padx=15, pady=(0, 8))
+        )
+        self.lbl_quota_source.grid(row=1, column=0, sticky="w", padx=15, pady=(0, 8))
 
-        # ── Карточка на каждое семейство моделей ──
+        # ── Карточка на каждую группу моделей (Gemini / Claude и GPT) ──
         cards = ctk.CTkFrame(head, fg_color="transparent")
         cards.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 14))
 
         self.quota_widgets: Dict[str, Dict[str, Any]] = {}
         families = AGYQuotaTracker.FAMILIES
-        accents = {"claude": "#f59e0b", "gemini": "#38bdf8", "other": "#94a3b8"}
+        accents = {"gemini": "#38bdf8", "claude": "#f59e0b"}
 
         for col, family in enumerate(families):
             cards.grid_columnconfigure(col, weight=1)
@@ -2461,60 +2812,24 @@ class GamePromptFactoryGUI(ctk.CTk):
             card.grid(row=0, column=col, sticky="nsew",
                       padx=(0 if col == 0 else 6, 0 if col == len(families) - 1 else 6))
 
-            lbl_title = ctk.CTkLabel(
+            ctk.CTkLabel(
                 card, text=AGYQuotaTracker.FAMILY_TITLES.get(family, family),
                 font=ctk.CTkFont(size=13, weight="bold"), text_color=accent
-            )
-            lbl_title.pack(anchor="w", padx=14, pady=(12, 0))
+            ).pack(anchor="w", padx=14, pady=(12, 0))
 
             lbl_model = ctk.CTkLabel(
-                card, text="", font=ctk.CTkFont(size=9), text_color="#475569"
+                card, text="", font=ctk.CTkFont(size=9), text_color="#475569",
+                justify="left", wraplength=420
             )
             lbl_model.pack(anchor="w", padx=14, pady=(0, 6))
 
-            ctk.CTkLabel(
-                card, text="⏱ 5 часов", font=ctk.CTkFont(size=10, weight="bold"),
-                text_color="#64748b"
-            ).pack(anchor="w", padx=14)
+            # Строки лимитов пересобираются на каждом обновлении: их состав
+            # зависит от источника данных (живой сервер отдаёт список моделей,
+            # локальный счётчик — два окна «5 часов» и «неделя»).
+            rows = ctk.CTkFrame(card, fg_color="transparent")
+            rows.pack(fill="x", padx=14, pady=(0, 14))
 
-            lbl_5h_big = ctk.CTkLabel(
-                card, text="0 / 50", font=ctk.CTkFont(size=26, weight="bold"), text_color=accent
-            )
-            lbl_5h_big.pack(anchor="w", padx=14)
-
-            pb_5h = ctk.CTkProgressBar(card, height=8, fg_color="#080e1a", progress_color=accent)
-            pb_5h.pack(fill="x", padx=14, pady=(4, 4))
-            pb_5h.set(0.0)
-
-            lbl_5h = ctk.CTkLabel(
-                card, text="", font=ctk.CTkFont(size=11), text_color="#cbd5e1", justify="left"
-            )
-            lbl_5h.pack(anchor="w", padx=14, pady=(0, 10))
-
-            ctk.CTkLabel(
-                card, text="📅 Неделя", font=ctk.CTkFont(size=10, weight="bold"),
-                text_color="#64748b"
-            ).pack(anchor="w", padx=14)
-
-            lbl_w_big = ctk.CTkLabel(
-                card, text="0 / 500", font=ctk.CTkFont(size=20, weight="bold"), text_color=accent
-            )
-            lbl_w_big.pack(anchor="w", padx=14)
-
-            pb_w = ctk.CTkProgressBar(card, height=8, fg_color="#080e1a", progress_color=accent)
-            pb_w.pack(fill="x", padx=14, pady=(4, 4))
-            pb_w.set(0.0)
-
-            lbl_w = ctk.CTkLabel(
-                card, text="", font=ctk.CTkFont(size=11), text_color="#cbd5e1", justify="left"
-            )
-            lbl_w.pack(anchor="w", padx=14, pady=(0, 14))
-
-            self.quota_widgets[family] = {
-                "accent": accent, "model": lbl_model,
-                "big_5h": lbl_5h_big, "pb_5h": pb_5h, "text_5h": lbl_5h,
-                "big_w": lbl_w_big, "pb_w": pb_w, "text_w": lbl_w,
-            }
+            self.quota_widgets[family] = {"accent": accent, "model": lbl_model, "rows": rows}
 
         # ── История запросов ──
         hist_box = ctk.CTkFrame(self.tab_quota_frame, fg_color="#121a2b", corner_radius=12)
@@ -2554,60 +2869,138 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._refresh_agy_quota_display()
         self._schedule_quota_autorefresh()
 
+    def _quota_color(self, percent_left: float) -> str:
+        """Цвет полосы по остатку квоты — как в терминале: зелёный/жёлтый/красный."""
+        if percent_left <= 10:
+            return "#ff4d79"
+        if percent_left <= 30:
+            return "#fbbf24"
+        return "#00ff88"
+
+    def _render_quota_row(self, parent, title: str, percent_left: float, note: str):
+        """Одна строка лимита: подпись, полоса и процент остатка."""
+        color = self._quota_color(percent_left)
+
+        ctk.CTkLabel(
+            parent, text=title, font=ctk.CTkFont(size=11, weight="bold"), text_color="#cbd5e1"
+        ).pack(anchor="w", pady=(8, 2))
+
+        bar_row = ctk.CTkFrame(parent, fg_color="transparent")
+        bar_row.pack(fill="x")
+
+        bar = ctk.CTkProgressBar(bar_row, height=14, corner_radius=3,
+                                 fg_color="#080e1a", progress_color=color)
+        bar.pack(side="left", fill="x", expand=True)
+        bar.set(max(0.0, min(1.0, percent_left / 100.0)))
+
+        ctk.CTkLabel(
+            bar_row, text=f"{percent_left:.2f}%", width=72, anchor="e",
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"), text_color=color
+        ).pack(side="left", padx=(8, 0))
+
+        ctk.CTkLabel(
+            parent, text=note, font=ctk.CTkFont(size=10), text_color="#64748b", justify="left"
+        ).pack(anchor="w", pady=(1, 0))
+
+    def _probe_live_quota_async(self):
+        """Опрашивает language server Antigravity в фоне — вызовы там блокирующие."""
+        if getattr(self, "_quota_probe_running", False):
+            return
+        self._quota_probe_running = True
+
+        def run():
+            try:
+                data = read_live_quota()
+            except Exception:
+                data = None
+            self._live_quota = data
+            self._quota_probe_running = False
+            try:
+                self.after(0, self._render_quota)
+            except Exception:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _refresh_agy_quota_display(self):
+        """Перерисовывает квоты из кэша и запускает свежий опрос сервера."""
+        self._render_quota()
+        self._probe_live_quota_async()
+
+    def _render_quota(self):
         status = self.agy_quota_tracker.get_quota_status()
         families = {f["family"]: f for f in status.get("families", [])}
+        live = getattr(self, "_live_quota", None)
 
-        # Сводка в боковой панели: важны именно Claude и Gemini по отдельности.
+        # Сводка в боковой панели — в процентах остатка по обеим группам.
         if getattr(self, "lbl_sidebar_quota", None):
-            claude = families.get("claude", {})
-            gemini = families.get("gemini", {})
-            worst = min(
-                [claude.get("remaining_5h", 999), gemini.get("remaining_5h", 999)]
-            )
+            if live:
+                parts = [
+                    f"{'Gemini' if key == 'gemini' else 'Claude'} {grp['percent']:.0f}%"
+                    for key, grp in live["groups"].items()
+                ]
+                worst_left = min((g["percent"] for g in live["groups"].values()), default=100.0)
+            else:
+                parts = [
+                    f"{'Gemini' if key == 'gemini' else 'Claude'} {families.get(key, {}).get('pct_left_5h', 100):.0f}%"
+                    for key in AGYQuotaTracker.FAMILIES
+                ]
+                worst_left = min(
+                    (families.get(key, {}).get("pct_left_5h", 100.0) for key in AGYQuotaTracker.FAMILIES),
+                    default=100.0,
+                )
             self.lbl_sidebar_quota.configure(
-                text=(f"5ч · Claude {claude.get('used_5h', 0)}/{claude.get('limit_5h', 0)}"
-                      f"  ·  Gemini {gemini.get('used_5h', 0)}/{gemini.get('limit_5h', 0)}"),
-                text_color="#ff4d79" if worst <= 5 else "#94a3b8"
+                text="Остаток: " + "  ·  ".join(parts),
+                text_color="#ff4d79" if worst_left <= 10 else "#94a3b8"
             )
 
         if not getattr(self, "quota_widgets", None):
             return
 
+        if getattr(self, "lbl_quota_source", None):
+            self.lbl_quota_source.configure(
+                text=("Данные Antigravity language server — реальный остаток квот по группам моделей."
+                      if live else
+                      "Antigravity IDE не запущена — показан локальный счётчик запросов фабрики "
+                      "(проценты приблизительные). Запустите IDE, чтобы видеть реальные квоты."),
+                text_color="#00ff88" if live else "#fbbf24"
+            )
+
         for family, widgets in self.quota_widgets.items():
+            rows = widgets["rows"]
+            for widget in rows.winfo_children():
+                widget.destroy()
+
+            group = (live or {}).get("groups", {}).get(family) if live else None
+            if group:
+                widgets["model"].configure(text=f"Модели группы: {group['model_names']}")
+                for model in sorted(group["models"], key=lambda m: m["percent"]):
+                    self._render_quota_row(
+                        rows,
+                        model["label"],
+                        model["percent"],
+                        (f"осталось {model['percent']:.0f}% · обновится через {model['reset_in']}"
+                         f" ({model['reset_at']})" if model["reset_seconds"] else
+                         f"осталось {model['percent']:.0f}% · квота доступна"),
+                    )
+                continue
+
             data = families.get(family)
             if not data:
                 continue
-
-            accent = widgets["accent"]
-            rem_5h, pct_5h = data["remaining_5h"], data["pct_5h"] / 100.0
-            rem_w, pct_w = data["remaining_weekly"], data["pct_weekly"] / 100.0
-
-            color_5h = "#ff4d79" if rem_5h <= 5 else ("#fbbf24" if rem_5h <= 15 else accent)
-            widgets["big_5h"].configure(text=f"{data['used_5h']} / {data['limit_5h']}", text_color=color_5h)
-            widgets["pb_5h"].set(pct_5h)
-            widgets["pb_5h"].configure(
-                progress_color="#ff4d79" if pct_5h >= 0.9 else ("#fbbf24" if pct_5h >= 0.7 else accent)
-            )
-            widgets["text_5h"].configure(
-                text=(f"Осталось {rem_5h} · занято {data['pct_5h']:.0f}%\n"
-                      f"Сброс через {data['reset_5h_str']} (≈ {data['reset_5h_at']})"),
-                text_color=color_5h
-            )
-
-            color_w = "#ff4d79" if rem_w <= 20 else ("#fbbf24" if rem_w <= 50 else accent)
-            widgets["big_w"].configure(text=f"{data['used_weekly']} / {data['limit_weekly']}", text_color=color_w)
-            widgets["pb_w"].set(pct_w)
-            widgets["pb_w"].configure(
-                progress_color="#ff4d79" if pct_w >= 0.9 else ("#fbbf24" if pct_w >= 0.7 else accent)
-            )
-            widgets["text_w"].configure(
-                text=(f"Осталось {rem_w} · занято {data['pct_weekly']:.0f}%\n"
-                      f"Сброс через {data['reset_weekly_str']} (≈ {data['reset_weekly_at']})"),
-                text_color=color_w
-            )
             widgets["model"].configure(
-                text=f"последняя модель: {data['last_model']}" if data["last_model"] else "запросов не было"
+                text=(f"последняя модель: {data['last_model']}" if data["last_model"]
+                      else "запросов из фабрики пока не было")
+            )
+            self._render_quota_row(
+                rows, "Weekly Limit Remaining", data["pct_left_weekly"],
+                f"{data['remaining_weekly']} из {data['limit_weekly']} запросов · "
+                f"сброс через {data['reset_weekly_str']}",
+            )
+            self._render_quota_row(
+                rows, "Five Hour Limit Remaining", data["pct_left_5h"],
+                f"{data['remaining_5h']} из {data['limit_5h']} запросов · "
+                f"сброс через {data['reset_5h_str']}",
             )
 
         lines = []
@@ -2624,8 +3017,8 @@ class GamePromptFactoryGUI(ctk.CTk):
             text=f"обновлено {datetime.now().strftime('%H:%M:%S')} · последний запрос: {status['last_used_at']}"
         )
         self.lbl_quota_meta.configure(
-            text=(f"Всего записей: {status['total_recorded']} · лимиты задаются переменными "
-                  f"AGY_LIMIT_5H_CLAUDE / AGY_LIMIT_WEEKLY_CLAUDE (и аналогично GEMINI, OTHER) "
+            text=(f"Всего записей: {status['total_recorded']} · лимиты локального счётчика задаются "
+                  f"AGY_LIMIT_5H_CLAUDE / AGY_LIMIT_WEEKLY_CLAUDE (и аналогично GEMINI) "
                   f"· файл истории: {status['storage_path']}")
         )
 
@@ -2640,13 +3033,134 @@ class GamePromptFactoryGUI(ctk.CTk):
             self.clipboard_append(content)
 
     def _stop_agy_task(self):
-        self.agy_stop_requested = True
-        if self._active_proc and self._active_proc.poll() is None:
-            try:
-                self._active_proc.kill()
-            except Exception:
-                pass
-        self.lbl_agy_term_status.configure(text="● Остановка...", text_color="#ff4d79")
+        """Останавливает задачу текущего чата — остальные чаты продолжают работу."""
+        if not self.active_chat_session:
+            return
+        if self.chat_jobs.request_stop(self.active_chat_session.id):
+            self.lbl_agy_term_status.configure(text="● Остановка...", text_color="#ff4d79")
+
+    def _update_chat_run_indicator(self):
+        """Показывает, сколько чатов работает прямо сейчас."""
+        running = self.chat_jobs.running_count()
+        if not getattr(self, "lbl_agy_running", None):
+            return
+        if running:
+            titles = ", ".join(job.title for job in self.chat_jobs.running_jobs()[:3])
+            self.lbl_agy_running.configure(
+                text=f"⏳ Работает чатов: {running} — {titles}", text_color="#fbbf24"
+            )
+        else:
+            self.lbl_agy_running.configure(text="", text_color="#64748b")
+
+    def _notify_chat_done(self, job, icon: str, status_text: str):
+        """
+        Сообщает о завершении чата штатным уведомлением Windows.
+
+        Тост уходит в центр уведомлений системы — его видно, даже когда окно
+        фабрики свёрнуто. Если система уведомление не показала, рисуем своё
+        окошко в углу. Выключается галочкой «🔔 Уведомления».
+        """
+        if not notify.notifications_enabled():
+            return
+
+        self._flash_taskbar()
+        notify.send(
+            f"{icon} {status_text}",
+            f"{job.slug} · {job.title} · {job.duration_str}",
+            on_fallback=lambda: self.after(0, lambda: self._show_inapp_toast(job, icon, status_text)),
+        )
+
+    def _show_inapp_toast(self, job, icon: str, status_text: str):
+        """Запасное уведомление внутри приложения, если системное не прошло."""
+        try:
+            self.bell()
+        except Exception:
+            pass
+
+        toast = ctk.CTkToplevel(self)
+        toast.title("Чат завершён")
+        toast.geometry("420x120")
+        toast.attributes("-topmost", True)
+        toast.configure(fg_color="#0b111e")
+        try:
+            toast.overrideredirect(True)
+        except Exception:
+            pass
+
+        # Правый нижний угол главного окна
+        self.update_idletasks()
+        x = self.winfo_rootx() + self.winfo_width() - 440
+        y = self.winfo_rooty() + self.winfo_height() - 150
+        toast.geometry(f"420x120+{max(0, x)}+{max(0, y)}")
+
+        color = "#00ff88" if job.status == "done" else "#fbbf24"
+        ctk.CTkLabel(
+            toast, text=f"{icon} {status_text}",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=color
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(
+            toast, text=f"{job.slug} · {job.title}", wraplength=350, justify="left",
+            font=ctk.CTkFont(size=11), text_color="#cbd5e1"
+        ).pack(anchor="w", padx=14)
+        ctk.CTkLabel(
+            toast, text=f"Время работы: {job.duration_str}",
+            font=ctk.CTkFont(size=10), text_color="#64748b"
+        ).pack(anchor="w", padx=14, pady=(2, 0))
+
+        btns = ctk.CTkFrame(toast, fg_color="transparent")
+        btns.pack(anchor="e", padx=10, pady=(4, 8))
+
+        def open_chat():
+            toast.destroy()
+            self.current_project_slug = job.slug
+            self._open_chat_session(job.session_id)
+
+        def play():
+            toast.destroy()
+            self._play_project(job.slug)
+
+        if self._project_is_playable(job.slug):
+            ctk.CTkButton(
+                btns, text="▶ Играть", width=84, height=24,
+                fg_color="#00ff88", hover_color="#00cc66", text_color="#050b14",
+                font=ctk.CTkFont(size=11, weight="bold"), command=play
+            ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            btns, text="Открыть чат", width=110, height=24,
+            fg_color="#00f0ff", hover_color="#00c8d6", text_color="#050b14",
+            font=ctk.CTkFont(size=11, weight="bold"), command=open_chat
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            btns, text="Скрыть", width=70, height=24,
+            fg_color="#1e293b", hover_color="#334155",
+            font=ctk.CTkFont(size=11), command=toast.destroy
+        ).pack(side="left")
+
+        toast.after(12_000, lambda: toast.winfo_exists() and toast.destroy())
+
+    def _flash_taskbar(self):
+        """Мигание кнопки в панели задач Windows, если окно свернуто или не в фокусе."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.UINT),
+                    ("hwnd", wintypes.HWND),
+                    ("dwFlags", wintypes.DWORD),
+                    ("uCount", wintypes.UINT),
+                    ("dwTimeout", wintypes.DWORD),
+                ]
+
+            hwnd = self.winfo_id()
+            info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, 0x00000003, 5, 0)  # FLASHW_ALL
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
 
     def _launch_agy_interactive_window(self):
         selected_proj = self.combo_agy_proj.get()
@@ -2685,143 +3199,175 @@ class GamePromptFactoryGUI(ctk.CTk):
         del history[:-20]
 
     def _run_agy_cli_task(self):
-        if getattr(self, "agy_running", False):
-            return
-
         prompt = self.txt_agy_prompt.get("1.0", "end").strip()
         if not prompt:
             return
 
         selected_proj = self.combo_agy_proj.get()
-        full_prompt = prompt
-        proj_dir = None
-        history_key = "[Без контекста]"
-        session = None
-        resume_id = None
-
-        if selected_proj and selected_proj != "[Без контекста]":
-            try:
-                proj_dir = sandbox.project_dir(selected_proj)
-            except sandbox.SandboxViolation as exc:
-                self.chat_agy.push({"kind": "error", "text": str(exc)})
-                return
-
-            history_key = selected_proj
-            title = (self.current_project_data or {}).get("title", selected_proj)
-
-            # Беседа привязана к проекту: если чат не открыт — заводим новый.
-            session = self._ensure_chat_session(selected_proj)
-            continue_dialog = bool(self.chk_agy_continue.get())
-            if continue_dialog:
-                # Предпочитаем возобновление на стороне CLI: агент помнит всё сам.
-                resume_id = session.conversation_id
-                history = None if resume_id else chat_store.history_digest(session)
-            else:
-                history = None
-
-            spec_file = proj_dir / "AI_DEVELOPER_PROMPT.md"
-            task_text = prompt
-            if spec_file.exists():
-                spec = spec_file.read_text(encoding="utf-8")[:2500]
-                task_text = (
-                    f"{prompt}\n\n[ВЫДЕРЖКА ИЗ СПЕЦИФИКАЦИИ AI_DEVELOPER_PROMPT.md]\n{spec}"
-                )
-
-            full_prompt = sandbox.build_agent_prompt(
-                task=task_text, directory=proj_dir, title=title, history=history
-            )
-        else:
+        if not selected_proj or selected_proj == "[Без контекста]":
             self.chat_agy.push({
-                "kind": "system", "icon": "⚠️",
-                "text": "Проект не выбран — агент запустится без каталога проекта и без песочницы. "
-                        "Выберите проект из списка, чтобы работа шла внутри workspace/."
+                "kind": "error",
+                "text": "Выберите проект — беседа сохраняется внутри игры, а агент работает "
+                        "строго в её каталоге workspace/."
             })
+            return
 
-        self._pending_agy_turn = (history_key, prompt)
+        try:
+            proj_dir = sandbox.project_dir(selected_proj)
+        except sandbox.SandboxViolation as exc:
+            self.chat_agy.push({"kind": "error", "text": str(exc)})
+            return
+
+        # Беседа привязана к проекту: если чат не открыт — заводим новый.
+        session = self._ensure_chat_session(selected_proj)
+        if self.chat_jobs.is_running(session.id):
+            self.chat_agy.push({
+                "kind": "error",
+                "text": "В этом чате агент ещё работает. Создайте новый чат (➕) — "
+                        "несколько чатов спокойно идут параллельно."
+            })
+            return
+
+        title = (self.current_project_data or {}).get("title", selected_proj)
+        if bool(self.chk_agy_continue.get()):
+            # Предпочитаем возобновление на стороне CLI: агент помнит всё сам.
+            resume_id = session.conversation_id
+            history = None if resume_id else chat_store.history_digest(session)
+        else:
+            resume_id, history = None, None
+
+        spec_file = self._resolve_doc_path("AI_DEVELOPER_PROMPT.md")
+        task_text = prompt
+        if spec_file.exists():
+            spec = spec_file.read_text(encoding="utf-8")[:2500]
+            task_text = f"{prompt}\n\n[ВЫДЕРЖКА ИЗ СПЕЦИФИКАЦИИ AI_DEVELOPER_PROMPT.md]\n{spec}"
+
+        full_prompt = sandbox.build_agent_prompt(
+            task=task_text, directory=proj_dir, title=title, history=history
+        )
+
         yolo_mode = bool(self.chk_agy_yolo.get())
         selected_model = self._selected_agy_model()
-        self.agy_running = True
-        self.agy_stop_requested = False
-        self.btn_run_agy.configure(state="disabled", text="⏳ Выполнение...")
-        self.lbl_agy_term_status.configure(text="● Выполнение...", text_color="#00f0ff")
+        session.model = selected_model
+        chat_store.append_message(selected_proj, session, "user", prompt)
+        self._update_agy_session_label()
 
         self.chat_agy.autoscroll = bool(self.chk_agy_autoscroll.get())
-        self.chat_agy.push({"kind": "user", "text": prompt})
-        if session:
-            chat_store.append_message(selected_proj, session, "user", prompt)
-            self._update_agy_session_label()
-
-        ctx_note = f"проект {selected_proj}" if proj_dir else "без контекста проекта"
-        resume_note = " · продолжение беседы 🔗" if resume_id else ""
-        self.chat_agy.push({
-            "kind": "system", "icon": "⚡",
-            "text": f"Запуск AGY · {ctx_note} · YOLO: {'вкл' if yolo_mode else 'выкл'}{resume_note}"
-        })
+        start_events = [
+            {"kind": "user", "text": prompt},
+            {"kind": "system", "icon": "⚡",
+             "text": f"Запуск AGY · проект {selected_proj} · модель {selected_model or 'по умолчанию'}"
+                     f" · YOLO: {'вкл' if yolo_mode else 'выкл'}"
+                     + (" · продолжение беседы 🔗" if resume_id else "")},
+        ]
+        for event in start_events:
+            self.chat_agy.push(event)
         self.chat_agy.show_typing()
-
         self.txt_agy_prompt.delete("1.0", "end")
 
-        result_text: List[str] = []
-
-        def on_event(event: Dict[str, Any]):
-            if event.get("kind") == "result" and event.get("text"):
-                result_text.append(event["text"])
-            self.chat_agy.push(event)
+        slug = selected_proj
+        session_id = session.id
+        answer_chunks: List[str] = []
 
         def on_conversation_id(conv_id: str):
             """CLI сообщил ID своей беседы — сохраняем, чтобы продолжить чат позже."""
-            if session and session.conversation_id != conv_id:
-                session.conversation_id = conv_id
-                chat_store.save_session(selected_proj, session)
-                self.after(0, self._update_agy_session_label)
+            stored = chat_store.load_session(slug, session_id)
+            if stored and stored.conversation_id != conv_id:
+                stored.conversation_id = conv_id
+                chat_store.save_session(slug, stored)
+                if self.active_chat_session and self.active_chat_session.id == session_id:
+                    self.active_chat_session.conversation_id = conv_id
+                    self.after(0, self._update_agy_session_label)
 
-        def run():
-            try:
-                agy_prov = AGYProvider(
-                    cli_path=config.agy_cli_path,
-                    model=selected_model,
-                    effort=config.agy_effort,
-                    yolo=yolo_mode
-                )
-                code, out = agy_prov.stream_run(
-                    full_prompt,
-                    on_event=on_event,
-                    yolo=yolo_mode,
-                    cwd=proj_dir,
-                    stop_check_fn=lambda: self.agy_stop_requested,
-                    conversation_id=resume_id,
-                    on_conversation_id=on_conversation_id
-                )
-                summary = " ".join(result_text)[:400]
-                self._remember_agy_turn(history_key, prompt, summary)
-                if session:
-                    chat_store.append_message(
-                        selected_proj, session, "assistant",
-                        summary or f"(агент завершил работу с кодом {code})"
-                    )
-                self.after(0, lambda: self._on_agy_task_finished(code))
-            except Exception as e:
-                msg = str(e)
-                self.chat_agy.push({"kind": "error", "text": msg})
-                self.after(0, lambda: self._on_agy_task_finished(-1))
+        def work(job):
+            def on_event(event: Dict[str, Any]):
+                if event.get("kind") in ("result", "assistant") and event.get("text"):
+                    answer_chunks.append(event["text"])
+                job.record(event)
+                # В ленту пишем только если этот чат сейчас открыт: остальные
+                # задачи копят события у себя и покажут их при открытии.
+                if self._is_active_chat(session_id):
+                    self.chat_agy.push(event)
 
-        threading.Thread(target=run, daemon=True).start()
+            agy_prov = AGYProvider(
+                cli_path=config.agy_cli_path,
+                model=selected_model,
+                effort=config.agy_effort,
+                yolo=yolo_mode
+            )
+            code, _out = agy_prov.stream_run(
+                full_prompt,
+                on_event=on_event,
+                yolo=yolo_mode,
+                cwd=proj_dir,
+                stop_check_fn=job.should_stop,
+                conversation_id=resume_id,
+                on_conversation_id=on_conversation_id
+            )
+            return code, "\n".join(answer_chunks).strip()
+
+        def on_finished(job):
+            self.after(0, lambda: self._on_chat_job_finished(job))
+
+        job = self.chat_jobs.start(
+            session_id=session_id, slug=slug, title=session.title, prompt=prompt,
+            model=selected_model, work=work, on_finished=on_finished
+        )
+        if job is None:
+            self.chat_agy.push({"kind": "error", "text": "Не удалось запустить задачу: чат уже занят."})
+            return
+        for event in start_events:
+            job.record(event)
+
+        self._update_chat_run_indicator()
+        self._refresh_chats_list()
+
+    def _is_active_chat(self, session_id: str) -> bool:
+        return bool(self.active_chat_session and self.active_chat_session.id == session_id)
 
     def _append_agy_terminal_line(self, chunk: str):
         """Совместимость: добавляет «сырую» строку в чат-ленту."""
         self.chat_agy.push({"kind": "raw", "text": chunk})
 
-    def _on_agy_task_finished(self, exit_code: int):
-        self.agy_running = False
-        self.chat_agy.hide_typing()
-        self.btn_run_agy.configure(state="normal", text="⚡ Отправить")
-        if exit_code == 0:
-            self.lbl_agy_term_status.configure(text="● Задача успешно завершена", text_color="#00ff88")
-            self.chat_agy.push({"kind": "system", "icon": "✅", "text": "Задача завершена"})
-        elif self.agy_stop_requested:
-            self.lbl_agy_term_status.configure(text="● Остановлено пользователем", text_color="#fbbf24")
-        else:
-            self.lbl_agy_term_status.configure(text=f"● Завершено с кодом {exit_code}", text_color="#fbbf24")
+    def _on_chat_job_finished(self, job):
+        """Задача чата завершилась: сохраняем ответ, обновляем ленту и зовём пользователя."""
+        stored = chat_store.load_session(job.slug, job.session_id)
+        answer = job.answer.strip() or f"(агент завершил работу с кодом {job.exit_code})"
+        if stored:
+            chat_store.append_message(job.slug, stored, "assistant", answer)
+            if self._is_active_chat(job.session_id):
+                self.active_chat_session = stored
+
+        status_icon = {"done": "✅", "stopped": "⏹", "failed": "⚠️"}.get(job.status, "ℹ️")
+        status_text = {
+            "done": "Задача завершена",
+            "stopped": "Остановлено пользователем",
+            "failed": f"Завершено с кодом {job.exit_code}",
+        }.get(job.status, "Завершено")
+        final_event = {"kind": "system", "icon": status_icon,
+                       "text": f"{status_text} · {job.duration_str}"}
+        job.record(final_event)
+
+        self._last_finished_slug = job.slug
+        playable = self._project_is_playable(job.slug)
+        if playable:
+            hint = {"kind": "system", "icon": "🎮",
+                    "text": "Игру можно запустить прямо сейчас — кнопка «▶ Играть» над лентой."}
+            job.record(hint)
+
+        if self._is_active_chat(job.session_id):
+            self.chat_agy.hide_typing()
+            self.chat_agy.push(final_event)
+            if playable:
+                self.chat_agy.push(hint)
+            self.lbl_agy_term_status.configure(
+                text=f"● {status_text}",
+                text_color="#00ff88" if job.status == "done" else "#fbbf24"
+            )
+
+        self._update_play_button()
+        self._notify_chat_done(job, status_icon, status_text)
+        self._update_chat_run_indicator()
         self._refresh_agy_quota_display()
         self._refresh_chats_list()
 
@@ -2942,6 +3488,21 @@ class GamePromptFactoryGUI(ctk.CTk):
             font=ctk.CTkFont(size=9), text_color="#64748b", justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 12))
 
+        self.chk_notify_settings = ctk.CTkCheckBox(
+            card_save,
+            text="🔔 Уведомления Windows о завершении чатов",
+            font=ctk.CTkFont(size=11),
+            command=self._toggle_notifications_setting
+        )
+        if notify.notifications_enabled():
+            self.chk_notify_settings.select()
+        self.chk_notify_settings.pack(anchor="w", padx=12, pady=(0, 4))
+        ctk.CTkLabel(
+            card_save,
+            text="Стандартный тост Windows: виден, даже когда окно свёрнуто.\nВыключение действует сразу и сохраняется в .env.",
+            font=ctk.CTkFont(size=9), text_color="#64748b", justify="left"
+        ).pack(anchor="w", padx=12, pady=(0, 12))
+
         self.btn_save_settings = ctk.CTkButton(
             card_save,
             text="💾 СОХРАНИТЬ НАСТРОЙКИ В .ENV",
@@ -2970,6 +3531,29 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.ent_anthropic_key.insert(0, os.getenv("ANTHROPIC_API_KEY", ""))
         self.ent_gemini_key.insert(0, os.getenv("GEMINI_API_KEY", ""))
         self.ent_out_dir.insert(0, str(config.output_dir))
+
+    def _persist_env_value(self, key: str, value: str):
+        """Точечно дописывает один ключ в .env, не трогая остальные настройки."""
+        env_path = BASE_DIR / ".env"
+        lines: List[str] = []
+        replaced = False
+        if env_path.exists():
+            try:
+                lines = env_path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith(f"{key}="):
+                lines[i] = f"{key}={value}"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"{key}={value}")
+        try:
+            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        os.environ[key] = value
 
     def _save_settings_to_env(self):
         env_path = BASE_DIR / ".env"

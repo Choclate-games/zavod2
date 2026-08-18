@@ -50,8 +50,10 @@ TOOL_ICONS = {
     "search_web": ("🌐", "#a78bfa"),
 }
 
-MAX_MESSAGES = 300
-FLUSH_MS = 60
+MAX_MESSAGES = 600
+FLUSH_MS = 60          # период опроса очереди, когда события идут потоком
+IDLE_MS = 200          # период опроса, когда в ленте тихо
+MAX_PER_FLUSH = 120    # сколько карточек рисуем за один тик — больше даёт рывки
 
 
 def _now() -> str:
@@ -83,7 +85,9 @@ class ChatTerminal(ctk.CTkFrame):
         self._plain: List[str] = []
 
         self._queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
-        self._flush_scheduled = False
+        self._pump_job: Optional[str] = None
+        self._alive = True
+        self._scroll_pending = False
 
         # Активный (стримящийся) пузырь ассистента и последняя карточка инструмента
         self._stream_label: Optional[ctk.CTkLabel] = None
@@ -97,22 +101,28 @@ class ChatTerminal(ctk.CTkFrame):
         if placeholder:
             self._placeholder_widget = self._add_system(placeholder, icon="💬", stamp=False)
 
+        # Насос очереди живёт в главном потоке: планировать `after` из рабочего
+        # потока нельзя — Tk теряет такие задания, и события чата пропадали.
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        self._schedule_pump(IDLE_MS)
+
     # ── Публичный API ────────────────────────────────────────────────────
 
     def push(self, event: Dict[str, Any]) -> None:
         """Потокобезопасно добавляет событие в ленту (можно звать из треда)."""
         self._queue.put(event)
-        if not self._flush_scheduled:
-            self._flush_scheduled = True
-            try:
-                self.after(FLUSH_MS, self._flush)
-            except Exception:
-                self._flush_scheduled = False
 
     def push_text(self, text: str, kind: str = "raw") -> None:
         self.push({"kind": kind, "text": text})
 
     def clear(self) -> None:
+        # Сначала выбрасываем неотрисованные события: иначе хвост прошлого чата
+        # дорисуется поверх только что открытой переписки.
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
         for w in self._bubbles:
             try:
                 w.destroy()
@@ -133,7 +143,7 @@ class ChatTerminal(ctk.CTkFrame):
         self._typing_label.configure(text=f"⚡  {text}")
         self._typing_bar.grid(row=1, column=0, sticky="w", padx=14, pady=(2, 6))
         self._typing = self._typing_bar
-        self._scroll_to_end()
+        self._request_scroll()
 
     def hide_typing(self) -> None:
         if self._typing is not None:
@@ -145,11 +155,25 @@ class ChatTerminal(ctk.CTkFrame):
 
     # ── Внутреннее: слив очереди ─────────────────────────────────────────
 
-    def _flush(self) -> None:
-        self._flush_scheduled = False
+    def _on_destroy(self, event=None) -> None:
+        if event is None or event.widget is self:
+            self._alive = False
+
+    def _schedule_pump(self, delay: int) -> None:
+        if not self._alive:
+            return
+        try:
+            self._pump_job = self.after(delay, self._pump)
+        except Exception:
+            self._pump_job = None
+
+    def _pump(self) -> None:
+        """Один тик насоса: рисуем накопленные события и планируем следующий."""
+        if not self._alive:
+            return
         drained = 0
         try:
-            while drained < 400:
+            while drained < MAX_PER_FLUSH:
                 event = self._queue.get_nowait()
                 self._render(event)
                 drained += 1
@@ -160,14 +184,10 @@ class ChatTerminal(ctk.CTkFrame):
 
         if drained:
             self._trim()
-            self._scroll_to_end()
+            self._request_scroll()
 
-        if not self._queue.empty() and not self._flush_scheduled:
-            self._flush_scheduled = True
-            try:
-                self.after(FLUSH_MS, self._flush)
-            except Exception:
-                self._flush_scheduled = False
+        # Пока поток событий плотный — опрашиваем чаще, в тишине реже.
+        self._schedule_pump(FLUSH_MS if (drained or not self._queue.empty()) else IDLE_MS)
 
     def _render(self, e: Dict[str, Any]) -> None:
         kind = e.get("kind", "raw")
@@ -418,11 +438,26 @@ class ChatTerminal(ctk.CTkFrame):
         if len(self._plain) > MAX_MESSAGES * 3:
             del self._plain[: len(self._plain) - MAX_MESSAGES * 3]
 
+    def _request_scroll(self) -> None:
+        """
+        Прокрутка вниз откладывается до простоя Tk.
+
+        Раньше каждый тик звал ``update_idletasks`` и пересчитывал геометрию всей
+        ленты — на длинных чатах это и давало мерцание и подвисания.
+        """
+        if not self.autoscroll or self._scroll_pending or not self._alive:
+            return
+        self._scroll_pending = True
+        try:
+            self.after_idle(self._scroll_to_end)
+        except Exception:
+            self._scroll_pending = False
+
     def _scroll_to_end(self) -> None:
-        if not self.autoscroll:
+        self._scroll_pending = False
+        if not self.autoscroll or not self._alive:
             return
         try:
-            self.feed.update_idletasks()
             self.feed._parent_canvas.yview_moveto(1.0)
         except Exception:
             pass

@@ -37,6 +37,7 @@ class ChatSession:
     created_at: str
     updated_at: str
     conversation_id: Optional[str] = None      # ID беседы на стороне AGY CLI
+    model: Optional[str] = None                # модель, выбранная для этой беседы
     messages: List[ChatMessage] = field(default_factory=list)
 
     @property
@@ -57,6 +58,7 @@ class ChatSession:
             created_at=data.get("created_at") or datetime.now().isoformat(timespec="seconds"),
             updated_at=data.get("updated_at") or data.get("created_at") or datetime.now().isoformat(timespec="seconds"),
             conversation_id=data.get("conversation_id"),
+            model=data.get("model"),
             messages=messages,
         )
 
