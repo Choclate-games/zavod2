@@ -21,6 +21,7 @@ from app.gui.game_runner import DevServer, detect_start_command, open_internal_b
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
 from providers.cli_agents import AGENT_CLASSES, make_cli_agent
+from providers.agent_usage import AgentUsageTracker
 from providers.quota_probe import read_live_quota
 from app.chat_jobs import ChatJobManager
 from app.gui.chat_terminal import ChatTerminal
@@ -406,6 +407,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.active_doc_filename = "AI_DEVELOPER_PROMPT.md"
         self.generation_running = False
         self.agy_quota_tracker = AGYQuotaTracker()
+        # Расход Claude Code / Codex / Kimi считает фабрика: у их CLI нет
+        # машинного отчёта об остатке квоты.
+        self.agent_usage_tracker = AgentUsageTracker()
         self.agy_running = False
         self.agy_stop_requested = False
         self._active_proc: Optional[subprocess.Popen] = None
@@ -3087,7 +3091,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         ctk.CTkLabel(
             title_row,
-            text="📊 Квоты Antigravity CLI",
+            text="📊 Квоты всех агентов",
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color="#ffffff"
         ).pack(side="left")
@@ -3146,6 +3150,43 @@ class GamePromptFactoryGUI(ctk.CTk):
 
             self.quota_widgets[family] = {"accent": accent, "model": lbl_model, "rows": rows}
 
+        # ── Карточки остальных терминальных агентов ──
+        ctk.CTkLabel(
+            head, text="🖥 Claude Code · Codex · Kimi — локальный счётчик запусков фабрики",
+            font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8"
+        ).grid(row=3, column=0, sticky="w", padx=15, pady=(0, 4))
+
+        agent_cards = ctk.CTkFrame(head, fg_color="transparent")
+        agent_cards.grid(row=4, column=0, sticky="ew", padx=15, pady=(0, 14))
+
+        self.agent_quota_widgets: Dict[str, Dict[str, Any]] = {}
+        agent_accents = {"claude": "#c084fc", "codex": "#94a3b8", "kimi": "#38bdf8"}
+        agent_keys = list(AGENT_CLASSES)
+
+        for col, agent_key in enumerate(agent_keys):
+            agent_cards.grid_columnconfigure(col, weight=1)
+            accent = agent_accents.get(agent_key, "#00f0ff")
+
+            card = ctk.CTkFrame(agent_cards, fg_color="#0b111e", corner_radius=10)
+            card.grid(row=0, column=col, sticky="nsew",
+                      padx=(0 if col == 0 else 6, 0 if col == len(agent_keys) - 1 else 6))
+
+            ctk.CTkLabel(
+                card, text=AGENT_LABELS.get(agent_key, agent_key),
+                font=ctk.CTkFont(size=13, weight="bold"), text_color=accent
+            ).pack(anchor="w", padx=14, pady=(12, 0))
+
+            lbl_model = ctk.CTkLabel(
+                card, text="", font=ctk.CTkFont(size=9), text_color="#475569",
+                justify="left", wraplength=420
+            )
+            lbl_model.pack(anchor="w", padx=14, pady=(0, 6))
+
+            rows = ctk.CTkFrame(card, fg_color="transparent")
+            rows.pack(fill="x", padx=14, pady=(0, 14))
+
+            self.agent_quota_widgets[agent_key] = {"accent": accent, "model": lbl_model, "rows": rows}
+
         # ── История запросов ──
         hist_box = ctk.CTkFrame(self.tab_quota_frame, fg_color="#121a2b", corner_radius=12)
         hist_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 5))
@@ -3153,7 +3194,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         hist_box.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            hist_box, text="🧾 Последние запросы к AGY",
+            hist_box, text="🧾 Последние запросы ко всем агентам",
             font=ctk.CTkFont(size=13, weight="bold"), text_color="#e2e8f0"
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(12, 6))
 
@@ -3264,6 +3305,13 @@ class GamePromptFactoryGUI(ctk.CTk):
                     (families.get(key, {}).get("pct_left_5h", 100.0) for key in AGYQuotaTracker.FAMILIES),
                     default=100.0,
                 )
+            # Активный агент чата тоже виден в сайдбаре — иначе остаток показывался
+            # только для AGY, даже когда работа идёт через Claude/Codex/Kimi.
+            active_agent = self._selected_agent_key()
+            if active_agent in AGENT_CLASSES:
+                agent_data = self.agent_usage_tracker.status(active_agent)
+                parts.append(f"{active_agent} {agent_data['pct_left_5h']:.0f}%")
+                worst_left = min(worst_left, agent_data["pct_left_5h"])
             self.lbl_sidebar_quota.configure(
                 text="Остаток: " + "  ·  ".join(parts),
                 text_color="#ff4d79" if worst_left <= 10 else "#94a3b8"
@@ -3318,12 +3366,49 @@ class GamePromptFactoryGUI(ctk.CTk):
                 f"сброс через {data['reset_5h_str']}",
             )
 
-        lines = []
+        # ── Карточки Claude Code / Codex / Kimi ──
+        for agent_key, widgets in getattr(self, "agent_quota_widgets", {}).items():
+            rows = widgets["rows"]
+            for widget in rows.winfo_children():
+                widget.destroy()
+
+            data = self.agent_usage_tracker.status(agent_key)
+            available = self._agent_provider(agent_key).is_available()
+            widgets["model"].configure(
+                text=(f"последняя модель: {data['last_model'] or 'по умолчанию'} · "
+                      f"последний запуск: {data['last_used_at']}" if data["total"]
+                      else ("CLI установлен, запусков из фабрики ещё не было" if available
+                            else "CLI не найден — укажите путь в настройках"))
+            )
+            self._render_quota_row(
+                rows, "Weekly Limit Remaining", data["pct_left_weekly"],
+                f"{data['remaining_weekly']} из {data['limit_weekly']} запросов · "
+                f"сброс через {data['reset_weekly_str']}",
+            )
+            self._render_quota_row(
+                rows, "Five Hour Limit Remaining", data["pct_left_5h"],
+                f"{data['remaining_5h']} из {data['limit_5h']} запросов · "
+                f"сброс через {data['reset_5h_str']}",
+            )
+
+        # ── Общая лента запросов: AGY и остальные агенты вперемешку по времени ──
+        events: List[tuple[float, str]] = []
         for item in status.get("recent", []):
-            when = str(item.get("datetime", ""))[:19].replace("T", " ")
             model = item.get("model") or "default"
             family = item.get("family") or AGYQuotaTracker.model_family(model)
-            lines.append(f"{when}   [{family:<6}] {model:<28} промпт: {item.get('prompt_len', 0)} симв.")
+            events.append((
+                item.get("timestamp", 0),
+                f"{str(item.get('datetime', ''))[:19].replace('T', ' ')}   "
+                f"[agy/{family:<6}] {model:<28} промпт: {item.get('prompt_len', 0)} симв."
+            ))
+        for item in self.agent_usage_tracker.recent(limit=15):
+            model = item.get("model") or "default"
+            events.append((
+                item.get("timestamp", 0),
+                f"{str(item.get('datetime', ''))[:19].replace('T', ' ')}   "
+                f"[{str(item.get('agent', '?')):<11}] {model:<28} промпт: {item.get('prompt_len', 0)} симв."
+            ))
+        lines = [text for _, text in sorted(events, key=lambda e: e[0], reverse=True)[:25]]
         self.txt_quota_history.configure(state="normal")
         self.txt_quota_history.delete("1.0", "end")
         self.txt_quota_history.insert("1.0", "\n".join(lines) or "Запросов пока не было.")
@@ -3332,9 +3417,10 @@ class GamePromptFactoryGUI(ctk.CTk):
             text=f"обновлено {datetime.now().strftime('%H:%M:%S')} · последний запрос: {status['last_used_at']}"
         )
         self.lbl_quota_meta.configure(
-            text=(f"Всего записей: {status['total_recorded']} · лимиты локального счётчика задаются "
-                  f"AGY_LIMIT_5H_CLAUDE / AGY_LIMIT_WEEKLY_CLAUDE (и аналогично GEMINI) "
-                  f"· файл истории: {status['storage_path']}")
+            text=(f"Всего записей: AGY {status['total_recorded']} · "
+                  f"остальные агенты {sum(self.agent_usage_tracker.status(k)['total'] for k in AGENT_CLASSES)} · "
+                  f"лимиты счётчика задаются AGY_LIMIT_5H_CLAUDE / CLAUDE_LIMIT_5H / CODEX_LIMIT_WEEKLY и т. п. "
+                  f"· файлы истории: {status['storage_path']}, {self.agent_usage_tracker.storage_path}")
         )
 
     def _set_agy_preset(self, text: str):

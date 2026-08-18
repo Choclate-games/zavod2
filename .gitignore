@@ -156,6 +156,7 @@ desktop.ini
 
 # --- Внутренняя история CLI-агентов ---
 .agy_quota_history.json
+.agent_usage_history.json
 .agy/
 .gemini/
 .claude/

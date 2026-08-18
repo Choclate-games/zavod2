@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from providers.agent_usage import AgentUsageTracker
 from providers.base import AIProvider, T
 from providers.local import LocalAIProvider
 
@@ -77,6 +78,8 @@ class CodingCLIAgent(AIProvider):
     env_prefix = "CLI"
     supports_resume = False
     default_models: tuple[str, ...] = ()
+    # Подкоманда входа в аккаунт (None — вход делается изнутри сессии, /login)
+    login_command: Optional[str] = None
     login_hint = "Запустите CLI в терминале и выполните вход в аккаунт."
 
     def __init__(
@@ -95,6 +98,8 @@ class CodingCLIAgent(AIProvider):
         self.yolo = yolo
         self.timeout_seconds = timeout_seconds
         self.fallback = LocalAIProvider()
+        # Расход считаем сами: у этих CLI нет машинного отчёта об остатке квоты.
+        self.usage_tracker = AgentUsageTracker()
 
     # ── Поиск исполняемого файла ─────────────────────────────────────────
 
@@ -139,7 +144,9 @@ class CodingCLIAgent(AIProvider):
         """Строка запуска для отдельного окна терминала."""
         exe = self.resolve_cli() or self.cli_path
         exe_part = f'"{exe}"' if " " in exe else exe
-        if bare or not prompt:
+        if bare:
+            return f"{exe_part} {self.login_command}" if self.login_command else exe_part
+        if not prompt:
             return exe_part
         clean = prompt.replace('"', '""').replace("\n", " ").replace("\r", "")[:1200]
         return f'{exe_part} "{clean}"'
@@ -149,12 +156,18 @@ class CodingCLIAgent(AIProvider):
     def extract_conversation_id(self, data: Dict[str, Any]) -> Optional[str]:
         return None
 
+    # Служебные строки CLI, которым не место в ленте чата
+    noise_patterns: tuple[str, ...] = ()
+
     def parse_stream_event(self, line: str) -> Optional[Dict[str, Any]]:
         """Строка вывода → событие ленты (None = показывать нечего)."""
         line = (line or "").strip()
         if not line:
             return None
         if not line.startswith("{"):
+            low = line.lower()
+            if any(pattern in low for pattern in self.noise_patterns):
+                return None
             return {"kind": "assistant", "text": line + "\n"}
         try:
             data = json.loads(line)
@@ -269,6 +282,9 @@ class CodingCLIAgent(AIProvider):
         try:
             proc = subprocess.Popen(
                 cmd,
+                # Без закрытого stdin codex сообщает «Reading additional input from
+                # stdin…» и в фоновом запуске может ждать ввода бесконечно.
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=work_dir,
@@ -278,6 +294,8 @@ class CodingCLIAgent(AIProvider):
             )
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ({cli}): {exc}") from exc
+
+        self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
 
         collected: List[str] = []
         seen_conversation = False
@@ -351,12 +369,15 @@ class CodingCLIAgent(AIProvider):
             result = subprocess.run(
                 cmd,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
+                stdin=subprocess.DEVNULL,
                 timeout=self.timeout_seconds, cwd=work_dir, env=env, creationflags=creationflags,
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"{self.title}: CLI не ответил за {self.timeout_seconds} с.") from exc
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ('{cmd[0]}'): {exc}") from exc
+        finally:
+            self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
 
         if result.returncode != 0:
             err = (result.stderr or "").strip() or (result.stdout or "").strip()[-500:]
@@ -580,7 +601,9 @@ class CodexAgent(CodingCLIAgent):
     env_prefix = "CODEX"
     supports_resume = True
     default_models = ("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5", "o3")
-    login_hint = "В открытом терминале выполните `codex login` и вернитесь в фабрику."
+    login_command = "login"
+    login_hint = "Пройдите вход в открывшемся терминале и вернитесь в фабрику."
+    noise_patterns = ("reading additional input from stdin",)
 
     def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
         cmd = [self.cli_path, "exec"]
@@ -604,7 +627,9 @@ class CodexAgent(CodingCLIAgent):
     def interactive_command(self, prompt: Optional[str], bare: bool) -> str:
         exe = self.resolve_cli() or self.cli_path
         exe_part = f'"{exe}"' if " " in exe else exe
-        if bare or not prompt:
+        if bare:
+            return f"{exe_part} login"
+        if not prompt:
             return exe_part
         clean = prompt.replace('"', '""').replace("\n", " ").replace("\r", "")[:1200]
         yolo_flag = " --dangerously-bypass-approvals-and-sandbox" if self.yolo else ""
@@ -701,33 +726,87 @@ class CodexAgent(CodingCLIAgent):
 
 class KimiAgent(CodingCLIAgent):
     """
-    Kimi CLI от Moonshot AI.
+    Kimi Code CLI от Moonshot AI (`kimi -p … --output-format stream-json`).
 
-    Машинного формата вывода у него нет, поэтому работаем в текстовом
-    неинтерактивном режиме: строки stdout идут в ленту как ответ ассистента.
-    Флаг неинтерактивного режима задаётся через KIMI_PRINT_FLAG.
+    Особенность: в prompt-режиме CLI отказывается принимать `--yolo` / `--auto`
+    («Cannot combine --prompt with --yolo»), поэтому флаг YOLO из интерфейса
+    здесь намеренно не передаётся — режим и так неинтерактивный.
+    Возобновление беседы делается через `--session <id>` и работает, только пока
+    рабочий каталог тот же, в котором сессия создана (у нас это каталог игры).
     """
 
     key = "kimi"
-    title = "Kimi CLI"
+    title = "Kimi Code CLI"
     icon = "🌙"
     default_cli = "kimi"
     env_prefix = "KIMI"
-    supports_resume = False
+    supports_resume = True
     default_models = ("kimi-k2-turbo-preview", "kimi-k2-0905-preview", "kimi-latest")
-    login_hint = "В открытом терминале выполните вход (`/login` либо задайте MOONSHOT_API_KEY)."
+    login_command = "login"
+    login_hint = "В открытом терминале пройдите вход по коду устройства и вернитесь в фабрику."
 
     def print_flag(self) -> str:
-        return os.getenv("KIMI_PRINT_FLAG", "--print").strip()
+        return os.getenv("KIMI_PRINT_FLAG", "-p").strip()
 
     def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
+        cmd = [self.cli_path, self.print_flag(), prompt, "--output-format", "stream-json"]
+        if self.model:
+            cmd.extend(["--model", self.model])
+        if conversation_id:
+            cmd.extend(["--session", conversation_id])
+        return cmd + self.extra_args()
+
+    def build_plain_command(self, prompt: str) -> List[str]:
         cmd = [self.cli_path, self.print_flag(), prompt]
         if self.model:
             cmd.extend(["--model", self.model])
         return cmd + self.extra_args()
 
-    def build_plain_command(self, prompt: str) -> List[str]:
-        return self.build_stream_command(prompt)
+    def interactive_command(self, prompt: Optional[str], bare: bool) -> str:
+        # Промпт аргументом интерактивный режим не принимает — открываем сессию
+        # с авто-подтверждением, задачу пользователь вставит сам.
+        exe = self.resolve_cli() or self.cli_path
+        exe_part = f'"{exe}"' if " " in exe else exe
+        if bare:
+            return f"{exe_part} login"
+        return f"{exe_part} -y" if self.yolo else exe_part
+
+    def extract_conversation_id(self, data: Dict[str, Any]) -> Optional[str]:
+        return data.get("session_id")
+
+    def parse_json_event(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        role = data.get("role")
+
+        if role == "assistant":
+            calls = data.get("tool_calls") or []
+            for call in calls:
+                function = (call or {}).get("function") or {}
+                name = function.get("name", "tool")
+                raw_args = function.get("arguments")
+                try:
+                    params = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+                except ValueError:
+                    params = {"аргументы": raw_args}
+                detail = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
+                return {"kind": "tool", "tool": name,
+                        "title": f"Инструмент: {name}", "detail": _shorten(detail, 300)}
+            content = data.get("content")
+            return {"kind": "assistant", "text": str(content) + "\n"} if content else None
+
+        if role == "tool":
+            return {"kind": "tool_result", "text": _shorten(str(data.get("content") or "готово")), "meta": ""}
+
+        if role == "meta":
+            if data.get("type") == "session.resume_hint":
+                return {"kind": "system", "icon": "🌙",
+                        "text": f"Сессия Kimi: {data.get('session_id', '')}"}
+            return None
+
+        if role in ("error", "system"):
+            text = str(data.get("content") or data.get("message") or "")
+            return {"kind": "error" if role == "error" else "system", "icon": "🌙", "text": text} if text else None
+
+        return self._generic_json_event(data)
 
 
 AGENT_CLASSES: Dict[str, Type[CodingCLIAgent]] = {
