@@ -1,0 +1,806 @@
+raw_prompt: 'Разработай 3D Tower Defense на Three.js на пляжной локации. Враги (крабы,
+  чайки, морские звезды) идут по песку к замку игрока. Игрок кликом возводит песчаные
+  башни разных типов: ракушечная пушка (дальний бой), поливалка (замедление) и песчаная
+  стена. Реализуй систему поиска пути (A* или Flow Field) в реальном времени при изменении
+  расстановки башен.'
+title: 'Песочный Бастион 3D: Защита Пляжа'
+slug: sandcastle-defense-3d
+genre: Tower Defense (Защита башен)
+subgenre: Лабиринтный 3D Tower Defense / Real-Time Strategy
+renderer: threejs
+renderer_reason: User explicitly specified 'threejs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Web & Mobile)
+orientation: landscape
+target_audience: Игроки от 10 до 45 лет, любители казуальных и мидкорных тактических
+  стратегий, поклонники классических TD (Kingdom Rush, Bloons, Desktop Tower Defense)
+  на ПК и мобильных браузерах.
+core_loop: 1. Оценка береговой линии и спавна врагов -> 2. Строительство песчаных
+  стен и боевых башен за ракушки -> 3. Запуск волны и динамический поиск пути врагами
+  по созданному лабиринту -> 4. Уничтожение крабов, чаек и морских звёзд -> 5. Получение
+  золотого песка и мета-прокачка башен между раундами.
+hook: Возможность создавать собственный уникальный лабиринт из песчаных замков прямо
+  на пляже, заставляя волны крабов и морских звезд плутать под перекрестным огнем
+  ракушечных пушек и струй поливалок.
+player_fantasy: Вы — великий архитектор песчаных замков и защитник побережья, превращающий
+  хрупкий пляжный песок и морские ракушки в непреодолимую высокотехнологичную крепость
+  против забавных морских захватчиков.
+session_model: Быстрые сессии по 4–8 минут на уровень с возможностью мгновенного продолжения,
+  сохранения прогресса в облаке и бесконечного режима выживания.
+unique_value_proposition: Сочетание теплой летней пляжной атмосферы, приятной 3D-физики
+  песчаных частиц и глубокой тактики лабиринтостроения (mazing) с расчетом Flow Field
+  в реальном времени прямо в веб-браузере.
+vision: Красочная, сочная и расслабляющая, но в то же время тактически глубокая 3D-стратегия,
+  которая загружается за секунду на любом смартфоне или ПК, даря игрокам эстетическое
+  удовольствие от брызг воды, рассыпающегося песка и умного перестроения вражеских
+  потоков.
+elevator_pitch: Постройте несокрушимый песчаный лабиринт на солнечном берегу! Расставляйте
+  ракушечные пушки, поливайте наглых крабов из водяных брызгалок и не дайте чайкам
+  и морским звездам разрушить ваш песчаный замок в трехмерном Tower Defense с умным
+  поиском пути!
+win_conditions: Успешно отразить все волны морских обитателей на локации, сохранив
+  прочность главного Песчаного Замка выше 0%.
+lose_conditions: Прочность главного Песчаного Замка падает до 0% из-за прорвавшихся
+  к нему врагов.
+progression_summary: Поуровневое открытие новых чертежей (Песчаная катапульта, Коралловый
+  шокер), древо талантов за жемчуг (увеличение замедления поливалки, сплэш-урон ракушек,
+  прочность стен) и косметические скины для башен.
+difficulty_curve: Плавный онбординг на первых 3 волнах (медленные крабы) -> появление
+  летающих чаек, игнорирующих стены (требуется расстановка ПВО-ракушек) -> быстрые
+  морские звезды и бронированные крабы-отшельники -> босс Морской Кракено-Краб, разрушающий
+  стены.
+scores:
+  fun: 9
+  originality: 8
+  replayability: 9
+  development_cost: 8
+  visual_appeal: 9
+  mobile_fit: 9
+  monetization: 9
+  platform_fit: 10
+  overall_score: 8.85
+  justification: Тематика пляжа и песка выделяется на фоне стандартных фэнтези/сай-фай
+    TD. Механика свободного лабиринтостроения (mazing) с Flow Field обеспечивает колоссальную
+    реиграбельность при низкой нагрузке на рендеринг благодаря легковесным моделям
+    и Three.js.
+references:
+- name: Desktop Tower Defense
+  genre: Grid Mazing Tower Defense
+  mechanics:
+  - Свободная постройка башен на сетке без фиксированных дорожек
+  - Динамический пересчет кратчайшего пути для мобов
+  - Разделение на наземных и летающих юнитов
+  lessons: Свобода создания лабиринта — самый захватывающий элемент геймплея; важно
+    не допускать полного перекрытия пути (блокировки).
+  what_to_avoid: Устаревшая визуальная подача и отсутствие визуальной индикации путей.
+- name: Kingdom Rush
+  genre: Casual 3D/2D Tower Defense
+  mechanics:
+  - 'Четкая синергия башен: замедление + фокус-урон + блокирование'
+  - Яркие сочные звуковые эффекты и тактильный геймфил
+  - Звездная система прогрессии уровней
+  lessons: У каждой башни должна быть кристально понятная роль и аудиовизуальный отклик.
+  what_to_avoid: Фиксированные слоты под башни (в нашей игре игрок строит везде).
+- name: Bloons TD 6
+  genre: 3D Strategy TD
+  mechanics:
+  - Разнообразие типов снарядов (пробивающие, замедляющие, взрывные)
+  - Особые свойства врагов (быстрые, летающие, делящиеся)
+  lessons: Приятные яркие цвета и понятная читаемость поля боя с высоты птичьего полета.
+  what_to_avoid: Избыточная визуальная перегрузка эффектами в поздней игре.
+mechanics:
+- name: Динамическое лабиринтостроение (Mazing Grid)
+  category: building
+  priority: core
+  description: Игрок кликом или тапом по песчаной сетке возводит башни и стены. Сетка
+    обновляет проходимость в матрице графа.
+  player_interaction: Выбор типа башни в нижнем меню -> клик/тап по ячейке песка на
+    поле. Подсвечивается зеленым (разрешено) или красным (запрещено/блокирует путь).
+  feedback: Звук осыпающегося песка, частицы песчинок, появление башни с плавной анимацией
+    вырастания из земли.
+  technical_complexity: Medium
+  strengths:
+  - Высокая вариативность тактических решений
+  - Творческая свобода для игрока
+  weaknesses:
+  - Необходимость валидации отсутствия полной блокировки спавна
+- name: Векторное поле путей (Flow Field & A* Pathfinding)
+  category: ai
+  priority: core
+  description: Расчет карты высот расстояний (Dijkstra/Integration Field) и векторов
+    направления (Flow Field) к замку для всех наземных существ при каждом изменении
+    сетки.
+  player_interaction: 'Косвенное влияние: при постройке стены векторное поле пересчитывается
+    мгновенно, и все крабы плавно меняют курс.'
+  feedback: Отображение легких полупрозрачных стрелок течения/следов на песке при
+    включении тактического режима.
+  technical_complexity: High
+  strengths:
+  - Поддержка сотен юнитов одновременно с нулевым падением производительности
+  - Мгновенная реакция толпы на возведение преград
+  weaknesses:
+  - Требует аккуратной обработки краевых случаев при замуровывании юнита
+- name: Ракушечная пушка (Дальний прицельный бой)
+  category: combat
+  priority: core
+  description: Базовая башня из плотно спрессованного песка с ракушечным жерлом. Стреляет
+    острыми ракушками по одиночным целям с высоким уроном.
+  player_interaction: Постройка за 100 ракушек, выбор приоритета цели (Первый / Сильный
+    / Близкий к замку).
+  feedback: Хлопок выстрела, полет ракушки по дуге, щелчок попадания и разлетающиеся
+    осколки ракушек.
+  technical_complexity: Low
+  strengths:
+  - Эффективна против бронированных крабов и чаек
+  - Большой радиус поражения
+  weaknesses:
+  - Низкая скорострельность, уязвима к толпам мелких врагов
+- name: Водная поливалка (AOE Замедление)
+  category: combat
+  priority: core
+  description: Башня с вращающейся детской брызгалкой, подключенной к подземным морским
+    водам. Разбрызгивает воду по кругу, размачивая песок и замедляя врагов на 50%.
+  player_interaction: Размещение на поворотах лабиринта для создания зон максимального
+    поражения.
+  feedback: Звук журчания воды, круговой водяной туман, капли воды над замедленными
+    крабами и мокрый след на песке.
+  technical_complexity: Medium
+  strengths:
+  - Удерживает врагов в зоне поражения пушек в два раза дольше
+  - Накладывает статус 'Намокание'
+  weaknesses:
+  - Наносит минимальный прямой урон
+- name: Песчаная стена (Блокиратор пути)
+  category: building
+  priority: core
+  description: Дешевый блок из утрамбованного песка, служащий для направления потока
+    врагов по длинному маршруту.
+  player_interaction: Быстрая постройка всего за 20 ракушек для создания коридоров
+    'змейки'.
+  feedback: Глухой звук трамбовки, анимация формочки для песка.
+  technical_complexity: Low
+  strengths:
+  - Минимальная стоимость, позволяет выстраивать длинные лабиринты
+  weaknesses:
+  - Не атакует сама по себе
+- name: Морские захватчики с уникальным поведением
+  category: combat
+  priority: core
+  description: 'Враги делятся на типы: Крабы (стандартная пехота), Крабы-отшельники
+    (тяжелая броня), Морские звезды (при гибели делятся на 2 маленькие), Чайки (летят
+    по прямой к замку, игнорируя лабиринт стен).'
+  player_interaction: Игрок должен комбинировать ПВО-башни и наземные лабиринты.
+  feedback: Забавное перебирание клешнями, крики чаек при пикировании, хлюпанье звезд.
+  technical_complexity: Medium
+  strengths:
+  - Заставляет игрока не полагаться только на один тип обороны
+  weaknesses:
+  - Требует отдельной логики перемещения для летающих юнитов
+gameplay_systems:
+- name: Система Сетки и Размещения (Grid & Build System)
+  purpose: Управление координатной сеткой пляжа (например, 24x16 клеток), валидация
+    установки объектов и управление ресурсами строительства.
+  input: Клик мыши / Тап по экрану на координаты мира Three.js с помощью Raycaster.
+  rules:
+  - Строительство разрешено только в пределах свободных ячеек пляжа.
+  - Запрещено строить на точках спавна врагов и на ячейках самого Замка.
+  - Запрещено ставить башню/стену, если это полностью блокирует единственный оставшийся
+    путь от любого спавна к замку.
+  state:
+  - 'grid_matrix: Array2D<CellState>'
+  - 'selected_tool: ''cannon'' | ''splasher'' | ''wall'' | ''sell'' | ''upgrade'''
+  - 'hover_cell: {x: number, y: number} | null'
+  interactions: При успешной постройке списывает ракушки, обновляет матрицу препятствий
+    и триггерит событие OnGridChanged для Flow Field системы.
+  feedback: Зеленый/красный голографический шейдер предпросмотра ячейки, спавн 3D
+    модели с сочным эффектом пыли.
+  edge_cases:
+  - Попытка поставить башню в момент, когда моб стоит на этой клетке (моб плавно выталкивается
+    в соседнюю свободную клетку)
+  - Клик за пределами активной зоны поля (игнорируется)
+- name: Система Поиска Пути Flow Field
+  purpose: Обеспечение быстрого и плавного движения сотен мобов по лабиринту без индивидуальных
+    тяжелых расчетов A* для каждого юнита.
+  input: Событие OnGridChanged или удаление башни.
+  rules:
+  - Целевая ячейка — Песчаный Замок (стоимость 0).
+  - Волновой алгоритм Дейкстры рассчитывает матрицу расстояний от всех ячеек к замку.
+  - Для каждой ячейки вычисляется 2D-вектор градиента наискорейшего спуска.
+  - Наземные мобы считывают вектор своей текущей клетки и двигаются вдоль него.
+  state:
+  - 'cost_field: Uint16Array'
+  - 'flow_vectors: Float32Array (x, z)'
+  - 'is_path_valid: boolean'
+  interactions: Враги запрашивают текущий вектор смещения из буфера Float32Array в
+    методе update().
+  feedback: Синхронное красивое перестроение всей колонны крабов в реальном времени.
+  edge_cases:
+  - Если путь перекрыт — откатить постройку башни и вернуть деньги игроку с показом
+    всплывающего предупреждения 'Путь заблокирован!'.
+- name: Система Снарядов и Боевых Взаимодействий
+  purpose: Поиск целей башнями, баллистический расчет траекторий и регистрация урона/эффектов
+    замедления.
+  input: Тик игрового цикла delta_time.
+  rules:
+  - Башни сканируют врагов в радиусе range с интервалом fire_rate.
+  - Ракушечные снаряды летят с физическим упреждением к позиции цели.
+  - Поливалка испускает круговой конус брызг, накладывая SlowEffect на 3 секунды.
+  state:
+  - 'active_projectiles: Array<ProjectileData>'
+  - 'active_status_effects: Map<EnemyId, StatusEffect>'
+  interactions: При попадании снаряда уменьшает HP врага; при HP <= 0 враг уничтожается,
+    спавнятся наградные ракушки в общий счетчик игрока.
+  feedback: Всплывающие цифры урона, партиклы брызг и осколков, мигание модели врага
+    белым цветом (hit flash).
+  edge_cases:
+  - Цель погибает до прилета снаряда (снаряд падает на песок и оставляет след).
+- name: Система Волн и Экономики Побережья
+  purpose: Генерация сбалансированных волн противников и начисление внутриигровых
+    ресурсов (Ракушки для раунда, Жемчуг для меты).
+  input: Таймер межволнового периода или ручной клик игрока 'Начать волну'.
+  rules:
+  - 'Каждая волна имеет состав: тип врага, интервал спавна, множитель здоровья.'
+  - За досрочный запуск волны игрок получает бонусные +25 ракушек.
+  - За каждого убитого врага начисляются ракушки в зависимости от его типа.
+  state:
+  - 'current_wave: number'
+  - 'total_waves: number'
+  - 'wave_in_progress: boolean'
+  - 'sand_shells: number'
+  - 'pearls: number'
+  interactions: Передает данные в UI HUD для обновления счетчиков и полосы прогресса
+    волны.
+  feedback: 'Звуковой горн старта волны, всплывающий баннер ''Волна 5: Нашествие Чаек!'''
+  edge_cases:
+  - Все мобы убиты до окончания таймера спавна (волна корректно завершается победой).
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: threejs
+  renderer_version: ^0.170.0
+  physics_engine: Rapier3D (@dimforge/rapier3d-compat 0.13.x)
+  state_manager: Reactive EventBus / NanoStores
+  audio_engine: 'Web Audio API (Howler.js with html5: false)'
+  target_fps: 60
+  max_draw_calls: 45
+  max_triangles_or_sprites: 35000
+  bundle_size_budget_mb: 3.2
+  layers:
+  - name: Core & Event Engine
+    responsibility: 'Главный игровой цикл, EventBus, управление временем (TimeScale:
+      1x, 2x, pause)'
+  - name: Grid & FlowField Subsystem
+    responsibility: Дискретная сетка 24x16, расчет FlowField, валидация путей, пространственный
+      хэш юнитов
+  - name: Three.js Rendering Layer
+    responsibility: Сцена, освещение, InstancedMesh для песка/башен/снарядов, кастомные
+      шейдеры воды и песка
+  - name: Entity Component System (Entities)
+    responsibility: Башни, Враги, Снаряды, Замок, VFX Партиклы
+  - name: Platform & Bridge SDK Layer
+    responsibility: Интеграция @playgama/bridge, сохранение в облако, баннеры, interstitial
+      и rewarded реклама
+  - name: UI / HUD Overlay (HTML5 Canvas & CSS3)
+    responsibility: Адаптивный интерфейс строительства, панель улучшений, экраны победы/поражения
+  modules:
+  - name: GridManager
+    file: src/game/grid/GridManager.ts
+    description: Хранение состояния клеток, рейкастинг кликов мыши в ячейки, валидация
+      размещения.
+  - name: FlowFieldSolver
+    file: src/game/ai/FlowFieldSolver.ts
+    description: Быстрый расчет волны Дейкстры и матрицы направлений движения на Uint8Array/Float32Array.
+  - name: TowerSystem
+    file: src/game/towers/TowerSystem.ts
+    description: Логика поиска целей, стрельбы, типов атак (Пушка, Поливалка, Стена)
+      и улучшений.
+  - name: EnemySpawner
+    file: src/game/enemies/EnemySpawner.ts
+    description: Инстансирование и пул объектов врагов (крабы, чайки, морские звезды),
+      расчет движения по FlowField.
+  - name: BridgeManager
+    file: src/game/platform/BridgeManager.ts
+    description: 'Связь с Playgama Bridge: инициализация, показ рекламы, сохранение
+      рекордов в Leaderboards.'
+monetization:
+  strategy_summary: Мягкая гибридная модель (Rewarded Video + Interstitial с умным
+    кулдауном + опциональные IAP/Ян-валюта), не ломающая игровой баланс и стимулирующая
+    игрока наградами за просмотр.
+  rewarded_placements:
+  - id: revive_castle
+    name: 'Второй Шанс: Восстановление Замка'
+    benefit: Мгновенно восстанавливает 50% прочности песчаного замка при критическом
+      поражении и смывает волной текущих врагов на экране.
+    cooldown_or_limit: 1 раз за матч
+    trigger_moment: Экран критического урона или поражения замка.
+  - id: double_shells
+    name: Двойной улов ракушек
+    benefit: Удваивает количество полученного за пройденный уровень Жемчуга и Ракушек.
+    cooldown_or_limit: После каждого успешного уровня
+    trigger_moment: Экран победы (Victory Screen).
+  - id: instant_boost_tsunami
+    name: Приливный Смыв (Цунами)
+    benefit: 'Супер-способность: призывает мощную морскую волну, смывающую 100% слабых
+      мобов и наносящую 500 урона боссам.'
+    cooldown_or_limit: 1 раз за 3 волны
+    trigger_moment: Кнопка паники в боевом HUD во время сложной волны.
+  interstitial_placements:
+  - trigger_event: Завершение уровня (Победа или окончательное Поражение)
+    cooldown_seconds: 90
+    conditions: Не показывается, если игрок только что посмотрел Rewarded Video; не
+      чаще одного раза в 90 секунд.
+  - trigger_event: Возврат в главное меню после 3+ сыгранных волн
+    cooldown_seconds: 120
+    conditions: Показывается только между спокойными состояниями меню.
+  in_app_purchases:
+  - sku: starter_beach_pack
+    name: Набор Песчаного Архитектора
+    description: 500 жемчужин + эксклюзивный золотой скин для Ракушечной Пушки + постоянный
+      бонус +10% к стартовому песку.
+    price_tier: Tier 1 (99 руб / $0.99)
+    reward: 500 жемчужин, Золотой скин, +10% стартовых ресурсов навсегда.
+  - sku: no_ads_vip
+    name: VIP Отключение рекламы
+    description: Полное отключение межстраничной рекламы (Interstitial) + удвоение
+      наград за все уровни навсегда.
+    price_tier: Tier 3 (299 руб / $2.99)
+    reward: Отключение Interstitial, постоянный x2 бонус.
+  fairness_rules:
+  - Любой уровень можно пройти на 3 звезды абсолютно бесплатно благодаря грамотной
+    тактике лабиринта.
+  - Реклама никогда не прерывает активную фазу боя или клики игрока по сетке.
+  - Всегда предусмотрен визуальный таймер и подтверждение перед запуском видео.
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - gamepix
+  - crazygames
+  - standalone_web
+  - mobile_browsers
+  initialization_flow:
+  - 1. Инициализация Bridge.init() при старте HTML страницы
+  - 2. Проверка доступности платформы и получение языка интерфейса (Bridge.platform.language)
+  - 3. Загрузка сохранений игрока через Bridge.storage.get()
+  - 4. Вызов Bridge.advertisement.showBanner() для десктопных платформ
+  - 5. Сигнал Bridge.game.ready() после загрузки Three.js ассетов
+  cloud_save_keys:
+  - sand_castle_progress_v1
+  - unlocked_towers
+  - pearl_currency
+  - tower_upgrades_tree
+  - audio_and_fx_settings
+  leaderboards:
+  - high_wave_endless_beach
+  - total_stars_campaign
+  ads_integration:
+    banner_supported: true
+    rewarded_auto_resume_audio: true
+    interstitial_interval_check: true
+  lifecycle_hooks:
+  - Bridge.game.on('pause', () => Game.pauseEngine())
+  - Bridge.game.on('resume', () => Game.resumeEngine())
+  - Bridge.advertisement.on('rewarded_opened', () => AudioManager.muteAll())
+  - Bridge.advertisement.on('rewarded_closed', () => AudioManager.unmuteAll())
+art:
+  style_name: Stylized Low-Poly Beach Voxel / Cartoon 3D (Сочный мультяшный пляж)
+  camera_perspective: Изометрический вид сверху под углом (Isometric Top-Down 3D)
+    с возможностью легкого панорамирования
+  camera_fov: 45
+  camera_pitch_angle: 55
+  environment_theme: Золотистый песчаный пляж тропического острова, лазурное полупрозрачное
+    море с набегающей пеной, пальмы на заднем плане и ракушки.
+  character_proportions: Стилизованные пухлые мультяшные формы (Chibi), легко считываемые
+    силуэты сверху.
+  lighting_setup: Яркий теплый полуденный солнечный свет (DirectionalLight с мягкими
+    PCFShadows) + HemisphereLight (небесно-голубой сверху, песчано-золотой снизу)
+    для сочных теней.
+  color_palette:
+    sand_gold: '#F7D070'
+    sea_turquoise: '#29C5B5'
+    water_foam: '#FFFFFF'
+    crab_coral: '#FF4B4B'
+    starfish_orange: '#FF8826'
+    seagull_white: '#F0F4F8'
+    shell_violet: '#9B51E0'
+    wet_sand: '#D8A752'
+  vfx_list:
+  - Водяные фонтаны и брызги при работе поливалки
+  - Осыпающийся песок и клубы песчаной пыли при возведении башни
+  - Осколочный взрыв и треск при уничтожении крабов
+  - Анимированная пена морского прибоя на границе воды и суши
+  - Следы на песке (декали), исчезающие со временем
+  ui_theme: 'Летний курортный интерфейс: текстуры дерева выгоревшего на солнце, кнопки
+    в форме морских ракушек и жемчужин, четкая типографика с обводкой.'
+ui_ux:
+  hud_elements:
+  - Счетчик Ракушек (ресурс стройки) с анимацией сбора
+  - Счетчик Жемчуга (мета-валюта)
+  - Индикатор Прочности Замка (HP Bar)
+  - Индикатор Волны (Текущая / Всего) и полоса спавна
+  - Кнопка 'Старт Волны / Ускорение x2'
+  - 'Нижняя Панель Башен: Ракушечная Пушка (100), Поливалка (150), Стена (20), Продажа/Улучшение'
+  - Кнопка Паузы и Настроек (Звук/Музыка)
+  screens:
+  - screen_id: main_menu
+    title: Главное меню
+    description: 3D панорама пляжа, кнопки 'В бой', 'Мастерская башен', 'Таблица рекордов'.
+  - screen_id: gameplay_battle
+    title: Поле боя
+    description: Сетка пляжа, 3D сцена, плавающий HUD, радиальное меню управления
+      выбранной башней.
+  - screen_id: upgrade_workshop
+    title: Мастерская Песчаных Талантов
+    description: Древо прокачки башен за жемчуг между боями.
+  - screen_id: victory_defeat_modal
+    title: Экран Итогов Боя
+    description: Звезды за победу, заработанные ресурсы, кнопка удвоения за рекламу
+      и кнопка следующего уровня.
+  mobile_controls_layout: 'Оптимизация под большие пальцы: панель выбора башен снизу
+    по центру; при тапе по ячейке поля появляется радиальное контекстное меню (Улучшить
+    / Продать / Инфо). Двойной тап или жест двумя пальцами для зума камеры.'
+  keyboard_controls:
+    '1': Выбрать Ракушечную Пушку
+    '2': Выбрать Водную Поливалку
+    '3': Выбрать Песчаную Стену
+    Space: Запуск волны / Пауза
+    R: Ускорение времени x1 / x2
+    Escape: Снять выделение / Меню
+  touch_controls:
+    Tap on Grid: Установить выбранную башню / Выбрать существующую
+    Drag: Панорамирование камеры по пляжу
+    Pinch: Плавный зум камеры (приблизить/отдалить)
+  wireframes_ascii: '+----------------------------------------------------------+
+
+    | [Замок: 100%]   [Волна: 3/10]   [Ракушки: 350] [Жемчуг: 12] [||] |
+
+    +----------------------------------------------------------+
+
+    |                                                          |
+
+    |    [Спавн 1] ~ ~ ~ ~ (Крабы)                             |
+
+    |         |                                                |
+
+    |       [###]=====[Пушка]======[###]                       |
+
+    |         |                      |                         |
+
+    |       [Поливалка]            [Стена]                     |
+
+    |         |                      |                         |
+
+    |         +=======[Пушка]========+                         |
+
+    |                                    \                     |
+
+    |    [Спавн 2: Чайки] -----------------> [ПЕСЧАНЫЙ ЗАМОК]  |
+
+    |                                                          |
+
+    +----------------------------------------------------------+
+
+    |  [Пушка (100)] [Поливалка (150)] [Стена (20)]  | [x2] [СТАРТ] |
+
+    +----------------------------------------------------------+'
+mobile:
+  orientation: landscape
+  touch_implementation: Single-touch Raycasting с фильтром дребезга (Deadzone 8px),
+    чтобы отличить клик по клетке от свайпа камеры.
+  safe_area_handling: CSS env(safe-area-inset-*) для отступов панелей на экранах с
+    вырезами (iPhone Notch / Dynamic Island).
+  performance_throttling:
+  - 'Автоматическое снижение разрешения рендера (DPR: 1.0 на слабых GPU вместо 2.0)'
+  - Ограничение максимального числа одновременных партиклов до 150 на мобильных
+  - Отключение теней в реальном времени на бюджетных мобильных чипсетах с переходом
+    на запеченные теневые декали
+audio:
+  soundtrack: Веселый, ненавязчивый тропический лаунж/регги с укулеле, маримбой и
+    шумом набегающих морских волн.
+  sound_effects:
+    build_sand: Приятный сухой шорох и утрамбовка песка
+    cannon_shot: Хлопок выстрела ракушки (Pop/Thud)
+    water_spray: Непрерывный мягкий шум брызг и плеска воды
+    crab_snip: Забавные щелчки клешней и писк при падении
+    seagull_cry: Короткие крики чаек при пикировании
+    wave_alarm: Звук морского рога/раковины при старте волны
+    victory_fanfare: Праздничная тропическая мелодия с колокольчиками
+qa:
+  functional_tests:
+  - Проверка запрета возведения башни, блокирующей 100% путей к замку (валидация FlowField)
+  - Корректность пересчета траекторий всех мобов при мгновенном изменении сетки
+  - 'Поведение летающих врагов (чайки): игнорирование стен и прямолинейный полет к
+    замку'
+  - Работа сохранения и загрузки прогресса через Playgama Bridge Storage
+  - Корректный показ и начисление наград за Rewarded Video
+  performance_benchmarks:
+  - Стабильные 60 FPS при 150 активных крабах и 30 башнях на экране
+  - Время расчета FlowField матрицы 24x16 не превышает 1.5 мс
+  - Потребление оперативной памяти вкладкой браузера < 120 МБ
+  cross_browser_matrix:
+  - Google Chrome (Desktop / Android)
+  - Apple Safari (iOS 15+ WebGL 2.0)
+  - Yandex Browser (Desktop / Mobile)
+  - Firefox / Edge (Latest versions)
+  common_bug_checklist:
+  - Утечка WebGL текстур и геометрий при рестарте уровня (проверить renderer.dispose())
+  - Застревание крабов внутри ячейки при постройке башни прямо на них
+  - Рассинхрон аудио при сворачивании вкладки (корректная обработка document.hidden)
+  - Клик сквозь UI кнопки в 3D сцену (предотвращение через pointer-events / stopPropagation)
+roadmap:
+- phase_number: 1
+  title: Прототип ядра (Core Engine & FlowField)
+  duration_days: 2
+  tasks:
+  - Настройка Three.js сцены, изометрической камеры и песчаной сетки 24x16
+  - Реализация FlowField алгоритма поиска пути и Raycaster кликов по клеткам
+  - Базовые кубические прототипы башен и спавн тестовых мобов
+  milestone_deliverable: 'Рабочий прототип: кликом ставятся блоки, мобы обходят препятствия
+    в реальном времени и идут к замку.'
+- phase_number: 2
+  title: Боевая система и Типы Башен/Врагов
+  duration_days: 3
+  tasks:
+  - 'Имплементация логики: Ракушечная Пушка (урон), Поливалка (slow AOE), Песчаная
+    стена'
+  - 'Создание врагов: Краб (наземный), Чайка (воздух), Морская звезда (сплит при смерти)'
+  - Система волн, баланс HP/Урона и экономика ракушек
+  milestone_deliverable: 'Полноценный боевой цикл: 5 сбалансированных волн с разными
+    врагами и работающими башнями.'
+- phase_number: 3
+  title: 3D Арт, Шейдеры, VFX и Сочный Саунд-дизайн
+  duration_days: 2
+  tasks:
+  - Интеграция стилизованных 3D-моделей песка, башен, крабов и замка
+  - Шейдер лазурной воды с пеной и партиклы брызг/песчинок
+  - Подключение Web Audio (звуки выстрелов, брызг, крики чаек, тропическая музыка)
+  milestone_deliverable: Красивая визуальная и аудио-презентация уровня коммерческого
+    хита.
+- phase_number: 4
+  title: Интеграция Playgama Bridge, UI и Релиз
+  duration_days: 2
+  tasks:
+  - Интеграция Playgama SDK (баннеры, межстраничная реклама, Rewarded Video, Cloud
+    Saves, Leaderboards)
+  - Полировка адаптивного мобильного тач-интерфейса
+  - Финальное QA-тестирование, оптимизация FPS и сборка продакшн бандла
+  milestone_deliverable: Готовая к публикации игра, проверенная на Yandex Games и
+    мобильных браузерах.
+risks:
+- risk: Просадки производительности на бюджетных смартфонах при большом числе мобов
+  category: technical
+  severity: Medium
+  mitigation: Использование THREE.InstancedMesh для отрисовки одинаковых мобов и снарядов
+    за один Draw Call, кэширование FlowField векторов.
+- risk: Игрок может найти эксплойт 'вечного лабиринта' (Juggling — перестройка стен
+    туда-сюда, заставляющая врагов бегать бесконечно)
+  category: game_design
+  severity: High
+  mitigation: Добавление стоимости/задержки на перестройку во время активной волны
+    или таймер ярости у крабов (через 60 секунд бега они ускоряются и атакуют ближайшую
+    стену).
+- risk: Блокировка звука браузером до первого клика пользователя (AudioContext policy)
+  category: technical
+  severity: Low
+  mitigation: Инициализация и разблокировка Howler/AudioContext по первому тапу по
+    экрану на стартовом сплеш-скрине.
+skills:
+- skill_id: threejs_flowfield_pathfinding
+  name: Реализация высокопроизводительного FlowField в Three.js
+  filename: skills/flowfield_threejs.md
+  purpose: Обеспечение расчета векторов движения для сотен мобов за <2мс на JavaScript
+    TypedArrays.
+  when_to_use: При разработке механик лабиринтостроения (mazing) и массового спавна
+    мобов.
+  rules:
+  - Никогда не создавать новые объекты в методе расчета поля (Zero Allocation / GC
+    Friendly).
+  - Использовать одномерные Uint8Array и Float32Array для представления матриц сетки.
+  - Использовать BFS с кольцевым буфером для расчета интеграционного поля Дейкстры.
+  architecture: Grid -> IntegrationField (BFS) -> FlowField (Gradients) -> Entity
+    Movement Update
+  implementation_guidance: Хранить координаты целей в виде индексов `y * width + x`.
+    При постройке башни вызывать `recalculateField()`, если поле не имеет выхода —
+    возвращать `false` и отменять установку.
+  common_mistakes:
+  - Вызов A* поиска для каждого моба по отдельности
+  - Создание `new THREE.Vector3()` внутри цикла обновления мобов
+  checklist:
+  - Проверен BFS алгоритм на отсутствие зацикливания
+  - Протестирована валидация перекрытия пути
+  - Частота кадров держит 60 FPS при 200 юнитах
+  knowledge_refs:
+  - Crowd Pathfinding via Flow Fields (Emerson 2006)
+  - Three.js InstancedMesh Performance Guide
+- skill_id: game_skill
+  name: 'Песочный Бастион 3D: Защита Пляжа Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for Песочный
+    Бастион 3D: Защита Пляжа.'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: THREEJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for THREEJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - threejs/adaptive_quality.md
+  - threejs/mobile_shaders.md
+  - threejs/performance_guide.md
+  - threejs/physics_integration.md
+  - threejs/vehicle_wheel_rig.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Песочный Бастион 3D: Защита
+  Пляжа'', a Tower Defense (Защита башен) game. Visual style: Stylized Low-Poly Beach
+  Voxel / Cartoon 3D (Сочный мультяшный пляж). Camera perspective: Изометрический
+  вид сверху под углом (Isometric Top-Down 3D) с возможностью легкого панорамирования.
+  Environment: Золотистый песчаный пляж тропического острова, лазурное полупрозрачное
+  море с набегающей пеной, пальмы на заднем плане и ракушки.. Central Action: The
+  player character (Вы — великий архитектор песчаных замков и защитник побережья...)
+  is actively engaging enemies in combat, striking with visible weapon trail arcs
+  and dynamic particle sparks at the impact point. An enemy is reeling with physics
+  momentum. Visible in-game HUD overlay: health bar at top-left, wave and enemies
+  remaining at top-center, gold counter at top-right, crowd hype gauge at bottom-center,
+  and touch action controls at bottom corners. Crisp lighting: Яркий теплый полуденный
+  солнечный свет (DirectionalLight с мягкими PCFShadows) + HemisphereLight (небесно-голубой
+  сверху, песчано-золотой снизу) для сочных теней., high visual clarity, immersive
+  WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Сетка пляжа 24x16 корректно реагирует на клики и тапы с подсветкой ячеек
+- 'Реализованы 3 типа башен: Ракушечная пушка, Водная поливалка и Песчаная стена'
+- FlowField алгоритм пересчитывает пути в реальном времени при изменении расстановки
+  башен
+- Реализована защита от полной блокировки спавна (нельзя закрыть единственный проход)
+- Враги 3 типов (Крабы, Чайки, Морские звезды) имеют уникальные паттерны движения
+  и уязвимости
+- Интегрирован Playgama Bridge 2.x с поддержкой рекламы, сохранений и лидербордов
+- Игра выдает стабильные 60 FPS на смартфонах и ПК в веб-браузере

@@ -1,0 +1,787 @@
+raw_prompt: Создай 3D вождение грузовика на Three.js с процедурно генерируемой ухабистой
+  трассой. В кузове грузовика находятся физические объекты с расчетом коллизий. Игрок
+  управляет газом и тормозом. Задача — проехать маршрут от деревни до лесопилки, потеряв
+  как можно меньше груза. Добавь спидометр, индикатор целостности груза и уютную рустик-стилистику.
+title: 'Лесной Рейс: Доставка на Лесопилку 3D'
+slug: rustic-cargo-truck-3d
+genre: Физический 3D-симулятор вождения
+subgenre: Аркадная доставка груза по бездорожью
+renderer: threejs
+renderer_reason: User explicitly specified 'threejs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Яндекс Игры / VK Play / Web & Mobile)
+orientation: landscape
+target_audience: Игроки от 10 до 45 лет, любители физических автосимуляторов, Hill
+  Climb Racing, Spintires/MudRunner, ценящие медитативный, но азартный геймплей с
+  реалистичной физикой груза.
+core_loop: Старт в деревне с полным кузовом -> Преодоление ухабистой процедурной трассы
+  с контролем тяги и торможения -> Балансировка на склонах для предотвращения выпадения
+  брёвен и ящиков -> Финиш на лесопилке -> Подсчет доставленного груза и получение
+  монет -> Прокачка грузовика и открытие новых маршрутов.
+hook: Тактильная физика раскачивающихся и норовящих вылететь из кузова брёвен на непредсказуемых
+  ухабах в ламповой, теплой сельской атмосфере.
+player_fantasy: Мастерский шофёр винтажного грузовика, способный проехать по любым
+  оврагам и доставить ценный груз в целости сквозь живописные лесные просеки.
+session_model: Быстрые динамичные сессии по 2–4 минуты на один заезд с постоянным
+  накоплением прогресса и апгрейдами.
+unique_value_proposition: Полноценный 3D-физический автосимулятор в браузере с процедурным
+  ландшафтом, честной физикой сыпучего/штучного груза и уютным визуальным стилем без
+  долгих загрузок.
+vision: Создать главный веб-хит в жанре перевозки грузов, сочетающий медитативную
+  атмосферу русской природы, азартную физическую модель и высокую реиграбельность
+  за счет процедурной генерации трасс.
+elevator_pitch: Заведи старый добрый грузовик и доставь брёвна из тихой деревни на
+  лесопилку! Дорога полна кочек, ям и крутых подъемов — удерживай баланс газа и тормоза,
+  следи за спидометром и довези груз в целости, чтобы заработать максимум на прокачку
+  машины.
+win_conditions: Достижение финишных ворот лесопилки с сохранением хотя бы 1 единицы
+  груза (для получения максимальных 3 звёзд требуется доставить от 80% до 100% груза).
+lose_conditions: Полная потеря всех предметов из кузова (0% груза) или опрокидывание
+  грузовика на крышу более чем на 3 секунды.
+progression_summary: Заработанные за доставку монеты тратятся на улучшение двигателя
+  (мощность на подъемах), подвески (гашение ударов на ухабах), шин (сцепление с грунтом)
+  и наращивание бортов кузова. Открываются новые модели грузовиков и сложные типы
+  грузов (хрупкие ящики, бочки).
+difficulty_curve: Плавный рост сложности от пологих деревенских холмов до крутых таёжных
+  перевалов с глубокими колеями, трамплинами и скользкими деревянными мостами.
+scores:
+  fun: 9
+  originality: 8
+  replayability: 9
+  development_cost: 7
+  visual_appeal: 9
+  mobile_fit: 9
+  monetization: 8
+  platform_fit: 10
+  overall_score: 8.7
+  justification: Классическая механика доставки с физикой груза в сочетании с 3D Three.js
+    и процедурной генерацией создает мощный виральный эффект на площадках Яндекс Игр
+    и Playgama, обеспечивая высокую глубину сессий и органический интерес к мета-прогрессии.
+references:
+- name: MudRunner / Spintires
+  genre: Heavy Off-road Simulator
+  mechanics:
+  - Физика преодоления бездорожья
+  - Инерция тяжелой техники
+  - Перевозка бревен
+  lessons: Ощущение веса машины и преодоления рельефа вызывает невероятное удовлетворение.
+  what_to_avoid: Излишне медленный темп и комплексное управление, неподходящее для
+    быстрых веб-сессий.
+- name: Hill Climb Racing
+  genre: 2D Physics Driving
+  mechanics:
+  - Управление двумя педалями (газ/тормоз)
+  - Прокачка узлов автомобиля
+  - Преодоление крутых холмов
+  lessons: Простое бинарное управление в сочетании с честной физикой доступно игрокам
+    любого возраста.
+  what_to_avoid: Плоская 2D-перспектива и однообразный фон.
+- name: Truck Loader / Cargo Delivery Games
+  genre: Physics Cargo Puzzle/Driving
+  mechanics:
+  - Физические объекты в открытом кузове
+  - Индикатор сохранности груза
+  - Штрафы за потерянный товар
+  lessons: Вид вылетающего из кузова ящика создает яркую эмоциональную реакцию и стимулирует
+    играть аккуратнее.
+  what_to_avoid: Статичные повторяющиеся трассы без процедурного разнообразия.
+mechanics:
+- name: Двухпедальное управление тягой и торможением
+  category: driving
+  priority: core
+  description: Игрок управляет только подачей газа (ускорение вперед) и тормозом (замедление
+    / задний ход / балансировка в воздухе).
+  player_interaction: Нажатие клавиш W/S, стрелок вверх/вниз на ПК или сенсорных экранных
+    педалей на смартфонах.
+  feedback: Звук нарастающих оборотов двигателя, дым из выхлопной трубы, наклон кузова
+    грузовика при торможении.
+  technical_complexity: Medium
+  strengths:
+  - Мгновенный порог входа
+  - Идеально для мобильных тач-устройств
+  weaknesses:
+  - Требует тонкой настройки физического трения, чтобы машина не казалась невесомой
+- name: Физическая симуляция груза в кузове
+  category: physics
+  priority: core
+  description: В кузов загружаются отдельные твердые тела (брёвна цилиндрической формы,
+    кубические ящики), которые сталкиваются между собой и бортами.
+  player_interaction: Косвенное влияние через скорость и ускорение грузовика.
+  feedback: Стук дерева о дерево, глухие удары о борта, визуальное смещение и вываливание
+    предметов через край.
+  technical_complexity: High
+  strengths:
+  - Максимальная наглядность и драматизм геймплея
+  - Каждый заезд уникален
+  weaknesses:
+  - Риск застревания коллидеров на высокой скорости (требует включения CCD)
+- name: Процедурная генерация ухабистого маршрута
+  category: generation
+  priority: core
+  description: Генерация 3D-сплайна дороги с наложением шумов Перлина/Симплекс для
+    создания кочек, оврагов, канав и мостов.
+  player_interaction: Игрок визуально оценивает рельеф впереди и заранее сбрасывает
+    или набирает скорость.
+  feedback: Тряска камеры, срабатывание рессор подвески, пыль из-под колес при наезде
+    на неровности.
+  technical_complexity: High
+  strengths:
+  - Бесконечная вариативность уровней
+  - Минимальный размер билда без тяжелых запеченных карт
+  weaknesses:
+  - Необходимость алгоритмической валидации проходимости крутых склонов
+- name: Индикатор целостности и подсчет доставленного груза
+  category: scoring
+  priority: core
+  description: Отслеживание количества оставшихся в кузове объектов в реальном времени
+    и расчет финальной награды на финише.
+  player_interaction: Игрок следит за шкалой на HUD и выбирает между риском ради скорости
+    и осторожностью.
+  feedback: Цветовая смена индикатора (зеленый -> желтый -> красный), тревожный звуковой
+    сигнал при выпадении предмета.
+  technical_complexity: Low
+  strengths:
+  - Четкая и понятная цель для игрока
+  - Создает сильное напряжение на последних метрах перед финишем
+  weaknesses:
+  - Требуется корректная фильтрация ложных срабатываний при подпрыгивании груза внутри
+    кузова
+gameplay_systems:
+- name: VehiclePhysicsSystem
+  purpose: 'Симуляция динамики грузовика: крутящий момент, многорычажная подвеска,
+    сцепление колес с грунтом и центр тяжести.'
+  input: Команды газа/тормоза от контроллеров ввода (клавиатура / тач).
+  rules:
+  - Подача газа прикладывает крутящий момент к задней оси с учетом передаточного числа
+  - Тормоз создает замедляющий момент и переносит массу на переднюю ось
+  - Подвеска амортизирует вертикальные толчки от неровностей процедурного меша
+  state:
+  - currentSpeed
+  - engineRPM
+  - suspensionCompression
+  - isGrounded
+  - tiltAngle
+  interactions: Взаимодействует с RoadMeshCollider и передает импульсы кузову, где
+    находится груз.
+  feedback: Спидометр на HUD, наклон шасси, частицы пыли и звуки двигателя.
+  edge_cases:
+  - Грузовик завис на гребне холма днищем
+  - Переворот на 180 градусов
+- name: CargoPhysicsSystem
+  purpose: Контроль физики предметов в кузове, коллизий и фиксация факта потери груза.
+  input: Физические импульсы от перемещения кузова грузовика.
+  rules:
+  - Каждый объект груза обладает массой, трением и упругостью
+  - Если объект покидает ограничивающий триггер кузова и касается земли, он помечается
+    как потерянный
+  - Потерянный объект деактивируется через 5 секунд для экономии производительности
+  state:
+  - totalCargoCount
+  - activeCargoCount
+  - cargoIntegrityPercent
+  - cargoObjectsList
+  interactions: Передает данные в DeliveryScoringSystem и HUD.
+  feedback: Всплывающий красный значок '-1 Груз!', тревожный звуковой сигнал, обновление
+    шкалы целостности.
+  edge_cases:
+  - Бревно высоко подлетело на кочке, но приземлилось обратно в кузов (не считается
+    потерянным)
+- name: ProceduralRoadSystem
+  purpose: Генерация бесконечного или сегментного ухабистого маршрута от точки 'Деревня'
+    до 'Лесопилка'.
+  input: Сид уровня, длина трассы, коэффициент холмистости и плотности препятствий.
+  rules:
+  - Трасса строится по 3D Catmull-Rom сплайну
+  - Высота профиля модулируется несколькими октавами шума Перлина
+  - Вдоль обочин процедурно расставляются сосны, березы, заборы и дорожные знаки
+  - В начале трассы генерируется зона деревни с избами, в конце — лесопилка с конвейером
+  state:
+  - levelSeed
+  - roadSpline
+  - roadMesh
+  - finishDistance
+  - playerProgress
+  interactions: Предоставляет коллизионную геометрию для физического движка Rapier3D.
+  feedback: Плавная подгрузка геометрии, маркеры дистанции вдоль обочин.
+  edge_cases:
+  - Слишком крутой угол подъема (сглаживается авто-валидатором уклона)
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: threejs
+  renderer_version: ^0.170.0
+  physics_engine: Rapier3D (@dimforge/rapier3d-compat 0.13.x)
+  state_manager: Reactive EventBus / Nanostores
+  audio_engine: 'Web Audio API (Howler.js with html5: false)'
+  target_fps: 60
+  max_draw_calls: 75
+  max_triangles_or_sprites: 45000
+  bundle_size_budget_mb: 3.8
+  layers:
+  - name: EnvironmentLayer
+    type: Three.Group
+    description: Процедурный меш дороги, террейн, деревья, дома деревни и лесопилка
+      с инстансингом
+  - name: VehicleLayer
+    type: Three.Group
+    description: Модель грузовика, анимированные колеса, открытый кузов
+  - name: CargoLayer
+    type: Three.Group
+    description: Динамические физические объекты груза (брёвна, ящики, бочки)
+  - name: VFXLayer
+    type: Three.Points / InstancedMesh
+    description: Пыль из-под колес, выхлопной дым, искры и листопад
+  - name: UILayer
+    type: HTML/CSS Overlay
+    description: Адаптивный спидометр, индикатор груза, педали управления и экраны
+      победы/поражения
+  modules:
+  - name: RoadGenerator
+    path: src/core/world/RoadGenerator.ts
+    responsibility: Генерация сплайна, расчет триангуляции дороги и создание Rapier
+      Trimesh коллидера
+  - name: TruckController
+    path: src/core/entities/TruckController.ts
+    responsibility: Физическое управление грузовиком, обработка газа, тормоза, амортизаторов
+  - name: CargoManager
+    path: src/core/entities/CargoManager.ts
+    responsibility: Спавн грузов в кузове, отслеживание выпадения через триггерные
+      зоны и расчет целостности
+  - name: BridgeService
+    path: src/services/BridgeService.ts
+    responsibility: 'Интеграция с Playgama Bridge: реклама, облачные сохранения и
+      лидерборды'
+monetization:
+  strategy_summary: 'Мягкая гибридная модель: ненавязчивая межстраничная реклама между
+    рейсами, ценные Rewarded видео (удвоение заработка, спасательный магнит для груза)
+    и покупка эксклюзивных лесовозов/отключения рекламы.'
+  rewarded_placements:
+  - id: double_reward
+    name: Удвоить награду за рейс
+    benefit: Умножает заработанные монеты за доставленный груз на x2
+    cooldown_or_limit: После каждого успешного заезда
+    trigger_moment: Экран завершения рейса на лесопилке
+  - id: cargo_magnet_revive
+    name: Магнит груза (Возврат)
+    benefit: Возвращает все выпавшие брёвна обратно в кузов и чинит целостность до
+      100%
+    cooldown_or_limit: 1 раз за заезд при потере >50% груза
+    trigger_moment: Критическая потеря груза во время заезда
+  - id: free_super_tuning
+    name: Тест-драйв супер-подвески
+    benefit: Дает максимальный уровень подвески и шин на один следующий рейс
+    cooldown_or_limit: 1 раз в 10 минут
+    trigger_moment: Экран гаража перед стартом
+  interstitial_placements:
+  - trigger_event: Возврат в гараж / переход к следующему рейсу
+    cooldown_seconds: 90
+    conditions: Показывается только между рейсами, никогда не прерывает активное вождение
+  in_app_purchases:
+  - sku: remove_ads_forever
+    name: Отключение рекламы
+    description: Полностью отключает все межстраничные баннеры навсегда
+    price_tier: Tier 2 (~199 RUB / 1.99 USD)
+    reward: Вечный No-Ads статус + 5000 бонусных монет
+  - sku: truck_taiga_beast
+    name: Тягач 'Таёжный Медведь 6x6'
+    description: Эксклюзивный полноприводный трехосный грузовик с высокими бортами
+    price_tier: Tier 3 (~299 RUB / 2.99 USD)
+    reward: Разблокировка уникального тягача с повышенной устойчивостью
+  - sku: coin_pack_large
+    name: Мешок деревенского золота
+    description: Большой запас монет на полную прокачку любого грузовика
+    price_tier: Tier 1 (~99 RUB / 0.99 USD)
+    reward: 15,000 монет
+  fairness_rules:
+  - Любой грузовик и трасса могут быть открыты исключительно за счет игрового процесса
+    без доната
+  - Реклама не прерывает заезд в процессе управления
+  - Rewarded видео строго опциональны и дают комфортный бонус, не блокируя прохождение
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - game_distribution
+  - crazy_games
+  - mobile_web
+  initialization_flow:
+  - Инициализация bridge.initialize() при старте страницы
+  - Определение типа платформы и языка интерфейса (RU/EN)
+  - Загрузка данных игрока из облачного хранилища bridge.storage.get()
+  - Инициализация баннерной рекламы и регистрация хуков видимости страницы
+  cloud_save_keys:
+  - player_coins
+  - selected_truck_id
+  - truck_upgrades_data
+  - unlocked_trucks
+  - high_score_cargo
+  - settings_sound_volume
+  leaderboards:
+  - leaderboard_total_cargo_delivered
+  - leaderboard_fastest_timber_run
+  ads_integration:
+    interstitial_enabled: true
+    rewarded_enabled: true
+    banner_enabled: false
+  lifecycle_hooks:
+  - bridge.on('gameplay_pause', () => pausePhysicsAndAudio())
+  - bridge.on('gameplay_resume', () => resumePhysicsAndAudio())
+  - bridge.on('visibility_change', (state) => handleVisibility(state))
+art:
+  style_name: Cozy Rustic Low-Poly Stylized 3D
+  camera_perspective: Динамическая преследующая камера сбоку-сзади (Chase Cam 3/4)
+    с плавным демпфированием
+  camera_fov: 52
+  camera_pitch_angle: 22
+  environment_theme: 'Живописная русская глубинка: деревянные избы с резными наличниками,
+    золотые сосны, березовые рощи, речной брод с деревянным мостом и дымящая лесопилка
+    вдали.'
+  character_proportions: Коренастый винтажный грузовик (вдохновленный ГАЗ-51/ЗИЛ-130)
+    с выразительной круглой кабиной, массивными колесами и просторным деревянным кузовом.
+  lighting_setup: Мягкий теплый свет 'золотого часа' (DirectionalLight под низким
+    углом с теплыми оранжевыми тенями) + рассеянный небесный свет HemisphericalLight.
+  color_palette:
+    truck_red: '#C23B22'
+    truck_chrome: '#E0E5E8'
+    timber_wood: '#6B4423'
+    dirt_road: '#8B5A2B'
+    autumn_grass: '#5A7A32'
+    golden_sunlight: '#FDE68A'
+    sky_blue: '#93C5FD'
+    ui_wood_panel: '#4A2E18'
+  vfx_list:
+  - Густые клубы пыли из-под задних колес при пробуксовке
+  - Кольца сизого дизельного дыма из выхлопной трубы при нажатии на газ
+  - Искры при чиркании днища о выступающие камни
+  - Разлетающиеся осенние листья при быстром проезде сквозь лес
+  - Праздничный салют из древесных опилок и конфетти на финише лесопилки
+  ui_theme: 'Уютный рустик-стиль: текстурированные деревянные плашки, бронзовые заклепки,
+    крупный винтажный спидометр со стрелкой и сочные зеленые индикаторы целостности.'
+ui_ux:
+  hud_elements:
+  - Винтажный круглый спидометр (0-100 км/ч) со стрелкой и цифровым дублером внизу
+    справа
+  - 'Индикатор целостности груза: горизонтальная шкала с иконкой бревна (100% -> 0%)
+    вверху по центру'
+  - Индикатор прогресса маршрута (мини-линия 'Деревня [Иконка грузовика] Лесопилка')
+    вверху экрана
+  - Счетчик заработанных за рейс монет вверху слева
+  - Большие сенсорные педали 'Тормоз' (слева) и 'Газ' (справа) на мобильных экранах
+  screens:
+  - name: MainMenuScreen
+    description: Уютный вид на грузовик в деревенском дворе, кнопки 'В рейс!', 'Гараж',
+      'Лидерборды', 'Звук'
+  - name: GarageScreen
+    description: Прокачка Двигателя, Подвески, Шин и Бортов кузова за монеты, выбор
+      цвета кабины и модели грузовика
+  - name: GameplayHUD
+    description: Минималистичный интерфейс заезда со спидометром, шкалой сохранности
+      груза и кнопкой паузы
+  - name: LevelCompleteScreen
+    description: 'Результаты рейса: процент сохраненного груза, оценка в 3 звезды,
+      монеты, кнопка ''Удвоить x2 за рекламу'' и ''В гараж'''
+  - name: GameOverScreen
+    description: Сообщение о потере груза или аварии, кнопка 'Вернуть груз магнитом
+      за рекламу' или 'Попробовать снова'
+  mobile_controls_layout: 'Двуручный эргономичный хват: левый большой палец на педали
+    Тормоза/Заднего хода (нижний левый угол), правый большой палец на большой педали
+    Газа (нижний правый угол).'
+  keyboard_controls:
+    W / Стрелка Вверх: Газ (Ускорение вперед)
+    S / Стрелка Вниз: Тормоз / Реверс (Задний ход)
+    Пробел: Ручной тормоз
+    R: Быстрый рестарт рейса
+    Esc / P: Пауза
+  touch_controls:
+    Левая экранная педаль: Тормоз / Задний ход
+    Правая экранная педаль: Газ / Ускорение
+    Кнопка паузы в верхнем углу: Открыть меню паузы
+  wireframes_ascii: '+---------------------------------------------------+
+
+    | [🪙 1,250]     [🛣️ Деревня ====🚚===== Лесопилка]   [⏸️]  |
+
+    |               [📦 Целостность: 100% (8/8 брёвен)] |
+
+    |                                                   |
+
+    |                                                   |
+
+    |                    3D GAME VIEW                   |
+
+    |                 (Truck on bumpy road)             |
+
+    |                                                   |
+
+    |                                                   |
+
+    |  +---------+                       /¯¯¯¯¯¯\       |
+
+    |  | 🛑 ТОРМОЗ|                      | 60KM/H|       |
+
+    |  +---------+                       \______/       |
+
+    |                                    +------+       |
+
+    |                                    | 🟢ГАЗ |       |
+
+    |                                    +------+       |
+
+    +---------------------------------------------------+'
+mobile:
+  orientation: landscape
+  touch_implementation: Большие полупрозрачные сенсорные кнопки педалей с активной
+    зоной отклика и тактильной вибрацией (navigator.vibrate) при нажатии.
+  safe_area_handling: Применение CSS env(safe-area-inset-left) и env(safe-area-inset-right)
+    для предотвращения наложения кнопок на вырезы камер смартфонов.
+  performance_throttling:
+  - Динамический pixelRatio (ограничение до 1.5 на Retina/High-DPI экранах)
+  - Инстансинг геометрии деревьев и заборов вдоль дороги
+  - Отключение мягких теней (PCFSoftShadowMap -> BasicShadowMap) на слабых мобильных
+    GPU
+audio:
+  bgm_track: Теплая акустическая кантри/фолк мелодия на акустической гитаре, банджо
+    и губной гармошке, создающая ощущение утренней дороги.
+  engine_sound: Процедурный или сэмплированный рокот дизельного двигателя с изменением
+    высоты тона (pitch) в зависимости от текущей скорости и нагрузки.
+  suspension_squeak: Характерный металлический скрип рессор и глухие удары амортизаторов
+    при проезде глубоких ухабов.
+  cargo_impacts: Реалистичные глухие стуки сталкивающихся деревянных брёвен и дребезг
+    бортов кузова.
+  cargo_loss_alert: Звонкий тревожный звук при выпадании бревна из кузова на дорогу.
+  brakes_air_hiss: Короткий шипящий звук пневматических тормозов при резкой остановке.
+  victory_fanfare: Победный гудок грузовика и радостный аккорд банджо при пересечении
+    финиша на лесопилке.
+qa:
+  functional_tests:
+  - Проверка корректности начисления монет при разном проценте доставленного груза
+    (0%, 50%, 100%)
+  - 'Тестирование коллизий: брёвна не должны проваливаться сквозь дно или стенки кузова
+    при резком ускорении'
+  - Проверка работы Rewarded видео на удвоение монет и возврат груза через мок-адаптер
+    Playgama
+  - Проверка сохранения прогресса и купленных улучшений при перезагрузке страницы
+  performance_benchmarks:
+  - Стабильные 60 FPS на ПК в разрешении Full HD
+  - Не менее 50-60 FPS на мобильных устройствах среднего уровня (уровня Snapdragon
+    680 / Apple A12)
+  - Время первичной загрузки страницы не более 2.5 секунд при 4G соединении
+  cross_browser_matrix:
+  - Google Chrome (Desktop & Android)
+  - Safari (iOS 15+ / macOS)
+  - Yandex Browser (Desktop & Mobile)
+  - Mozilla Firefox & Microsoft Edge
+  common_bug_checklist:
+  - Туннелирование физики груза на высокой скорости (решается включением Rapier CCD)
+  - Застревание машины днищем на вершинах треугольников процедурной сетки
+  - Утечки памяти WebGL при многократных перезапусках заезда без очистки Three.js
+    геометрий
+  - Рассинхрон аудио Web Audio API при переключении вкладок браузера
+roadmap:
+- phase_number: 1
+  title: Физический прототип и базовый контроллер
+  duration_days: 2
+  tasks:
+  - Настройка Three.js сцены и физического мира Rapier3D
+  - Создание модели грузовика с подвижными колесами и физическим шасси
+  - Реализация двухпедального управления (газ, тормоз, реверс)
+  - Добавление кузова и спавн физических брёвен с расчетом массы и трения
+  milestone_deliverable: Управляемый грузовик, способный перевозить подвижные брёвна
+    в кузове по тестовой плоскости с трамплинами.
+- phase_number: 2
+  title: Процедурный генератор трассы и коллизии
+  duration_days: 3
+  tasks:
+  - Разработка алгоритма генерации сплайна дороги с шумом Перлина
+  - Построение процедурного меша трассы с UV-разверткой гравийной дороги
+  - Генерация точного Rapier Trimesh коллидера для ухабистого рельефа
+  - 'Инстансинг декораций: деревья, кусты, заборы, стартовая деревня и финишная лесопилка'
+  milestone_deliverable: Полноценная процедурная трасса от деревни до лесопилки с
+    ухабами, кочками и мостами.
+- phase_number: 3
+  title: Игровая логика, HUD и рустик-арт
+  duration_days: 3
+  tasks:
+  - Индикатор целостности груза и система детекции выпавших предметов
+  - 'Создание UI: спидометр с аналоговой стрелкой, полоса прогресса, педали управления'
+  - Настройка теплого освещения 'золотого часа', кастомных шейдеров пыли и дыма
+  - Интеграция звукового движка (мотор, стук бревен, скрип рессор, фолк-музыка)
+  milestone_deliverable: Красивая и завершенная играбельная сессия доставки груза
+    с полным визуальным и звуковым фидбеком.
+- phase_number: 4
+  title: Мета-прогрессия, Гараж и Playgama SDK
+  duration_days: 2
+  tasks:
+  - 'Интерфейс гаража: прокачка двигателя, подвески, шин и высоты бортов кузова'
+  - 'Подключение Playgama Bridge: облачные сохранения, лидерборды, межстраничная и
+    rewarded реклама'
+  - Тестирование на мобильных экранах, оптимизация батчинга и отрисовки (Draw Calls
+    < 70)
+  milestone_deliverable: Полноценный релизный билд, готовый к публикации на Яндекс
+    Играх и мобильных платформах.
+risks:
+- risk: Выпадение или просачивание физических объектов сквозь стенки кузова при резких
+    ударах о кочки
+  category: technical
+  severity: High
+  mitigation: Использование Continuous Collision Detection (CCD) для брёвен и кузова,
+    увеличение толщины невидимых стенок коллидера кузова.
+- risk: Просадки FPS на слабых смартфонах из-за расчета физики большого числа объектов
+    на процедурном меше
+  category: performance
+  severity: Medium
+  mitigation: Ограничение количества активных брёвен до 8–12 штук, использование Rapier3D
+    на WebAssembly, генерация физических коллидеров дороги локальными чанками вокруг
+    игрока.
+- risk: Игрок может застрять на слишком крутом процедурном подъеме при непрокачанном
+    грузовике
+  category: gameplay
+  severity: Medium
+  mitigation: Автоматическое сглаживание сплайна трассы (максимальный угол наклона
+    не более 25 градусов) и защита от тупиковых генераций.
+skills:
+- skill_id: threejs-rapier-vehicle-physics
+  name: Three.js & Rapier3D Vehicle and Cargo Controller
+  filename: skills/threejs-rapier-vehicle-physics.md
+  purpose: Обеспечить стабильную симуляцию физики грузовика с динамической подвеской
+    и коллизиями груза в веб-среде.
+  when_to_use: При реализации физического контроллера автомобиля, взаимодействия колес
+    с неровным грунтом и симуляции предметов в кузове.
+  rules:
+  - Всегда использовать фиксированный шаг физики (fixed timestep 1/60s)
+  - Применять CCD для быстро движущихся физических тел груза
+  - Не изменять позицию Three.js мешей напрямую, синхронизировать их строго с RigidBody.translation()
+    и rotation()
+  architecture: TruckController связывает ввод пользователя с Rapier Raycast/RigidBody
+    колес, передавая смещения в визуальную иерархию Three.js.
+  implementation_guidance: Использовать составной составной коллидер (Compound Collider)
+    для кузова грузовика с достаточной толщиной бортов, чтобы исключить проскальзывание
+    бревен.
+  common_mistakes:
+  - Использование стандартного Trimesh для динамического кузова (Trimesh в Rapier
+    должен быть только статическим)
+  - Отсутствие деактивации выпавших за пределы экрана брёвен
+  checklist:
+  - Проверен отклик педалей газа и тормоза
+  - Подвеска амортизирует кочки без бесконечной раскачки
+  - Груз стабильно лежит в кузове при спокойной езде
+  knowledge_refs:
+  - Rapier3D Documentation (@dimforge/rapier3d-compat)
+  - Three.js InstancedMesh Best Practices
+- skill_id: procedural-road-generation-threejs
+  name: Procedural Bumpy Road Spline Generator
+  filename: skills/procedural-road-generation-threejs.md
+  purpose: Генерация сглаженной 3D-дороги с естественными ухабами, кочками и придорожными
+    декорациями.
+  when_to_use: При создании бесконечных или сегментных трасс для гонок и симуляторов
+    вождения на Three.js.
+  rules:
+  - Формировать сплайн через CatmullRomCurve3 с равномерным шагом точек
+  - Модулировать высоту через 2D Simplex Noise с контролем максимальной амплитуды
+  - Переиспользовать буферы геометрии для предотвращения сборок мусора (GC spikes)
+  architecture: Модуль RoadGenerator создает сплайн, вычисляет нормали/бинормали (Frenet
+    frames) и генерирует BufferGeometry дороги и коллидера.
+  implementation_guidance: Для физики дороги создавать Rapier Trimesh коллидер на
+    основе вершин сгенерированной BufferGeometry.
+  common_mistakes:
+  - Слишком высокая плотность вершин меша, снижающая производительность
+  - Резкие перепады высоты, приводящие к подбрасыванию машины в космос
+  checklist:
+  - Сплайн генерируется без самопересечений
+  - Коллидер дороги совпадает с визуальной поверхностью
+  - Деревья и декорации не спавнятся прямо посреди проезжей части
+  knowledge_refs:
+  - Three.js Curve and Spline Extrusion
+  - SimplexNoise.js algorithm
+- skill_id: game_skill
+  name: 'Лесной Рейс: Доставка на Лесопилку 3D Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for Лесной
+    Рейс: Доставка на Лесопилку 3D.'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: THREEJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for THREEJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - threejs/adaptive_quality.md
+  - threejs/mobile_shaders.md
+  - threejs/performance_guide.md
+  - threejs/physics_integration.md
+  - threejs/vehicle_wheel_rig.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Лесной Рейс: Доставка
+  на Лесопилку 3D'', a Физический 3D-симулятор вождения game. Visual style: Cozy Rustic
+  Low-Poly Stylized 3D. Camera perspective: Динамическая преследующая камера сбоку-сзади
+  (Chase Cam 3/4) с плавным демпфированием. Environment: Живописная русская глубинка:
+  деревянные избы с резными наличниками, золотые сосны, березовые рощи, речной брод
+  с деревянным мостом и дымящая лесопилка вдали.. Central Action: The player character
+  (Мастерский шофёр винтажного грузовика, способный проехать по...) is actively engaging
+  enemies in combat, striking with visible weapon trail arcs and dynamic particle
+  sparks at the impact point. An enemy is reeling with physics momentum. Visible in-game
+  HUD overlay: health bar at top-left, wave and enemies remaining at top-center, gold
+  counter at top-right, crowd hype gauge at bottom-center, and touch action controls
+  at bottom corners. Crisp lighting: Мягкий теплый свет ''золотого часа'' (DirectionalLight
+  под низким углом с теплыми оранжевыми тенями) + рассеянный небесный свет HemisphericalLight.,
+  high visual clarity, immersive WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Грузовик плавно управляется с клавиатуры (W/S/Стрелки) и сенсорных педалей на смартфонах
+- Процедурная ухабистая трасса генерируется с кочками, спусками, мостами и корректными
+  коллизиями
+- Физические брёвна/ящики реалистично подпрыгивают в кузове и выпадают при экстремальной
+  езде
+- Спидометр и индикатор целостности груза на HUD точно отражают текущую скорость и
+  оставшийся товар
+- Заезд завершается подсчетом доставленного груза у лесопилки с начислением монет
+- Реализована система улучшений в гараже (двигатель, подвеска, шины, борта)
+- Интегрирован Playgama Bridge (сохранения, лидерборды, показ рекламы)
+- Стабильные 60 FPS на ПК и мобильных устройствах

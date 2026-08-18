@@ -1,0 +1,790 @@
+raw_prompt: Создай изометрическую 3D стелс-игру на Three.js. Игрок управляет курицей
+  в пределах фермы. У патрулирующих псов есть визуализированные конусы зрения (Spotlights
+  / Mesh cones). При входе в конус включается тревога. Игрок может нажимать кнопку
+  'Спрятаться под коробку', чтобы замаскироваться, собирать зерна для открытия ворот
+  и добегать до выхода.
+title: 'Куриный Побег 3D: Стелс на Ферме'
+slug: chicken-stealth-farm-escape-3d
+genre: 3D Стелс-головоломка / Аркадный Экшен
+subgenre: Изометрический стелс / Тактический лабиринт
+renderer: threejs
+renderer_reason: User explicitly specified 'threejs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Web)
+orientation: landscape
+target_audience: Широкая казуальная и мидкорная аудитория 10-35 лет на платформах
+  Yandex Games и WebGL, любящая забавных животных, тактические стелс-задачи и динамичный
+  аркадный геймплей.
+core_loop: Скрытное исследование территории фермы -> Уклонение от патрулей собак и
+  маскировка коробкой -> Сбор золотых зерен -> Открытие запертых ворот -> Побег в
+  зону эвакуации -> Получение наград и разблокировка скинов/уровней.
+hook: Культовая механика маскировки картонной коробкой в стиле Metal Gear Solid, перенесенная
+  в комедийный сеттинг фермы с дерзкой курицей и собаками с неоновыми конусами обзора!
+player_fantasy: Вы — ловкая курица-спецагент под прикрытием, способная перехитрить
+  грозных сторожевых псов, мгновенно раствориться под картонной коробкой прямо перед
+  носом врага и совершить легендарный побег на волю.
+session_model: Быстрые напряженные сессии по 1.5–3 минуты на уровень с нарастающей
+  комплексностью патрулей и мета-прогрессией скинов.
+unique_value_proposition: Уникальный сплав тактического стелса с мгновенно считываемыми
+  правилами (четкие светящиеся конусы обзора) и вирусного комедийного геймплея, адаптированного
+  под управление одним пальцем на смартфонах и клавиатуру на ПК.
+vision: Создать эталонную браузерную 3D стелс-игру с сочным геймфилом, плавной анимацией,
+  процедурными спецэффектами и непрерывной кривой удовольствия от перехитрения умных
+  патрульных псов.
+elevator_pitch: Дерзкая курица планирует побег века! Прокрадитесь мимо патрулирующих
+  фермерских псов, прячьтесь под картонную коробку при малейшей опасности, соберите
+  все золотые зерна, чтобы взломать замок ворот, и вырвитесь на свободу!
+win_conditions: Собрать необходимое количество золотых зерен на уровне, активировать
+  механизм открытия главных ворот и пересечь финишную линию эвакуации.
+lose_conditions: Попадание в освещенный конус зрения собаки в незамаскированном виде
+  или совершение движения в коробке на глазах у патрульного пса, приводящее к поимке.
+progression_summary: 'Последовательное прохождение 30+ уровней с возрастающим числом
+  сторожевых псов, движущимися маршрутами, камерами-фонарями, сужающимися укрытиями;
+  мета-прогрессия: покупка за зерна скинов курицы (Ниндзя, Спецагент, Робо-Цыпа) и
+  скинов коробок (Посылка, Сейф, Арбуз).'
+difficulty_curve: 'Плавное введение: Уровень 1 (1 стационарный пес, обучение коробке),
+  Уровни 2-5 (линейные патрули и базовый сбор), Уровни 6-15 (пересекающиеся конусы
+  зрения, собаки-гончие с высокой скоростью), Уровни 16+ (ловушки-шумелки, узкие лабиринты
+  и ограниченное время на маскировку).'
+scores:
+  fun: 9
+  originality: 8
+  replayability: 8
+  development_cost: 9
+  visual_appeal: 9
+  mobile_fit: 10
+  monetization: 9
+  platform_fit: 10
+  overall_score: 8.9
+  justification: 'Идеальное попадание в веб-формат: мгновенная читаемость визуальных
+    конусов зрения, виральный юмористический сеттинг, простое управление и естественная
+    интеграция рекламы за возрождение и скины.'
+references:
+- name: Metal Gear Solid
+  genre: Тактический стелс-экшен
+  mechanics:
+  - Маскировка картонной коробкой
+  - Индикаторы тревоги (!) над врагами
+  - Секторы видимости патрулей на миникарте
+  lessons: Коробка создает сильный комедийный эффект и дает игроку четкое ощущение
+    контроля над риском.
+  what_to_avoid: Перегруженное сложное управление и длительные катсцены.
+- name: Untitled Goose Game
+  genre: Комедийный стелс-песочница
+  mechanics:
+  - Управление дерзкой птицей
+  - Сбор квестовых предметов на ферме
+  - Манипуляция вниманием людей/животных
+  lessons: Милые животные и яркий визуальный стиль вызывают мгновенный эмоциональный
+    отклик у казуальной аудитории.
+  what_to_avoid: Чрезмерно свободные и неструктурированные цели без четкого аркадного
+    тайминга.
+- name: Hunter Assassin / Sneak Out 3D
+  genre: Гиперказуальный изометрический стелс
+  mechanics:
+  - Яркие полупрозрачные конусы света от врагов
+  - Управление свайпами / виртуальным стиком
+  - Короткие уровни-лабиринты
+  lessons: Визуализация конуса зрения фонариком делает стелс 100% честным и интуитивным.
+  what_to_avoid: Однообразная серая геометрия уровней без интерактивных объектов.
+mechanics:
+- name: Изометрическое перемещение курицы
+  category: movement
+  priority: core
+  description: Плавное 8-направленное перемещение персонажа с физической инерцией,
+    наклоном тела при поворотах и процедурной анимацией семенящих лапок.
+  player_interaction: WASD / Стрелки на клавиатуре или аналоговый экранный джойстик
+    на мобильных устройствах.
+  feedback: Частицы пыли из-под лапок, характерный звук топота и покачивание гребешка
+    курицы.
+  technical_complexity: Low
+  strengths:
+  - Отзывчивый и мгновенный отклик
+  - Идеальная адаптация под сенсорные экраны
+  weaknesses:
+  - Требует точной настройки коллизий с углами заборов
+- name: Маскировка под коробку (Box Hide)
+  category: stealth
+  priority: core
+  description: По нажатию кнопки курица мгновенно прячется под падающую сверху картонную
+    коробку. В неподвижном состоянии под коробкой курица полностью невидима для патрульных
+    псов даже внутри конуса зрения. Если игрок пытается двигаться в коробке на глазах
+    у собаки, пес немедленно распознает обман и атакует.
+  player_interaction: Кнопка 'Пробел' на ПК или крупная плавающая сенсорная кнопка
+    с иконкой коробки справа на экране смартфона.
+  feedback: Звук глухого хлопка картона, частицы облачка пыли, анимация опускания
+    коробки с глазками-щелками.
+  technical_complexity: Medium
+  strengths:
+  - Глубокий тактический выбор 'риск/награда'
+  - Сильный юмористический вау-эффект
+  weaknesses:
+  - Игрок может бесконечно сидеть в коробке, если не ввести таймер бдительности собаки
+- name: Динамический конус зрения собак (Vision Cone System)
+  category: ai
+  priority: core
+  description: Патрулирующие псы проецируют перед собой секторный 3D-меш конуса зрения
+    (Spotlight Mesh) с углом 65 градусов и дальностью 6 метров. Геометрия конуса динамически
+    обрезается препятствиями (стенами, стогами сена) с помощью лучевых проверок Raycast.
+  player_interaction: Визуальное считывание безопасных зон и траекторий движения охранников
+    для планирования тайминга перебежек.
+  feedback: Конус плавно пульсирует полупрозрачным мягким зеленым/желтым цветом в
+    спокойном режиме и вспыхивает агрессивным красным светом при обнаружении.
+  technical_complexity: Medium
+  strengths:
+  - Абсолютная честность правил игры для пользователя
+  - Эффектный кинематографичный вид сцены
+  weaknesses:
+  - Множественные Raycast-расчеты на мобильных CPU требуют оптимизации
+- name: Сбор зерен и механизм открытия ворот
+  category: progression
+  priority: core
+  description: По всей территории уровня разбросаны золотые светящиеся зерна. Сбор
+    определенного процента зерен (или всех) заряжает ключ-механизм и отпирает главные
+    ворота фермы, ведущие к свободе.
+  player_interaction: Перемещение курицы через триггер-зоны зерен.
+  feedback: Приятный звонкий звук подбора монетки, вылетающие золотые звездочки и
+    заполнение круговой шкалы ключа в HUD.
+  technical_complexity: Low
+  strengths:
+  - Четкая промежуточная цель, мотивирующая исследовать опасные зоны
+  weaknesses:
+  - Может превратиться в рутину, если зерна лежат слишком кучно
+- name: ИИ тревоги и погони (Alert & Pursuit AI)
+  category: ai
+  priority: core
+  description: 'Конечный автомат собаки (FSM): Патруль (Patrol) -> Подозрение (Suspicious,
+    желтый конус, поворот к источнику) -> Тревога/Погоня (Alert, красный конус, ускоренный
+    бег к курице) -> Потеря цели (Search, возвращение на маршрут).'
+  player_interaction: Убегание за угол или своевременная остановка под коробкой вне
+    прямого контакта.
+  feedback: Над головой собаки появляется анимированный знак '!' со звуком сирены
+    Metal Gear, пес издает грозный лай.
+  technical_complexity: Medium
+  strengths:
+  - Высокий уровень драматизма и адреналина в момент погони
+  weaknesses:
+  - Необходимо предотвратить застревание собак в углах заборов
+gameplay_systems:
+- name: Система стелс-детекции и конусов обзора (Stealth Detection System)
+  purpose: Обеспечение математически точной проверки видимости игрока патрульными
+    собаками с учетом укрытий и состояния маскировки.
+  input: Координаты курицы, состояние маскировки (isHiding), вектор скорости курицы,
+    координаты и поворот собаки.
+  rules:
+  - 'Если курица находится вне конуса зрения собаки: статус незаметен (Hidden).'
+  - 'Если курица вошла в конус зрения и isHiding == false: запуск накопления шкалы
+    тревоги собаки (Alert Gauge 0 -> 100% за 0.3 сек).'
+  - 'Если курица вошла в конус зрения, isHiding == true и скорость == 0: собака считает
+    коробку обычным объектом окружения и продолжает патруль.'
+  - 'Если курица двигается под коробкой (скорость > 0.1) внутри конуса: немедленный
+    переход в режим Тревоги (собака видит ползущую коробку).'
+  - Препятствия (заборы, амбары, тюки сена) блокируют луч зрения (Raycast occlusion).
+  state:
+  - PATROL_IDLE
+  - PATROL_WALK
+  - SUSPICIOUS_INVESTIGATING
+  - ALARM_PURSUIT
+  - SEARCHING_LOST_TARGET
+  interactions: Взаимодействует с PlayerController, DogAIController, LevelGeometryManager,
+    UIManager (шкала тревоги).
+  feedback: Цветовая смена меша конуса (Зеленый -> Желтый -> Красный), шейдерный глитч
+    на краях экрана при тревоге.
+  edge_cases:
+  - Игрок надел коробку прямо в момент, когда собака уже бежит на него в упор (собака
+    должна обнюхать коробку и успокоиться, если игрок замер вовремя)
+  - Несколько собак заметили игрока одновременно (координация погони без наслоения
+    мешей)
+- name: Система маскировки и камуфляжа (Camouflage System)
+  purpose: Управление механиками скрытности курицы, спавном коробки и физическими
+    ограничениями режима укрытия.
+  input: Нажатие кнопки Hide/Коробка, вектор движения игрока.
+  rules:
+  - При активации коробка опускается на курицу за 0.15 секунды с легким сквош-эффектом.
+  - Скорость перемещения курицы под коробкой снижается на 60% от базовой (забавное
+    медленное ползание).
+  - При повторном нажатии или резком рывке коробка сбрасывается вверх с эффектом разлетающихся
+    щепок/пыли.
+  state:
+  - EXPOSED_NORMAL
+  - BOX_DROPPING
+  - BOX_STATIONARY_STEALTH
+  - BOX_CRAWLING_EXPOSED
+  interactions: Взаимодействует с PhysicsController, StealthDetectionSystem, AudioSystem.
+  feedback: Звук падения коробки 'Тумп!', визуальные прорези для глаз на картонке,
+    светящиеся в темноте.
+  edge_cases:
+  - Активация коробки внутри узкого дверного проема (коробка автоматически масштабируется
+    без клиппинга в стены)
+- name: Система целей уровня и триггеров побега (Level Objectives & Gate System)
+  purpose: Контроль прогресса уровня, подсчет собранных зерен и управление логикой
+    открытия ворот.
+  input: Триггер сбора зерен (GrainTrigger), триггер финишной зоны (ExitZoneTrigger).
+  rules:
+  - Каждый уровень содержит фиксированное количество золотых зерен (например, 10 шт).
+  - Для разблокировки ворот требуется собрать 100% обязательных зерен.
+  - При сборе последнего зерна ворота фермы проигрывают анимацию открытия, а маркер
+    выхода подсвечивается неоновым лучом в небо.
+  - Достижение зоны выхода при открытых воротах завершает уровень победой.
+  state:
+  - GATHERING_SEEDS
+  - GATE_UNLOCKING
+  - GATE_OPEN_ESCAPE_ACTIVE
+  - LEVEL_COMPLETED
+  interactions: Взаимодействует с HUD, AudioSystem, CameraController (кратковременный
+    фокус на открывающиеся ворота).
+  feedback: Камера на 1 секунду показывает распахивающиеся ворота фермы со звоном
+    колокольчика, в HUD зажигается зеленый статус 'ВОРОТА ОТКРЫТЫ! БЕГИ К ВЫХОДУ!'.
+  edge_cases:
+  - Игрок добегает до ворот до сбора зерен (ворота заперты, выводится подсказка 'Соберите
+    еще N зерен')
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: threejs
+  renderer_version: ^0.170.0
+  physics_engine: Rapier3D (@dimforge/rapier3d-compat 0.13.x)
+  state_manager: Zustand + TinyEventEmitter
+  audio_engine: Howler.js (Web Audio API)
+  target_fps: 60
+  max_draw_calls: 45
+  max_triangles_or_sprites: 35000
+  bundle_size_budget_mb: 3.5
+  layers:
+  - name: Core Layer
+    description: Игровой цикл, GameLoop, EventBus, управление сценой и тиками физики
+      Rapier3D
+  - name: Gameplay & AI Layer
+    description: FSM патрулей собак, генератор конусов видимости, контроллер курицы
+      и маскировки
+  - name: Render & VFX Layer
+    description: Three.js Scene Graph, кастомные шейдеры конуса обзора, инстансинг
+      окружения, система партиклов
+  - name: UI & Platform Layer
+    description: DOM/Canvas UI, виртуальные контроллеры, мост Playgama Bridge SDK,
+      сохранение в облако
+  modules:
+  - name: PlayerController
+    responsibility: Обработка ввода, управление физическим телом курицы, анимации
+      шага и скрытности
+  - name: DogAIController
+    responsibility: Навигация по путевым точкам, конечный автомат состояний (Patrol/Pursuit),
+      обработка слуха и взгляда
+  - name: VisionConeMesh
+    responsibility: Процедурная генерация сектора конуса видимости с трассировкой
+      лучей и кастомным шейдером затухания
+  - name: LevelManager
+    responsibility: Загрузка геометрии уровня, спавн зерен, управление коллизиями
+      и триггерами ворот
+  - name: PlaygamaSDKBridge
+    responsibility: Взаимодействие с рекламой (Rewarded/Interstitial), лидербордами
+      и облачными сохранениями
+monetization:
+  strategy_summary: 'Мягкая гибридная модель: ненавязчивые межстраничные баннеры между
+    уровнями и высокоценные Rewarded Video за мгновенный ревайв на месте поимки, удвоение
+    наград и эксклюзивные скины шпионских куриц.'
+  rewarded_placements:
+  - id: revive_checkpoint
+    name: Мгновенное спасение (Revive)
+    benefit: Возрождает курицу на безопасном расстоянии от собаки с временной 3-секундной
+      неуязвимостью и сохраненным прогрессом собранных зерен.
+    cooldown_or_limit: 1 раз за уровень
+    trigger_moment: Экран поимки собакой (Game Over Screen)
+  - id: double_grain_reward
+    name: Удвоение урожая зерен
+    benefit: Удваивает количество собранных на уровне золотых зерен для ускоренной
+      разблокировки скинов.
+    cooldown_or_limit: После каждого успешного уровня
+    trigger_moment: Экран победы (Victory Screen)
+  - id: unlock_ninja_skin
+    name: Скин 'Курица-Ниндзя' в аренду
+    benefit: Предоставляет доступ к уникальному скину с бесшумным бегом на 3 уровня.
+    cooldown_or_limit: Без ограничений
+    trigger_moment: Магазин скинов / Экран выбора уровня
+  interstitial_placements:
+  - trigger_event: Завершение каждого 3-го уровня
+    cooldown_seconds: 90
+    conditions: Показывается только между уровнями, никогда не прерывает активный
+      геймплей или процесс маскировки.
+  in_app_purchases:
+  - sku: no_ads_pack
+    name: Набор 'Шпионский Комфорт' (No Ads)
+    description: Полное отключение обязательной межстраничной рекламы навсегда + 500
+      золотых зерен в подарок.
+    price_tier: Tier 2 (~150 Yans / 149 RUB)
+    reward: Отключение Interstitials + 500 зерен
+  - sku: skin_pack_special_ops
+    name: Премиум-набор скинов 'Спецназ Курятника'
+    description: 3 легендарных скина курицы (Курица 007, Кибер-Цыпленок, Курица в
+      смокинге) и 3 скина коробок (Дипломат, Сейф, Металлическая бочка).
+    price_tier: Tier 3 (~250 Yans / 249 RUB)
+    reward: 6 эксклюзивных скинов
+  fairness_rules:
+  - Все уровни на 100% проходимы без доната и просмотра рекламы.
+  - Реклама за ревайв доступна строго 1 раз за попытку, чтобы сохранить спортивный
+    интерес стелса.
+  - Никаких всплывающих баннеров во время движения под конусами зрения.
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - crazygames
+  - gamedistribution
+  - mobile_web
+  initialization_flow:
+  - '1. bridge.initialize({ platform: ''auto'' })'
+  - 2. bridge.storage.get(['unlocked_levels', 'gold_grains', 'equipped_skin', 'sound_settings'])
+  - 3. bridge.advertisement.checkBannerSupport()
+  - 4. bridge.game.ready() после загрузки 3D-сцены и текстур
+  cloud_save_keys:
+  - player_progress_level
+  - total_gold_grains
+  - unlocked_skins_array
+  - current_equipped_skin
+  - sound_volume_settings
+  leaderboards:
+  - leaderboard_fastest_escape
+  - leaderboard_total_grains
+  ads_integration:
+    rewarded_method: bridge.advertisement.showRewardedVideo()
+    interstitial_method: bridge.advertisement.showInterstitial()
+    banner_method: bridge.advertisement.showBanner()
+    reward_callback_handling: Обязательная пауза физики Three.js/Rapier и приглушение
+      звука Howler во время показа рекламы.
+  lifecycle_hooks:
+  - bridge.on('visibility_change', (state) => toggleGamePause(state))
+  - bridge.on('audio_focus_change', (hasAudio) => toggleAudioMute(!hasAudio))
+art:
+  style_name: Stylized Low-Poly Toon Farm
+  camera_perspective: Изометрическая проекция (Isometric 3D Camera, Pitch 50°, Yaw
+    45°)
+  camera_fov: 45
+  camera_pitch_angle: 50
+  environment_theme: Яркая, солнечная мультяшная ферма с деревянными заборчиками,
+    красными амбарами, тюками соломы, грядками моркови и мощеными дорожками.
+  character_proportions: 'Обаятельные чиби-пропорции: пухленькая белая курица с качающимся
+    алым гребешком и массивные забавные сторожевые бульдоги в ошейниках с шипами.'
+  lighting_setup: Теплый направленный свет солнца (DirectionalLight с мягкими тенями),
+    мягкий небесный AmbientLight и яркие светящиеся полупрозрачные конусы прожекторов
+    зрения (Spotlight Mesh) с градиентным затуханием.
+  color_palette:
+    grass_green: '#7BC644'
+    barn_red: '#E04A3F'
+    wood_brown: '#8D5B36'
+    hay_yellow: '#F4D03F'
+    chicken_white: '#FFFFFF'
+    chicken_beak: '#FFA726'
+    grain_gold: '#FFD700'
+    cone_safe_green: '#2ECC7188'
+    cone_alert_red: '#E74C3CCC'
+    box_cardboard: '#D4A373'
+  vfx_list:
+  - Полупрозрачный объемный конус зрения с анимированной сеткой лучшей детекции
+  - Восклицательный знак '!' над головой собаки с пружинящей анимацией масштабирования
+  - Облачко клубящейся пыли при падении картонной коробки
+  - Взрыв золотых искорок и звездочек при подборе зерна
+  - Разлетающиеся белые перышки при быстром беге курицы
+  - Праздничный салют конфетти при успешном пересечении ворот выхода
+  ui_theme: Теплый мультяшный интерфейс с текстурами деревянных дощечек, сочными круглыми
+    кнопками с жирными тенями и крупными пиктограммами.
+ui_ux:
+  hud_elements:
+  - Счетчик собранных зерен (иконка колоска + '7 / 10')
+  - Круговой индикатор готовности ворот побега
+  - Кнопка 'Маскировка (Коробка)' в правом нижнем углу с индикатором статуса
+  - Плавающий виртуальный джойстик в левой части экрана
+  - Кнопка паузы / настроек в верхнем углу
+  - Мини-индикатор тревоги фермы (Safe / Suspicious / Alarm!)
+  screens:
+  - id: main_menu
+    title: Главное Меню
+    description: 3D-диорама фермы с бродящей курицей, кнопки 'В БОЙ!', 'Гардероб Скинов',
+      'Настройки' и таблица лидеров.
+  - id: gameplay_hud
+    title: Игровой HUD
+    description: 'Минималистичный интерфейс, не закрывающий обзор изометрии: джойстик,
+      счетчик зерен, большая кнопка коробки.'
+  - id: victory_modal
+    title: Побег Удался!
+    description: Окно победы с 3 звездами за скорость, количеством собранных зерен,
+      кнопкой 'Удвоить награду (Видео)' и переходом на след. уровень.
+  - id: game_over_modal
+    title: Поймана с поличным!
+    description: Комичная анимация лающей собаки, кнопка 'Спастись под коробкой (Revive
+      Ad)' и кнопка 'Переиграть'.
+  - id: skin_shop
+    title: Куриный Гардероб
+    description: Выбор скинов курицы и коробок с предпросмотром 3D-моделей и покупкой
+      за зерна.
+  mobile_controls_layout: 'Левая половина экрана: динамический плавающий виртуальный
+    джойстик для перемещения; Правая половина экрана: увеличенная круглая кнопка ''СПРЯТАТЬСЯ
+    В КОРОБКУ'' диаметром 84px для мгновенного нажатия большим пальцем.'
+  keyboard_controls:
+    W / Стрелка Вверх: Движение вперед (Север)
+    S / Стрелка Вниз: Движение назад (Юг)
+    A / Стрелка Влево: Движение влево (Запад)
+    D / Стрелка Вправо: Движение вправо (Восток)
+    Пробел (Space) / E: Спрятаться / Снять коробку
+    Escape / P: Пауза
+  touch_controls:
+    Касание и ведение слева: Аналоговый джойстик управления шагом курицы
+    Тап по кнопке коробки: Мгновенное надевание/снятие коробки
+    Двойной тап по свободной зоне: Быстрый кувырок / маскировка
+  wireframes_ascii: '+--------------------------------------------------------+
+
+    | [Пауза]   (Зерна: 7/10) [===Ключ Ворот 70%===]   (Ур. 5) |
+
+    |                                                        |
+
+    |         [Забор]        [Амбар]        [Ворота Выхода]  |
+
+    |                                                        |
+
+    |                     (Собака Патруль)                   |
+
+    |                       / \                              |
+
+    |                      /   \ (Красный Конус Зрения)      |
+
+    |                     /     \                            |
+
+    |             [Курица в Коробке]                         |
+
+    |                                                        |
+
+    |   (O)                                  +-------------+ |
+
+    | [Джойстик]                             |  [КОРОБКА]  | |
+
+    |   (L)                                  +-------------+ |
+
+    +--------------------------------------------------------+'
+mobile:
+  orientation: landscape
+  touch_implementation: Кастомный Canvas-based виртуальный тач-джойстик с поддержкой
+    Multi-touch, предотвращением жестов масштабирования и виброоткликом (Navigator.vibrate)
+    при надевании коробки и тревоге.
+  safe_area_handling: Адаптивные отступы env(safe-area-inset-*) для вырезов экранов
+    iPhone/Android, фиксация соотношения сторон изометрической камеры.
+  performance_throttling:
+  - Динамическое масштабирование разрешения рендера (DPR 1.0 на слабых GPU, 1.5 на
+    мощных)
+  - Ограничение числа лучей Raycast для конуса зрения до 16 лучей на мобильных профилях
+  - Отключение теней реального времени в пользу предзапеченных мягких текстур под
+    персонажами (Blob Shadows)
+audio:
+  music_tracks:
+  - id: bgm_stealth_farm
+    name: Деревенский Шпион (Stealth Banjo & Bass)
+    mood: Комедийный, напряженный, шпионский кантри-ритм на банджо и контрабасе
+  - id: bgm_pursuit_alarm
+    name: Куриная Паника (Alarm Chase)
+    mood: Быстрый динамичный экшен-бит с сиренами и лаем
+  sfx_list:
+  - sfx_chicken_step (перебор лапок по траве)
+  - sfx_chicken_cluck (кудахтанье при удивлении)
+  - sfx_box_drop (глухой хлопок картонной коробки об землю)
+  - sfx_grain_pickup (хрустальный звон золотого зерна)
+  - sfx_dog_bark (грозный лай сторожевого пса)
+  - sfx_metal_gear_alert (культовый резкий сигнал обнаружения '!')
+  - sfx_gate_open (скрип открывающихся тяжелых деревянных ворот)
+  - sfx_victory_fanfare (веселая победная фанфара)
+qa:
+  functional_tests:
+  - Проверка 100% невидимости неподвижной курицы под коробкой внутри конуса зрения
+    собаки
+  - Проверка срабатывания тревоги, если курица двигается в коробке на глазах у собаки
+  - Корректное блокирование конуса зрения сплошными препятствиями (стены амбара, тюки
+    сена)
+  - Открытие ворот выхода строго после сбора 100% необходимых зерен
+  - Работа кнопки Revive с корректным респавном курицы и очисткой статуса тревоги
+    у всех собак
+  performance_benchmarks:
+  - Стабильные 60 FPS на iPhone 11 / Redmi Note 9 и выше
+  - Количество Draw Calls на сцене не превышает 45
+  - Потребление оперативной памяти WebGL Heap менее 120 МБ
+  cross_browser_matrix:
+  - Chrome Desktop / Mobile (Windows, Android)
+  - Safari Mobile (iOS 15+)
+  - Yandex Browser (Desktop & Android)
+  - VK App WebView / In-App Browser
+  common_bug_checklist:
+  - Застревание собак на углах навигационной сетки при преследовании
+  - Просачивание конуса зрения сквозь тонкие стыки заборов
+  - Залипание джойстика при выходе пальца за пределы экрана
+  - Рассинхронизация звука при сворачивании вкладки браузера
+roadmap:
+- phase_number: 1
+  title: Прототип ядра (Core Loop & Box Mechanic)
+  duration_days: 3
+  tasks:
+  - Настройка Three.js сцены с изометрической камерой и физикой Rapier3D
+  - Создание контроллера перемещения курицы (клавиатура + виртуальный джойстик)
+  - Реализация механики маскировки под коробку (Box Hide) и переключения состояний
+  milestone_deliverable: Игрок может бегать по полигону и прятаться под коробку по
+    кнопке.
+- phase_number: 2
+  title: ИИ собак и Конусы Зрения (Vision Cones & Stealth AI)
+  duration_days: 4
+  tasks:
+  - Создание процедурного меша конуса видимости со Spotlight-шейдером
+  - Трассировка лучей Raycast для отсечения препятствий конусом
+  - 'FSM логика собаки: патруль по точкам, реакция на незамаскированную курицу, погоня
+    и поимка'
+  milestone_deliverable: Полноценный стелс-геймплей с уклонением от патрулей собак.
+- phase_number: 3
+  title: Контент уровней, Ворота и Сбор зерен
+  duration_days: 4
+  tasks:
+  - Система сбора золотых зерен со счетчиком в HUD
+  - Механика открытия ворот фермы и финишной зоны эвакуации
+  - Дизайн и левел-дизайн 15 стартовых уровней с нарастающей сложностью
+  milestone_deliverable: Завершенный цикл прохождения уровней от старта до выхода.
+- phase_number: 4
+  title: Playgama SDK, Монетизация, Скины и Полировка
+  duration_days: 3
+  tasks:
+  - Интеграция @playgama/bridge (Rewarded Ads за ревайв, Interstitials, сохранение
+    прогресса)
+  - Магазин скинов курицы и кастомных коробок
+  - Добавление сочных звуковых эффектов Howler.js, частиц VFX и полировка сочности
+    управления
+  milestone_deliverable: Релизный билд, готовый к публикации на Yandex Games и Playgama.
+risks:
+- risk: Падение производительности на слабых смартфонах из-за множественных Raycast-проверок
+    конусов зрения.
+  category: technical
+  severity: Medium
+  mitigation: Использовать 2D Grid / Секторную математику дистанции и углов в плоскости
+    XZ для первичного отсечения и ограничивать частоту обновления Raycast до 20 раз
+    в секунду.
+- risk: Игрок может непрерывно сидеть под коробкой и ждать бесконечно, замедляя темп
+    игры.
+  category: gameplay
+  severity: Low
+  mitigation: Ввести 3-звездный таймер быстрого прохождения уровня и собак-нюхачей,
+    которые начинают с подозрением обнюхивать коробку, если она долго стоит на их
+    пути.
+skills:
+- skill_id: threejs-stealth-vision-cone
+  name: Генератор Процедурных Конусов Зрения Three.js
+  filename: skills/threejs-stealth-vision-cone.md
+  purpose: Обеспечение высокопроизводительного рендеринга динамических секторов видимости
+    с мягким шейдером затухания и raycast-окклюзией.
+  when_to_use: При создании стелс-игр с охранниками, прожекторами и камерами наблюдения
+    на Three.js.
+  rules:
+  - Использовать единую переиспользуемую BufferGeometry для конуса с динамическим
+    обновлением атрибута position.
+  - Применять MeshBasicMaterial с additive blending и альфа-градиентом для экономии
+    GPU.
+  - Ограничивать количество лучей трассировки в зависимости от профиля мобильного
+    устройства.
+  architecture: DogVisionSystem -> RaycastOcclusionManager -> DynamicConeGeometryBuffer
+    -> ToonShaderMaterial
+  implementation_guidance: Генерировать веер треугольников из центральной точки глаз
+    собаки к точкам пересечения лучей с препятствиями.
+  common_mistakes:
+  - Пересоздание new THREE.BufferGeometry() каждый кадр вместо мутации существующих
+    буферов вершин
+  - Игнорирование высоты препятствий при проверке видимости
+  checklist:
+  - Буферы вершин переиспользуются через .needsUpdate = true
+  - Материал конуса корректно меняет цвет с зеленого на красный при тревоге
+  - Конус не просвечивает сквозь сплошные стены амбаров
+  knowledge_refs:
+  - Three.js BufferGeometry documentation
+  - 2D Visibility Polygon Algorithms
+- skill_id: game_skill
+  name: 'Куриный Побег 3D: Стелс на Ферме Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for Куриный
+    Побег 3D: Стелс на Ферме.'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: THREEJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for THREEJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - threejs/adaptive_quality.md
+  - threejs/mobile_shaders.md
+  - threejs/performance_guide.md
+  - threejs/physics_integration.md
+  - threejs/vehicle_wheel_rig.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Куриный Побег 3D: Стелс
+  на Ферме'', a 3D Стелс-головоломка / Аркадный Экшен game. Visual style: Stylized
+  Low-Poly Toon Farm. Camera perspective: Изометрическая проекция (Isometric 3D Camera,
+  Pitch 50°, Yaw 45°). Environment: Яркая, солнечная мультяшная ферма с деревянными
+  заборчиками, красными амбарами, тюками соломы, грядками моркови и мощеными дорожками..
+  Central Action: The player character (Вы — ловкая курица-спецагент под прикрытием,
+  способная перех...) is actively engaging enemies in combat, striking with visible
+  weapon trail arcs and dynamic particle sparks at the impact point. An enemy is reeling
+  with physics momentum. Visible in-game HUD overlay: health bar at top-left, wave
+  and enemies remaining at top-center, gold counter at top-right, crowd hype gauge
+  at bottom-center, and touch action controls at bottom corners. Crisp lighting: Теплый
+  направленный свет солнца (DirectionalLight с мягкими тенями), мягкий небесный AmbientLight
+  и яркие светящиеся полупрозрачные конусы прожекторов зрения (Spotlight Mesh) с градиентным
+  затуханием., high visual clarity, immersive WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Курица плавно управляется с клавиатуры (WASD) и сенсорного джойстика с плавной физикой.
+- Кнопка 'Коробка' мгновенно маскирует курицу; неподвижная курица в коробке не триггерит
+  тревогу патрульных собак.
+- Конусы зрения собак визуализированы красивыми градиентными полупрозрачными мешами
+  и корректно блокируются заборами.
+- При входе незамаскированной курицы в конус включается тревога (!), собака с лаем
+  бросается в погоню.
+- Все золотые зерна собираются, открывая запертые ворота уровня со спецэффектом.
+- 'Интегрирован Playgama Bridge SDK: работают Rewarded Ads за ревайв, Interstitials
+  между уровнями и сохранение прогресса.'
+- Стабильные 60 FPS в мобильных и десктопных браузерах при весе бандла менее 3.5 МБ.
