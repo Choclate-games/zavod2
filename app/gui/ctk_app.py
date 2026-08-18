@@ -64,6 +64,18 @@ AGENT_LABELS: Dict[str, str] = {
 AGENT_KEYS = tuple(AGENT_LABELS)
 
 
+def _plural_runs(count: int) -> str:
+    """Русское склонение слова «запуск» для счётчиков квоты."""
+    if 11 <= count % 100 <= 14:
+        return "запусков"
+    last = count % 10
+    if last == 1:
+        return "запуск"
+    if 2 <= last <= 4:
+        return "запуска"
+    return "запусков"
+
+
 def _agent_key_from_label(label: str) -> str:
     """Ключ агента по подписи выпадающего списка ('agy', если не распознан)."""
     value = (label or "").lower()
@@ -3079,7 +3091,7 @@ class GamePromptFactoryGUI(ctk.CTk):
     # TAB: КВОТА AGY (отдельный экран, всё целиком и с автообновлением)
     # =================================================================
     def _build_quota_tab(self):
-        self.tab_quota_frame.grid_rowconfigure(1, weight=1)
+        self.tab_quota_frame.grid_rowconfigure(0, weight=1)
         self.tab_quota_frame.grid_columnconfigure(0, weight=1)
 
         head = ctk.CTkFrame(self.tab_quota_frame, fg_color="#121a2b", corner_radius=12)
@@ -3187,27 +3199,12 @@ class GamePromptFactoryGUI(ctk.CTk):
 
             self.agent_quota_widgets[agent_key] = {"accent": accent, "model": lbl_model, "rows": rows}
 
-        # ── История запросов ──
-        hist_box = ctk.CTkFrame(self.tab_quota_frame, fg_color="#121a2b", corner_radius=12)
-        hist_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 5))
-        hist_box.grid_rowconfigure(1, weight=1)
-        hist_box.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            hist_box, text="🧾 Последние запросы ко всем агентам",
-            font=ctk.CTkFont(size=13, weight="bold"), text_color="#e2e8f0"
-        ).grid(row=0, column=0, sticky="w", padx=15, pady=(12, 6))
-
-        self.txt_quota_history = ctk.CTkTextbox(
-            hist_box, font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="#070a10", text_color="#a5f3fc"
-        )
-        self.txt_quota_history.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 8))
-
+        # Подпись под карточками: откуда берутся цифры и как задать лимиты вручную.
         self.lbl_quota_meta = ctk.CTkLabel(
-            hist_box, text="", font=ctk.CTkFont(size=10), text_color="#475569"
+            self.tab_quota_frame, text="", font=ctk.CTkFont(size=10),
+            text_color="#475569", justify="left", wraplength=1000
         )
-        self.lbl_quota_meta.grid(row=2, column=0, sticky="w", padx=15, pady=(0, 10))
+        self.lbl_quota_meta.grid(row=1, column=0, sticky="nw", padx=15, pady=(0, 10))
 
         self._refresh_agy_quota_display()
         self._schedule_quota_autorefresh()
@@ -3292,13 +3289,13 @@ class GamePromptFactoryGUI(ctk.CTk):
         if getattr(self, "lbl_sidebar_quota", None):
             if live:
                 parts = [
-                    f"{'Gemini' if key == 'gemini' else 'Claude'} {grp['percent']:.0f}%"
+                    f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {grp['percent']:.0f}%"
                     for key, grp in live["groups"].items()
                 ]
                 worst_left = min((g["percent"] for g in live["groups"].values()), default=100.0)
             else:
                 parts = [
-                    f"{'Gemini' if key == 'gemini' else 'Claude'} {families.get(key, {}).get('pct_left_5h', 100):.0f}%"
+                    f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {families.get(key, {}).get('pct_left_5h', 100):.0f}%"
                     for key in AGYQuotaTracker.FAMILIES
                 ]
                 worst_left = min(
@@ -3309,9 +3306,20 @@ class GamePromptFactoryGUI(ctk.CTk):
             # только для AGY, даже когда работа идёт через Claude/Codex/Kimi.
             active_agent = self._selected_agent_key()
             if active_agent in AGENT_CLASSES:
+                agent_live = self.agent_usage_tracker.live_status(active_agent)
                 agent_data = self.agent_usage_tracker.status(active_agent)
-                parts.append(f"{active_agent} {agent_data['pct_left_5h']:.0f}%")
-                worst_left = min(worst_left, agent_data["pct_left_5h"])
+                if agent_live and agent_live.get("windows"):
+                    left = min(w["pct_left"] for w in agent_live["windows"])
+                elif agent_data["pct_left_5h"] is not None:
+                    left = agent_data["pct_left_5h"]
+                else:
+                    left = None
+                if left is None:
+                    # Остаток неизвестен — показываем хотя бы объём работы.
+                    parts.append(f"{active_agent}: {agent_data['used_5h']} зап./5ч")
+                else:
+                    parts.append(f"{active_agent} {left:.0f}%")
+                    worst_left = min(worst_left, left)
             self.lbl_sidebar_quota.configure(
                 text="Остаток: " + "  ·  ".join(parts),
                 text_color="#ff4d79" if worst_left <= 10 else "#94a3b8"
@@ -3368,60 +3376,105 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         # ── Карточки Claude Code / Codex / Kimi ──
         for agent_key, widgets in getattr(self, "agent_quota_widgets", {}).items():
-            rows = widgets["rows"]
-            for widget in rows.winfo_children():
-                widget.destroy()
-
-            data = self.agent_usage_tracker.status(agent_key)
-            available = self._agent_provider(agent_key).is_available()
-            widgets["model"].configure(
-                text=(f"последняя модель: {data['last_model'] or 'по умолчанию'} · "
-                      f"последний запуск: {data['last_used_at']}" if data["total"]
-                      else ("CLI установлен, запусков из фабрики ещё не было" if available
-                            else "CLI не найден — укажите путь в настройках"))
-            )
-            self._render_quota_row(
-                rows, "Weekly Limit Remaining", data["pct_left_weekly"],
-                f"{data['remaining_weekly']} из {data['limit_weekly']} запросов · "
-                f"сброс через {data['reset_weekly_str']}",
-            )
-            self._render_quota_row(
-                rows, "Five Hour Limit Remaining", data["pct_left_5h"],
-                f"{data['remaining_5h']} из {data['limit_5h']} запросов · "
-                f"сброс через {data['reset_5h_str']}",
-            )
-
-        # ── Общая лента запросов: AGY и остальные агенты вперемешку по времени ──
-        events: List[tuple[float, str]] = []
-        for item in status.get("recent", []):
-            model = item.get("model") or "default"
-            family = item.get("family") or AGYQuotaTracker.model_family(model)
-            events.append((
-                item.get("timestamp", 0),
-                f"{str(item.get('datetime', ''))[:19].replace('T', ' ')}   "
-                f"[agy/{family:<6}] {model:<28} промпт: {item.get('prompt_len', 0)} симв."
-            ))
-        for item in self.agent_usage_tracker.recent(limit=15):
-            model = item.get("model") or "default"
-            events.append((
-                item.get("timestamp", 0),
-                f"{str(item.get('datetime', ''))[:19].replace('T', ' ')}   "
-                f"[{str(item.get('agent', '?')):<11}] {model:<28} промпт: {item.get('prompt_len', 0)} симв."
-            ))
-        lines = [text for _, text in sorted(events, key=lambda e: e[0], reverse=True)[:25]]
-        self.txt_quota_history.configure(state="normal")
-        self.txt_quota_history.delete("1.0", "end")
-        self.txt_quota_history.insert("1.0", "\n".join(lines) or "Запросов пока не было.")
+            self._render_agent_quota_card(agent_key, widgets)
 
         self.lbl_quota_updated.configure(
-            text=f"обновлено {datetime.now().strftime('%H:%M:%S')} · последний запрос: {status['last_used_at']}"
+            text=f"обновлено {datetime.now().strftime('%H:%M:%S')} · последний запрос AGY: {status['last_used_at']}"
         )
         self.lbl_quota_meta.configure(
-            text=(f"Всего записей: AGY {status['total_recorded']} · "
-                  f"остальные агенты {sum(self.agent_usage_tracker.status(k)['total'] for k in AGENT_CLASSES)} · "
-                  f"лимиты счётчика задаются AGY_LIMIT_5H_CLAUDE / CLAUDE_LIMIT_5H / CODEX_LIMIT_WEEKLY и т. п. "
-                  f"· файлы истории: {status['storage_path']}, {self.agent_usage_tracker.storage_path}")
+            text=("Claude Code — реальные проценты из кэша его команды /usage (~/.claude.json), "
+                  "Codex — из файлов сессий ~/.codex/sessions. Обновляются, когда работает сам CLI.\n"
+                  "Kimi остаток нигде не сохраняет — /usage у него есть только внутри TUI, поэтому "
+                  "показан факт расхода фабрикой; кнопка под карточкой откроет терминал Kimi.\n"
+                  "Чтобы вместо счётчика запусков появились полосы, задайте лимит своего тарифа "
+                  "в .env: KIMI_LIMIT_5H, KIMI_LIMIT_WEEKLY.")
         )
+
+    def _render_agent_quota_card(self, agent_key: str, widgets: Dict[str, Any]):
+        """
+        Карточка терминального агента.
+
+        Если CLI отдаёт настоящий остаток (Codex) — рисуем его полосами.
+        Если нет, показываем только факт: запуски и токены, потраченные фабрикой,
+        и полосы лишь при вручную заданном лимите.
+        """
+        rows = widgets["rows"]
+        for widget in rows.winfo_children():
+            widget.destroy()
+
+        data = self.agent_usage_tracker.status(agent_key)
+        live = self.agent_usage_tracker.live_status(agent_key)
+
+        if live and live.get("windows"):
+            plan = f" · тариф {live['plan']}" if live.get("plan") else ""
+            widgets["model"].configure(
+                text=f"реальные данные CLI{plan} · обновлены {live.get('updated_at', '—')}"
+            )
+            for window in live["windows"]:
+                self._render_quota_row(
+                    rows,
+                    f"{window['label'].capitalize()} — остаток",
+                    window["pct_left"],
+                    f"израсходовано {window['used_percent']:.1f}% · сброс {window['reset_at']}",
+                )
+            return
+
+        available = self._agent_provider(agent_key).is_available()
+        if data["total"]:
+            widgets["model"].configure(
+                text=f"последняя модель: {data['last_model'] or 'по умолчанию'} · "
+                     f"последний запуск: {data['last_used_at']}"
+            )
+        else:
+            widgets["model"].configure(
+                text=("CLI установлен, запусков из фабрики ещё не было" if available
+                      else "CLI не найден — укажите путь в настройках")
+            )
+
+        for title, used, limit, pct_left, reset, tokens in (
+            ("Неделя", data["used_weekly"], data["limit_weekly"], data["pct_left_weekly"],
+             data["reset_weekly_str"], data["tokens_weekly"]),
+            ("5 часов", data["used_5h"], data["limit_5h"], data["pct_left_5h"],
+             data["reset_5h_str"], data["tokens_5h"]),
+        ):
+            token_note = f" · {tokens} токенов" if tokens else ""
+            if pct_left is None:
+                self._render_quota_note(
+                    rows, f"{title} — остаток неизвестен",
+                    f"{used} {_plural_runs(used)} из фабрики{token_note} · окно сбросится через {reset}",
+                )
+            else:
+                left = max(0, limit - used)
+                self._render_quota_row(
+                    rows, f"{title} — остаток", pct_left,
+                    f"{left} из {limit} {_plural_runs(limit)}{token_note} · сброс через {reset}",
+                )
+
+        # У Kimi остаток живёт только в его собственном TUI — даём туда короткий путь.
+        ctk.CTkButton(
+            rows,
+            text="▶ Открыть терминал и выполнить /usage",
+            height=26,
+            fg_color="#1e293b", hover_color="#334155",
+            font=ctk.CTkFont(size=10),
+            command=lambda k=agent_key: self._open_agent_usage_terminal(k)
+        ).pack(fill="x", pady=(10, 0))
+
+    def _open_agent_usage_terminal(self, agent_key: str):
+        """Открывает интерактивный CLI агента: там доступна его команда /usage."""
+        try:
+            self._agent_provider(agent_key).launch_interactive_terminal(bare=False)
+        except Exception as exc:
+            self.lbl_quota_meta.configure(text=f"Не удалось открыть терминал {agent_key}: {exc}")
+
+    def _render_quota_note(self, parent, title: str, note: str):
+        """Строка без полосы: когда настоящего лимита у CLI не узнать."""
+        ctk.CTkLabel(
+            parent, text=title, font=ctk.CTkFont(size=11, weight="bold"), text_color="#cbd5e1"
+        ).pack(anchor="w", pady=(8, 2))
+        ctk.CTkLabel(
+            parent, text=note, font=ctk.CTkFont(size=10), text_color="#64748b", justify="left"
+        ).pack(anchor="w")
 
     def _set_agy_preset(self, text: str):
         self.txt_agy_prompt.delete("1.0", "end")

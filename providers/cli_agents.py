@@ -295,9 +295,10 @@ class CodingCLIAgent(AIProvider):
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ({cli}): {exc}") from exc
 
-        self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
+        usage_key = self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
 
         collected: List[str] = []
+        spent_tokens = 0
         seen_conversation = False
         reported_error = False
         stopped = False
@@ -334,8 +335,11 @@ class CodingCLIAgent(AIProvider):
                     continue
                 if event.get("kind") == "error":
                     reported_error = True
+                elif event.get("kind") == "result":
+                    spent_tokens += int(event.get("tokens") or 0)
                 emit(event)
         finally:
+            self.usage_tracker.add_tokens(usage_key, spent_tokens)
             if proc.stdout and not proc.stdout.closed:
                 try:
                     proc.stdout.close()
