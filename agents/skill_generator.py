@@ -150,4 +150,58 @@ class SkillGeneratorAgent:
                 knowledge_refs=knowledge.CORE_TOPICS
             ))
 
+        if "controls_skill" not in skill_ids:
+            # Тач-управление раньше жило одной строкой в общем UX-разделе, и агент
+            # регулярно ограничивался джойстиком в углу. Отдельный скилл с
+            # встроенной базой знаний закрывает этот пробел.
+            log_agent("SkillGenerator", "Injecting core skill: controls_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="controls_skill",
+                name="Mobile Touch & Desktop Controls",
+                filename="CONTROLS_SKILL.md",
+                purpose=(
+                    "Задаёт обязательный контракт управления: раскладку под жанр, "
+                    "реализацию на Pointer Events, отмену браузерных жестов и правила видимости."
+                ),
+                when_to_use=(
+                    "Use when implementing any player input: virtual joystick, action buttons, "
+                    "driving pedals, camera gestures, or keyboard bindings."
+                ),
+                rules=[
+                    "Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.",
+                    "Движение и основное действие обязаны работать одновременно (мультитач).",
+                    "В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.",
+                    "touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.",
+                    "Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64 px.",
+                    "Слой управления виден только в игровом процессе и сбрасывается при скрытии.",
+                    "Сброс всех осей и кнопок на blur и visibilitychange.",
+                    "Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.",
+                ],
+                architecture=(
+                    "Отдельный модуль TouchControls создаёт собственный DOM-слой поверх UI, "
+                    "пишет в виртуальные оси InputManager и ничего не знает об игровой логике. "
+                    "InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления."
+                ),
+                implementation_guidance=(
+                    "UIManager владеет экземпляром TouchControls и переключает его видимость "
+                    "в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется "
+                    "под пальцем, зона захвата — половина экрана, мёртвая зона 8%."
+                ),
+                common_mistakes=[
+                    "Один стик на движение и газ — машина теряет ход в каждом повороте.",
+                    "touchstart/touchend без pointerId: второй палец сбрасывает первый.",
+                    "Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.",
+                    "Забытый passive:false — страница продолжает скроллиться под игрой.",
+                    "Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.",
+                ],
+                checklist=[
+                    "Газ/атака и направление работают одновременно, проверено тремя пальцами.",
+                    "Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.",
+                    "Долгое нажатие не открывает контекстное меню.",
+                    "Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.",
+                    "?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.",
+                ],
+                knowledge_refs=["ux/touch_controls.md"]
+            ))
+
         log_agent("SkillGenerator", f"Compiled {len(concept.skills)} reusable skill documents.")

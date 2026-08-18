@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, Callable
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
+from agents.prompt_compiler import PromptCompilerAgent
 
 class DocumentGenerator:
     """Generates the full suite of specialized Game Development Documents in Markdown."""
@@ -62,8 +63,11 @@ class DocumentGenerator:
 
 ## 📁 Package Directory Map
 ```text
-output/{c.slug}/
+workspace/{c.slug}/
+├── AGENTS.md                        # Инструкция для ИИ-агента (пишет фабрика)
 ├── AI_DEVELOPER_PROMPT.md           # Definitive master prompt for coding agent
+├── DEVLOG.md                        # Журнал разработки, ведёт кодовый агент
+├── CHANGELOG.md                     # Changelog проекта, ведёт кодовый агент
 ├── GAME_DATA.yaml                   # Machine-readable game metadata
 ├── GAME_DESIGN_DOCUMENT.md          # Vision, player fantasy, game design
 ├── GAMEPLAY_SPECIFICATION.md        # Combat, movement, spawning formulas
@@ -77,7 +81,8 @@ output/{c.slug}/
     ├── GAME_SKILL.md                # Game domain instructions
     ├── GAMEPLAY_SKILL.md            # Physics & combat coding rules
     ├── RENDERER_SKILL.md            # WebGL / Three.js performance guide
-    └── PLAYGAMA_SKILL.md            # Bridge SDK implementation guide
+    ├── PLAYGAMA_SKILL.md            # Bridge SDK implementation guide
+    └── CONTROLS_SKILL.md            # Тач- и десктоп-управление
 ```
 
 ---
@@ -86,7 +91,9 @@ output/{c.slug}/
 1. Open `AI_DEVELOPER_PROMPT.md`.
 2. Feed the prompt into your AI coding assistant (Cursor / Antigravity / Claude).
 3. Follow the 5-phase roadmap in `DEVELOPMENT_ROADMAP.md`.
-4. Verify every deliverable against the **Definition of Done**.
+4. Run `npm install && npm run dev` and check the game in the factory's built-in browser.
+5. Keep `DEVLOG.md` and `CHANGELOG.md` updated after every work session.
+6. Verify every deliverable against the **Definition of Done**.
 """
 
     def _gen_gdd(self, ctx: GenerationContext) -> str:
@@ -453,22 +460,55 @@ Stage (PIXI.Container)
     def _gen_mobile_controls(self, ctx: GenerationContext) -> str:
         c = ctx.concept
         m = c.mobile
+        # Раскладка берётся из того же профиля, что и мастер-промпт, чтобы
+        # документ и промпт не расходились между собой.
+        profile = PromptCompilerAgent._control_profile(ctx)
+        layout = PromptCompilerAgent._TOUCH_LAYOUTS[profile]
+        desktop = PromptCompilerAgent._DESKTOP_LAYOUTS.get(
+            profile, PromptCompilerAgent._DESKTOP_LAYOUTS["default"]
+        )
         return f"""# Mobile Controls & Ergonomics: {c.title}
+
+Профиль управления: **{profile}** (определён по жанру «{c.genre}»).
 
 ## 1. Orientation & Layout
 - **Target Orientation**: **{m.orientation.upper()}**
 - **Safe Area Insets**: `{m.safe_area_handling}`
+- Отступы слоя управления: `calc(18px + env(safe-area-inset-bottom))` и аналогично
+  для left/right.
 
-## 2. Touch Controls Implementation
-- **Left Thumb Area**: Dynamic floating virtual joystick activating wherever the user touches on the left 50% of the screen.
-- **Right Thumb Cluster**:
-  - **Large Primary Action Button**: Center of cluster for instant thumb access.
-  - **Secondary Action Button**: Located slightly lower-left for reactions.
-  - **Dash / Evasion Button**: Located upper-left for quick evasion.
+## 2. Раскладка
+{layout}
 
-## 3. Mobile Performance Throttling
+## 3. Реализация (обязательный контракт)
+- Только **Pointer Events** (`pointerdown/move/up/cancel`) + `setPointerCapture`;
+  на каждой кнопке — набор удерживающих её `pointerId`, иначе второй палец
+  сбрасывает первый.
+- Плавающий стик: зона захвата — половина экрана, база появляется под пальцем,
+  мёртвая зона 8%.
+- Отмена браузерных жестов: `touch-action: none`, отмена `contextmenu`,
+  `dragstart` и `touchmove` с `{{ passive: false }}`,
+  `-webkit-tap-highlight-color: transparent`.
+- Размеры: основная кнопка ≥ 96 px, второстепенные ≥ 64 px, зазор ≥ 12 px;
+  при высоте экрана < 460 px кнопки уменьшаются, но не ниже 56 px.
+- Видимость строго по состоянию игры: только игровой процесс. При скрытии,
+  `blur` и `visibilitychange` — сброс всех осей и кнопок.
+- Флаг `?touch=1` включает мобильную раскладку на десктопе (`?touch=0` — выключает).
+
+## 4. Desktop Controls
+{desktop}
+
+## 5. Mobile Performance Throttling
 - Cap pixel density to 1.5x.
 - Disable dynamic real-time shadows on low-end devices.
+
+## 6. Чек-лист приёмки
+- [ ] Направление и основное действие работают одновременно (мультитач).
+- [ ] Палец, уехавший за границу зоны, не роняет управление.
+- [ ] Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+- [ ] Долгое нажатие не открывает контекстное меню.
+- [ ] Управление скрыто в меню/паузе и сброшено после сворачивания вкладки.
+- [ ] Кнопки не перекрыты вырезом камеры и системными жестами.
 """
 
     def _gen_audio(self, ctx: GenerationContext) -> str:

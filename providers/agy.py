@@ -15,13 +15,70 @@ from providers.local import LocalAIProvider, LocalImageProvider
 
 class AGYQuotaTracker:
     """
-    Отслеживает использование Antigravity CLI (AGY), скользящий 5-часовой лимит и недельную квоту.
+    Отслеживает использование Antigravity CLI (AGY): скользящий 5-часовой лимит
+    и недельную квоту, отдельно по семействам моделей.
+
+    У Antigravity квоты не общие: Claude и Gemini расходуются независимо, поэтому
+    один сводный счётчик врал — он показывал сумму там, где лимиты раздельные.
     """
 
+    # Порядок важен: в таком виде семейства выводятся в интерфейсе.
+    FAMILIES = ("claude", "gemini", "other")
+    FAMILY_TITLES = {
+        "claude": "Claude",
+        "gemini": "Gemini",
+        "other": "Прочие модели",
+    }
+    FAMILY_DEFAULT_LIMITS = {
+        # Значения по умолчанию; переопределяются переменными окружения
+        # AGY_LIMIT_5H_CLAUDE / AGY_LIMIT_WEEKLY_CLAUDE и т. д.
+        "claude": (50, 500),
+        "gemini": (50, 500),
+        "other": (50, 500),
+    }
+
+    @staticmethod
+    def model_family(model: Optional[str]) -> str:
+        """Семейство квоты по идентификатору модели ('claude-sonnet-4-6' -> 'claude')."""
+        name = (model or "").strip().lower()
+        if name.startswith("claude") or "sonnet" in name or "opus" in name or "haiku" in name:
+            return "claude"
+        if name.startswith("gemini") or "gemini" in name:
+            return "gemini"
+        return "other"
+
+    # Единый файл истории для всех экземпляров трекера. Раньше путь был
+    # относительным ("output/..."), поэтому GUI и провайдер писали/читали разные
+    # файлы в зависимости от текущего рабочего каталога — счётчик «не обновлялся».
+    DEFAULT_STORAGE = Path(__file__).resolve().parent.parent / ".agy_quota_history.json"
+
     def __init__(self, storage_path: Optional[Path] = None):
-        self.storage_path = storage_path or Path("output/.agy_quota_history.json")
+        self.storage_path = Path(storage_path) if storage_path else self.DEFAULT_STORAGE
         self.limit_5h = int(os.getenv("AGY_LIMIT_5H", "50"))
         self.limit_weekly = int(os.getenv("AGY_LIMIT_WEEKLY", "500"))
+        self._migrate_legacy_history()
+
+    def family_limits(self, family: str) -> tuple[int, int]:
+        """Лимиты (5ч, неделя) для семейства моделей."""
+        default_5h, default_weekly = self.FAMILY_DEFAULT_LIMITS.get(
+            family, (self.limit_5h, self.limit_weekly)
+        )
+        suffix = family.upper()
+        return (
+            int(os.getenv(f"AGY_LIMIT_5H_{suffix}", str(default_5h))),
+            int(os.getenv(f"AGY_LIMIT_WEEKLY_{suffix}", str(default_weekly))),
+        )
+
+    def _migrate_legacy_history(self) -> None:
+        """Переносит историю из старого CWD-зависимого файла output/.agy_quota_history.json."""
+        if self.storage_path.exists():
+            return
+        legacy = self.storage_path.parent / "output" / ".agy_quota_history.json"
+        if legacy.exists():
+            try:
+                self.storage_path.write_bytes(legacy.read_bytes())
+            except OSError:
+                pass
 
     def record_usage(self, prompt_len: int = 0, model: str = "default"):
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,9 +88,53 @@ class AGYQuotaTracker:
             "timestamp": now_ts,
             "datetime": datetime.now().isoformat(),
             "prompt_len": prompt_len,
-            "model": model
+            "model": model,
+            "family": self.model_family(model),
         })
         self._save_history(history)
+
+    def _family_status(self, history: List[Dict[str, Any]], family: str, now_ts: float) -> Dict[str, Any]:
+        """Счётчики одного семейства моделей в обоих окнах."""
+        limit_5h, limit_weekly = self.family_limits(family)
+        items = [
+            item for item in history
+            if (item.get("family") or self.model_family(item.get("model"))) == family
+        ]
+        reqs_5h = [i for i in items if i.get("timestamp", 0) >= now_ts - 18000]
+        reqs_weekly = [i for i in items if i.get("timestamp", 0) >= now_ts - 604800]
+
+        used_5h, used_weekly = len(reqs_5h), len(reqs_weekly)
+
+        reset_5h = 0
+        if reqs_5h:
+            oldest = min(i.get("timestamp", now_ts) for i in reqs_5h)
+            reset_5h = max(0, int(18000 - (now_ts - oldest)))
+
+        reset_weekly = 0
+        if reqs_weekly:
+            oldest = min(i.get("timestamp", now_ts) for i in reqs_weekly)
+            reset_weekly = max(0, int(604800 - (now_ts - oldest)))
+
+        last_model = reqs_weekly[-1].get("model") if reqs_weekly else ""
+
+        return {
+            "family": family,
+            "title": self.FAMILY_TITLES.get(family, family.title()),
+            "used_5h": used_5h,
+            "limit_5h": limit_5h,
+            "remaining_5h": max(0, limit_5h - used_5h),
+            "pct_5h": min(100.0, (used_5h / max(1, limit_5h)) * 100),
+            "reset_5h_str": f"{reset_5h // 3600}ч {(reset_5h % 3600) // 60}м" if reset_5h > 0 else "0м",
+            "reset_5h_at": datetime.fromtimestamp(now_ts + reset_5h).strftime("%d.%m %H:%M") if reset_5h else "—",
+            "used_weekly": used_weekly,
+            "limit_weekly": limit_weekly,
+            "remaining_weekly": max(0, limit_weekly - used_weekly),
+            "pct_weekly": min(100.0, (used_weekly / max(1, limit_weekly)) * 100),
+            "reset_weekly_str": f"{reset_weekly // 86400}д {(reset_weekly % 86400) // 3600}ч" if reset_weekly else "0д",
+            "reset_weekly_at": datetime.fromtimestamp(now_ts + reset_weekly).strftime("%d.%m %H:%M") if reset_weekly else "—",
+            "last_model": last_model,
+            "total": len(items),
+        }
 
     def get_quota_status(self) -> Dict[str, Any]:
         history = self._load_history()
@@ -63,7 +164,20 @@ class AGYQuotaTracker:
             oldest_weekly = min(item.get("timestamp", now_ts) for item in reqs_weekly)
             reset_weekly_seconds = max(0, int(604800 - (now_ts - oldest_weekly)))
 
+        recent = sorted(history, key=lambda i: i.get("timestamp", 0), reverse=True)[:15]
+        families = [self._family_status(history, f, now_ts) for f in self.FAMILIES]
+
         return {
+            "families": families,
+            "reset_5h_at": datetime.fromtimestamp(now_ts + reset_5h_seconds).strftime("%d.%m %H:%M")
+            if reset_5h_seconds > 0 else "—",
+            "reset_weekly_at": datetime.fromtimestamp(now_ts + reset_weekly_seconds).strftime("%d.%m %H:%M")
+            if reset_weekly_seconds > 0 else "—",
+            "last_used_at": datetime.fromtimestamp(
+                max(item.get("timestamp", 0) for item in history)
+            ).strftime("%d.%m.%Y %H:%M:%S") if history else "—",
+            "recent": recent,
+            "storage_path": str(self.storage_path),
             "used_5h": used_5h,
             "limit_5h": self.limit_5h,
             "remaining_5h": rem_5h,
@@ -174,10 +288,15 @@ class AGYProvider(AIProvider):
         output_format: str = "text",
         yolo: Optional[bool] = None,
         print_timeout: Optional[str] = "20m0s",
-        with_effort: bool = True
+        with_effort: bool = True,
+        conversation_id: Optional[str] = None
     ) -> list[str]:
         use_yolo = self.yolo if yolo is None else yolo
         cmd = [self.resolve_cli() or self.cli_path, "-p", prompt, "--output-format", output_format]
+        # Продолжение беседы на стороне CLI: агент видит собственный прошлый
+        # контекст целиком, а не пересказ из GUI.
+        if conversation_id:
+            cmd.extend(["--conversation", conversation_id])
         if print_timeout:
             cmd.extend(["--print-timeout", print_timeout])
         if use_yolo:
@@ -238,8 +357,15 @@ class AGYProvider(AIProvider):
             event = data.get("event")
 
             if event == "init":
-                cwd = data.get("init", {}).get("cwd", "")
-                return {"kind": "system", "icon": "⚡", "text": f"Сессия AGY запущена в: {cwd}"}
+                init = data.get("init", {}) or {}
+                cwd = init.get("cwd", "")
+                return {
+                    "kind": "system",
+                    "icon": "⚡",
+                    "text": f"Сессия AGY запущена в: {cwd}",
+                    "conversation_id": init.get("conversation_id") or data.get("conversation_id"),
+                    "model": init.get("model"),
+                }
 
             if event == "step_update":
                 su = data.get("step_update", {})
@@ -416,13 +542,18 @@ class AGYProvider(AIProvider):
         yolo: Optional[bool] = None,
         cwd: Optional[Path] = None,
         stop_check_fn: Optional[Callable[[], bool]] = None,
-        on_event: Optional[Callable[[Dict[str, Any]], None]] = None
+        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+        conversation_id: Optional[str] = None,
+        on_conversation_id: Optional[Callable[[str], None]] = None
     ) -> tuple[int, str]:
         """
         Запускает задачу в agy с потоковым stream-json выводом.
 
         `on_line`  — получает готовые строки лога (старый API).
         `on_event` — получает структурированные события для чат-терминала.
+        `conversation_id`    — возобновить беседу с этим ID (`--conversation`).
+        `on_conversation_id` — вызывается, когда CLI сообщил ID своей беседы;
+                               его нужно сохранить, чтобы продолжить чат позже.
         """
         import io
         import time
@@ -459,11 +590,33 @@ class AGYProvider(AIProvider):
         env["PYTHONUNBUFFERED"] = "1"
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+        seen_conversation: Dict[str, str] = {}
+
+        def capture_conversation(line: str) -> None:
+            """Вылавливает ID беседы из любого события потока — он нужен для продолжения чата."""
+            if seen_conversation or '"conversation_id"' not in line:
+                return
+            try:
+                data = json.loads(line)
+            except ValueError:
+                return
+            found = data.get("conversation_id")
+            if not found:
+                for value in data.values():
+                    if isinstance(value, dict) and value.get("conversation_id"):
+                        found = value["conversation_id"]
+                        break
+            if found:
+                seen_conversation["id"] = str(found)
+                if on_conversation_id:
+                    on_conversation_id(str(found))
+
         def attempt(with_effort: bool) -> tuple[int, str, bool, bool]:
             """Один прогон CLI. Возвращает (код, вывод, остановлен, отклонён_effort)."""
             cmd = self._build_command(
                 prompt, output_format="stream-json", yolo=yolo,
-                print_timeout="25m0s", with_effort=with_effort
+                print_timeout="25m0s", with_effort=with_effort,
+                conversation_id=conversation_id
             )
             cmd[0] = cli
             shown_cmd = " ".join(
@@ -508,6 +661,7 @@ class AGYProvider(AIProvider):
                         continue
 
                     collected.append(line)
+                    capture_conversation(line)
                     event = self.parse_stream_event(line)
                     if not event:
                         continue

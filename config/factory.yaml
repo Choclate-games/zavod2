@@ -81,3 +81,15 @@ skills:
     - GAMEPLAY_SKILL.md
     - RENDERER_SKILL.md
     - PLAYGAMA_SKILL.md
+    - CONTROLS_SKILL.md
+
+# Файлы, которые ведёт кодовый агент в каталоге проекта на протяжении разработки.
+# Фабрика создаёт заготовки, агент обязан дописывать их после каждой задачи.
+agent_maintained:
+  - DEVLOG.md
+  - CHANGELOG.md
+  - README.md
+
+# AGENTS.md пишет сама фабрика и перезаписывает при каждой генерации:
+# это машинная инструкция агенту, а не рабочий документ проекта.
+agent_instructions_file: AGENTS.md

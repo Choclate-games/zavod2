@@ -10,7 +10,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = BASE_DIR / "config"
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 TEMPLATES_DIR = BASE_DIR / "templates"
-DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
+# Единственный корень для всех проектов игр: и документация, и исходный код.
+# Кодовый агент запускается строго внутри него (см. app/sandbox.py).
+DEFAULT_WORKSPACE_DIR = BASE_DIR / "workspace"
 
 def load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
@@ -24,8 +26,13 @@ class AppConfig:
         self.config_dir = CONFIG_DIR
         self.knowledge_dir = KNOWLEDGE_DIR
         self.templates_dir = TEMPLATES_DIR
-        self.output_dir = Path(os.getenv("OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
-        
+        # workspace/ — песочница агента и хранилище проектов.
+        self.workspace_dir = Path(os.getenv("WORKSPACE_DIR", str(DEFAULT_WORKSPACE_DIR))).resolve()
+        # OUTPUT_DIR оставлен для совместимости со старыми .env, но по умолчанию
+        # проекты создаются в workspace/, чтобы агент не выходил за её пределы.
+        self.output_dir = Path(os.getenv("OUTPUT_DIR", str(self.workspace_dir))).resolve()
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+
         # Load yaml configs
         self.factory_cfg = load_yaml(CONFIG_DIR / "factory.yaml")
         self.models_cfg = load_yaml(CONFIG_DIR / "models.yaml")

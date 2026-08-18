@@ -42,4 +42,30 @@ class CompletenessValidator:
                 results.append({"item": "Definition of Done", "status": "FAIL", "detail": "Missing Definition of Done checklist in AI prompt"})
                 all_passed = False
 
+            # Мобильное управление — самая частая дыра в готовой игре, поэтому
+            # проверяем, что оно вообще дошло до мастер-промпта конкретикой.
+            if "Pointer Events" in content and "safe-area" in content:
+                results.append({"item": "Mobile Controls Spec", "status": "PASS", "detail": "Touch contract present in master prompt"})
+            else:
+                results.append({"item": "Mobile Controls Spec", "status": "FAIL", "detail": "Master prompt lacks the touch controls contract"})
+                all_passed = False
+
+        # 4. Инструкция агенту от фабрики
+        agents_file = game_dir / "AGENTS.md"
+        if agents_file.exists() and agents_file.stat().st_size > 200:
+            results.append({"item": "Agent Instructions", "status": "PASS", "detail": "AGENTS.md на месте"})
+        else:
+            results.append({"item": "Agent Instructions", "status": "FAIL", "detail": "Нет AGENTS.md — агент не получит правил проекта"})
+            all_passed = False
+
+        # 5. Файлы, которые ведёт кодовый агент по ходу разработки
+        for name, label in (("DEVLOG.md", "Development Log"), ("CHANGELOG.md", "Changelog")):
+            path = game_dir / name
+            if not path.exists():
+                results.append({"item": label, "status": "WARN", "detail": f"{name} ещё не создан"})
+            elif path.stat().st_size < 80:
+                results.append({"item": label, "status": "WARN", "detail": f"{name} пуст — агент не документирует работу"})
+            else:
+                results.append({"item": label, "status": "PASS", "detail": f"{name} ведётся ({path.stat().st_size} байт)"})
+
         return all_passed, results

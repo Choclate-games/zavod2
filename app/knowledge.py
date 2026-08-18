@@ -22,6 +22,9 @@ CORE_TOPICS: List[str] = [
     "playgama/banners_and_layout.md",
     "compliance/yandex_moderation.md",
     "ux/localization_system.md",
+    # Мобильное управление — не опция: платформы играются в основном с телефона,
+    # и «нет тач-управления» стабильно стоило нам переделки уже готовой игры.
+    "ux/touch_controls.md",
 ]
 
 

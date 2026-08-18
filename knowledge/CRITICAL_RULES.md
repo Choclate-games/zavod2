@@ -145,3 +145,31 @@ moderation rejection. Violating any of them ships a broken or rejected game.
     and crawl up — start optimistic and step down.
 54. Apply resolution and shadow-map changes **before** `render()`, on a frame you
     actually render; doing it after clears the canvas and flashes a blank frame.
+55. One group, one degree of freedom. A mesh that both steers and spins (wheel,
+    turret, limb) needs **nested** groups — `Euler('XYZ')` applies the inner
+    rotation around the parent's axis and visibly skews the part otherwise.
+    See `knowledge/threejs/vehicle_wheel_rig.md`.
+
+## Touch controls
+
+56. Touch controls are built on **Pointer Events** with `setPointerCapture` and
+    per-`pointerId` tracking — `touchstart/end` alone loses fingers at element
+    borders and lets a second finger cancel the first (nitro kills throttle).
+57. Movement and the primary action must be usable **at the same time**. In a
+    driving game throttle never shares an axis with steering: it is a separate
+    pedal button, the largest control on screen.
+58. The control layer sets `touch-action: none`, cancels `contextmenu`,
+    `dragstart` and non-passive `touchmove`, and respects `env(safe-area-inset-*)`.
+    Without this the page scrolls, pull-to-refreshes and gets rejected by
+    moderation.
+59. Controls are visible only during gameplay and are **reset** whenever hidden,
+    on `blur` and on `visibilitychange` — a transparent control layer over a menu
+    swallows button taps, and a held throttle survives an ad break otherwise.
+    See `knowledge/ux/touch_controls.md`.
+
+## Development log
+
+60. Every work session ends with an entry in `DEVLOG.md` (task, what was done,
+    files touched, what was verified, what remains) and in `CHANGELOG.md` under
+    `## [Unreleased]` in player-facing language. A change nobody can reconstruct
+    later is a change that will be redone from scratch.

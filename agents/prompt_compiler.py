@@ -8,6 +8,77 @@ class PromptCompilerAgent:
     into a self-contained, definitive master AI Developer Prompt (AI_DEVELOPER_PROMPT.md).
     """
 
+    # Раскладка тач-управления зависит от жанра. Универсальный «джойстик слева +
+    # кнопки справа» ломает вождение: газ и руль обязаны работать одновременно.
+    _TOUCH_LAYOUTS = {
+        "driving": (
+            "- **Слева — РУЛЬ**: плавающий стик, работает только по горизонтали "
+            "(поворот). Вертикаль стика не управляет газом.\n"
+            "- **Справа — ПЕДАЛИ И ДЕЙСТВИЯ**: большая кнопка **ГАЗ** (≥ 104 px) под "
+            "большим пальцем, рядом **НАЗАД/ТОРМОЗ**, выше — **НИТРО** и **РУЧНИК/ДРИФТ**.\n"
+            "- Газ, руль и нитро должны нажиматься одновременно (мультитач на 3 пальца)."
+        ),
+        "platformer": (
+            "- **Слева**: кнопки ВЛЕВО / ВПРАВО (или горизонтальный стик).\n"
+            "- **Справа**: ПРЫЖОК (самая большая кнопка) и кнопка действия/атаки.\n"
+            "- Прыжок и движение обязаны работать одновременно."
+        ),
+        "builder": (
+            "- **Одним пальцем**: панорамирование карты, тап — выбор объекта.\n"
+            "- **Двумя пальцами**: пинч-зум и поворот камеры.\n"
+            "- **Справа снизу**: панель постройки/действий, кнопки ≥ 64 px."
+        ),
+        "default": (
+            "- **Слева — ДВИЖЕНИЕ**: плавающий виртуальный джойстик на 2 оси, "
+            "зона захвата — вся левая половина экрана.\n"
+            "- **Справа — ДЕЙСТВИЯ**: крупная основная кнопка (атака/использование) "
+            "и 2–3 второстепенные (дэш, блок, спец-умение).\n"
+            "- Движение и атака должны работать одновременно."
+        ),
+    }
+
+    _DESKTOP_LAYOUTS = {
+        "driving": (
+            "- `W` / `S` / `↑` / `↓` — газ и тормоз/задний ход\n"
+            "- `A` / `D` / `←` / `→` — руль\n"
+            "- `Space` / `E` — нитро\n"
+            "- `Shift` / `F` — ручной тормоз (дрифт)\n"
+            "- `P` / `Esc` — пауза"
+        ),
+        "default": (
+            "- `WASD` / стрелки — движение\n"
+            "- ЛКМ / `J` — основная атака\n"
+            "- ПКМ / `K` — тяжёлая атака / блок\n"
+            "- `Space` / `Shift` — рывок / уклонение\n"
+            "- `P` / `Esc` — пауза"
+        ),
+    }
+
+    _DRIVING_WORDS = ("гонк", "дрифт", "маш", "racing", "drift", "vehicle", "car", "derby", "трак")
+    _PLATFORMER_WORDS = ("платформер", "platformer", "runner", "раннер")
+    _BUILDER_WORDS = ("строит", "builder", "base building", "tower defense", "башен", "стратег")
+
+    @classmethod
+    def _control_profile(cls, ctx: GenerationContext) -> str:
+        """Определяет профиль управления по жанру, механикам и исходной идее."""
+        concept = ctx.concept
+        haystack = " ".join([
+            str(concept.genre or ""),
+            str(concept.subgenre or ""),
+            str(concept.title or ""),
+            str(ctx.raw_prompt or ""),
+            " ".join(m.name for m in concept.mechanics),
+        ]).lower()
+
+        for profile, words in (
+            ("driving", cls._DRIVING_WORDS),
+            ("platformer", cls._PLATFORMER_WORDS),
+            ("builder", cls._BUILDER_WORDS),
+        ):
+            if any(word in haystack for word in words):
+                return profile
+        return "default"
+
     def compile(self, ctx: GenerationContext) -> str:
         concept = ctx.concept
         log_agent("PromptCompiler", f"Compiling definitive AI Developer Prompt for '{concept.title}'")
@@ -33,6 +104,11 @@ class PromptCompilerAgent:
         # The knowledge base is the factory's memory of what actually ships on
         # these platforms. It is injected verbatim so the coding agent never has
         # to rediscover a rule that already cost a production bug.
+        profile = self._control_profile(ctx)
+        touch_layout = self._TOUCH_LAYOUTS[profile]
+        desktop_controls = self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
+        log_agent("PromptCompiler", f"Control profile: {profile}")
+
         critical_rules = knowledge.critical_rules(heading_offset=1)
         if not critical_rules:
             log_agent("PromptCompiler", "WARNING: knowledge/CRITICAL_RULES.md missing — prompt will omit platform rules")
@@ -194,17 +270,54 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 ---
 
 ## 6. USER INTERFACE & MOBILE CONTROLS
+Мобильное управление — обязательная часть поставки, а не «доделаем потом».
+Большинство игроков на Яндекс Играх / VK / Playgama заходят с телефона: игра без
+рабочего тач-управления не проходит приёмку, даже если на клавиатуре всё идеально.
+
 - **Orientation**: {concept.orientation.capitalize()}
-- **Safe Area Insets**: Handled via CSS `padding: env(safe-area-inset-top) env(safe-area-inset-right)...`
-- **Mobile Touch Controls**:
-  - **Left Side**: Floating dynamic virtual joystick with touch-drag tracking.
-  - **Right Side**: Action cluster (Large Primary Strike, Medium Parry/Block, Medium Dash).
-- **Desktop Controls**:
-  - `WASD` / `Arrow Keys`: Movement
-  - `Left Mouse Button` / `J`: Primary Strike
-  - `Right Mouse Button` / `K`: Heavy Strike / Block
-  - `Space` / `Shift`: Dash / Dodge
-  - `F` / `E`: Parry / Special
+- **Safe Area Insets**: `padding: calc(18px + env(safe-area-inset-bottom))` и аналогично
+  для left/right — кнопки не должны попадать под вырез камеры и системные жесты.
+
+### Обязательный контракт тач-управления
+{touch_layout}
+
+- **Реализация только на Pointer Events** (`pointerdown/move/up/cancel`) с
+  `setPointerCapture` и учётом `pointerId` для каждой кнопки: `touchstart/end`
+  теряет палец на границе элемента, а второй палец сбрасывает первый.
+- **Плавающий стик**: зона захвата — вся левая половина экрана, база стика
+  появляется под пальцем. Мёртвая зона 8%, иначе управление дрожит.
+- **Отмена браузерных жестов**: `touch-action: none`, отмена `contextmenu`,
+  `dragstart` и `touchmove` с `{{ passive: false }}`; `-webkit-tap-highlight-color: transparent`.
+- **Видимость по состоянию**: слой управления показан только в игровом процессе,
+  скрыт в меню / гараже / паузе / модалках и при скрытии сбрасывает все оси и
+  кнопки (также по `blur` и `visibilitychange`).
+- **Размеры**: основная кнопка действия ≥ 96 px, второстепенные ≥ 64 px, зазор ≥ 12 px.
+- **Отладочный флаг** `?touch=1` принудительно включает мобильную раскладку на
+  десктопе (и `?touch=0` выключает) — без него управление невозможно проверить.
+- Клавиатура и тач работают параллельно и не глушат друг друга.
+
+### Desktop Controls
+{desktop_controls}
+
+---
+
+## 6a. ЖУРНАЛ РАЗРАБОТКИ И CHANGELOG (ЧАСТЬ DEFINITION OF DONE)
+Проект живёт в песочнице `workspace/{concept.slug}/`, и вся работа за её пределы
+не выходит. Правила работы продублированы в `AGENTS.md` в корне проекта —
+прочитай его первым. В корне также ведутся два журнала; они обновляются в конце
+**каждой** рабочей сессии, до отчёта о завершении:
+
+- **`DEVLOG.md`** — запись вида `## ГГГГ-ММ-ДД ЧЧ:ММ — <суть>` с пунктами
+  **Задача**, **Сделано**, **Затронутые файлы**, **Проверено**,
+  **Известные проблемы / следующий шаг**.
+- **`CHANGELOG.md`** — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/):
+  раздел `## [Unreleased]`, подразделы Added / Changed / Fixed / Removed,
+  формулировки на языке игрока, а не описание диффа.
+- **`README.md`** — как запустить (`npm install`, `npm run dev`), управление на
+  клавиатуре и на телефоне, структура каталогов.
+
+Игра обязана запускаться командой `npm run dev` и открываться в браузере без
+ошибок в консоли: именно так её проверяет фабрика (вкладка «Играть»).
 
 ---
 
@@ -245,15 +358,18 @@ Deep, worked-out detail behind the rules in section 9 — read the relevant file
 
 ## 12. DETAILED REFERENCE DOCUMENTS
 For extended deep specifications, refer to the accompanying project documentation files:
-- [Game Design Document](file:///output/{concept.slug}/GAME_DESIGN_DOCUMENT.md)
-- [Gameplay Specification](file:///output/{concept.slug}/GAMEPLAY_SPECIFICATION.md)
-- [Technical Specification](file:///output/{concept.slug}/TECHNICAL_SPECIFICATION.md)
-- [Architecture Document](file:///output/{concept.slug}/ARCHITECTURE_DOCUMENT.md)
-- [Playgama Integration](file:///output/{concept.slug}/PLAYGAMA_INTEGRATION.md)
-- [Monetization Specification](file:///output/{concept.slug}/MONETIZATION.md)
-- [Mobile Controls](file:///output/{concept.slug}/MOBILE_CONTROLS.md)
-- [QA Plan](file:///output/{concept.slug}/QA_PLAN.md)
-- [Game Skill Guidelines](file:///output/{concept.slug}/skills/GAME_SKILL.md)
-- [Renderer Skill](file:///output/{concept.slug}/skills/RENDERER_SKILL.md)
+- [Инструкция агенту (AGENTS.md)](./AGENTS.md)
+- [Журнал разработки (DEVLOG.md)](./DEVLOG.md)
+- [Changelog](./CHANGELOG.md)
+- [Game Design Document](./GAME_DESIGN_DOCUMENT.md)
+- [Gameplay Specification](./GAMEPLAY_SPECIFICATION.md)
+- [Technical Specification](./TECHNICAL_SPECIFICATION.md)
+- [Architecture Document](./ARCHITECTURE_DOCUMENT.md)
+- [Playgama Integration](./PLAYGAMA_INTEGRATION.md)
+- [Monetization Specification](./MONETIZATION.md)
+- [Mobile Controls](./MOBILE_CONTROLS.md)
+- [QA Plan](./QA_PLAN.md)
+- [Game Skill Guidelines](./skills/GAME_SKILL.md)
+- [Renderer Skill](./skills/RENDERER_SKILL.md)
 """
         return prompt_content.strip()

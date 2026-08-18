@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime
 import yaml
 
+from app import sandbox
 from app.context import GenerationContext
 from app.logging import log_agent, log_success, log_info
 from generators.document_generator import DocumentGenerator
@@ -85,5 +86,12 @@ class OutputGenerator:
         with open(json_file, "w", encoding="utf-8") as f:
             f.write(meta.model_dump_json(indent=2))
         ctx.generated_files.append(json_file)
+
+        # 8. Инструкция агенту и журналы разработки. Пишутся здесь, а не в GUI,
+        # чтобы CLI-генерация давала ровно такой же пакет.
+        sandbox.ensure_project_docs(game_dir, concept.title)
+        for name in (sandbox.AGENTS_NAME, sandbox.DEVLOG_NAME, sandbox.CHANGELOG_NAME):
+            ctx.generated_files.append(game_dir / name)
+        log_success(f"Agent instructions & devlog prepared: [highlight]{sandbox.AGENTS_NAME}[/highlight]")
 
         return game_dir
