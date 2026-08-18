@@ -1,0 +1,894 @@
+raw_prompt: Создай свайп-слэшер на Three.js с механикой Bullet Time и процедурным
+  разрезанием 3D геометрии. Включи стильную киберпанк-эстетику, комбо-счетчик с сочными
+  вспышками, ветку roguelite-талантов и динамичные боссфайты.
+title: 'CYBER SLICE: BULLET PROTOCOL (Кибер Срез: Протокол Времени)'
+slug: cyber-slice-bullet-protocol-3d
+genre: Экшен-слэшер / Аркада
+subgenre: 3D Roguelite свайп-слэшер с замедлением времени и процедурным разрушением
+renderer: threejs
+renderer_reason: User explicitly specified 'threejs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Web / Android)
+orientation: landscape
+target_audience: Игроки 14-35 лет, поклонники динамичных слэшеров (Ghostrunner, Metal
+  Gear Rising, Fruit Ninja, Superhot), любители киберпанк-стилистики, неонового синтивейва
+  и скиллозависимого аркадного геймплея.
+core_loop: Вход на неоновую кибер-арену -> Замедление времени (Bullet Time) при касании/свайпе
+  -> Хирургическое рассечение нападающих киборгов и снарядов свайпом -> Накопление
+  комбо и перегрузки (Overdrive) -> Сбор нано-чипов и выбор roguelite-модификаторов
+  -> Сражение с многофазным боссом -> Прокачка постоянных кибер-имплантов в хабе.
+hook: Мгновенное тактильное рассечение 3D-врагов под любым углом в кинематографичном
+  Bullet Time с физическим разлетом светящихся неоновых осколков и сочным киберпанк-звуком.
+player_fantasy: Ты — элитный аугментированный кибер-ниндзя с тактическим квантовым
+  клинком. Для тебя мир замирает в миллисекундах, пока ты элегантными взмахами пальца
+  разрезаешь лазерные лучи, пули и элитных боевых мехов на десятки аккуратных кусков.
+session_model: Быстрые сессии по 4-8 минут (3-5 волн врагов + дуэль с боссом) с глубокой
+  мета-прокачкой и бесконечным рейтинговым режимом «Кибер-Бездна».
+unique_value_proposition: Первый в браузерном WebGL 3D-слэшер с честным процедурным
+  срезом трехмерных моделей (CSG/Plane-intersection) в замедлении времени, оптимизированный
+  под 60 FPS на мобильных и десктопных устройствах без тяжелых загрузок.
+vision: Создать эталонный мобильный и веб-хит в жанре свайп-экшена, соединяющий визуальный
+  шик киберпанка, глубокую roguelite-реиграбельность билдов и непревзойденное ощущение
+  гипер-контроля над временем и геометрией пространства.
+elevator_pitch: '«Ghostrunner встречает Fruit Ninja в неоновом киберпанке»: замедляй
+  время одним касанием, рассекай киборгов и летящие ракеты на светящиеся полигональные
+  части, выстраивай безумные комбо и сокрушай мега-боссов с уникальными roguelite-талантами
+  прямо в браузере!'
+win_conditions: Уничтожить все волны кибер-агентов на арене, отразить критические
+  атаки и нейтрализовать главного босса сектора, сохранив запас прочности экзоскелета.
+lose_conditions: Полное истощение шкалы HP кибер-ниндзя от пропущенных ударов, взрывов
+  неразрезанных ракет или падения в лазерные барьеры.
+progression_summary: 'Внутри забега: выбор 1 из 3 случайных кибер-модулей после каждой
+  волны (цепные молнии по срезам, взрывные волны, заморозка времени, критические мульти-слэши).
+  Мета-прогрессия: покупка постоянных нейро-апгрейдов за кибер-кредиты (увеличение
+  шкалы хроно-энергии, вампиризм, стартовые щиты, разблокировка легендарных катан
+  с уникальными следами и эффектами).'
+difficulty_curve: Плавный вход на 1-й волне с базовыми дронами, нарастание темпа за
+  счет комбинированных атак (стрелки + щитовики), кульминация в фазах босса с круговыми
+  лазерными атаками и проверкой тайминга парирования.
+scores:
+  fun: 10
+  originality: 9
+  replayability: 9
+  development_cost: 7
+  visual_appeal: 9
+  mobile_fit: 10
+  monetization: 9
+  platform_fit: 9
+  overall_score: 9.0
+  justification: Механика свайп-среза с Bullet Time обладает мгновенной тактильной
+    отдачей и виральным потенциалом. Roguelite-структура обеспечивает удержание D1/D7,
+    а интеграция с Playgama Bridge идеально монетизируется через ревайвы, удвоение
+    наград и скины оружия.
+references:
+- name: 'Metal Gear Rising: Revengeance (Blade Mode)'
+  genre: 3D Action Hack and Slash
+  mechanics:
+  - Свободный угол среза геометрии
+  - Замедление времени при прицеливании
+  - Рассечение уязвимых точек (Zandatsu)
+  lessons: Свобода выбора плоскости среза дарит непревзойденное ощущение мощи и мастерства.
+  what_to_avoid: Избыточная сложность управления камерой на тачскринах.
+- name: Ghostrunner
+  genre: First-Person Cyberpunk Slasher
+  mechanics:
+  - One-hit kill динамика
+  - Рывок с уклонением от пуль
+  - Киберпанк синты и неоновый визуальный стиль
+  lessons: Высокий темп и сочные аудио-визуальные акценты создают состояние чистого
+    потока.
+  what_to_avoid: Слишком высокий порог входа для казуальных веб-игроков.
+- name: Fruit Ninja
+  genre: Arcade Swipe
+  mechanics:
+  - Интуитивный свайп-контроль
+  - Разрезание объектов на 2 части
+  - Комбо-множители за одновременный срез
+  lessons: Идеальная эргономика для мобильных экранов и мгновенное понимание геймплея.
+  what_to_avoid: Монотонность без прокачки и разнообразия врагов.
+- name: Superhot
+  genre: Time-bending Action
+  mechanics:
+  - Время движется только при действии
+  - Физический разлет поверженных кристаллических врагов
+  lessons: Контроль над темпом боя превращает экшен в тактическую головоломку.
+  what_to_avoid: Полная остановка динамики без музыкального драйва.
+mechanics:
+- name: Процедурный срез 3D-геометрии (Mesh Slicing)
+  category: combat
+  priority: core
+  description: При свайпе строится секущая плоскость в мировых координатах. Three.js
+    делит исходную BufferGeometry врага или снаряда на два изолированных меша, генерирует
+    внутренние срезы со светящейся неоновой текстурой 'расплавленного ядра' и передает
+    половинки в физический симулятор разлета.
+  player_interaction: Проведение пальцем или мышью через силуэты противников под любым
+    желаемым углом.
+  feedback: Яркая световая линия клинка, импульсный неоновый взрыв по контуру среза,
+    физическое падение обломков с затухающим свечением и сочный звуковой щелчок разрезаемого
+    металла.
+  technical_complexity: High
+  strengths:
+  - Невероятный уровень сочности и свободы действий
+  - Каждый срез уникален и не использует заранее запеченные анимации смерти
+  weaknesses:
+  - Требуется строгий пул геометрии для предотвращения пауз сборщика мусора (GC spikes)
+- name: Хроно-фокус (Bullet Time & Time Dilation)
+  category: combat
+  priority: core
+  description: При первом касании экрана/зажатии мыши время в игре замедляется до
+    10% от нормальной скорости, расходуя полосу Chrono-Energy. Вражеские пули, лазеры
+    и летящие роботы плавно зависают в воздухе, позволяя выстроить траекторию идеального
+    мульти-среза.
+  player_interaction: Удержание пальца на экране для замедления; резкий свайп инициирует
+    мгновенный удар и восстанавливает нормальный ход времени.
+  feedback: Плавный хроматический сдвиг (Chromatic Aberration), приглушение звука
+    с наложением низкочастотного гула (low-pass filter) и появление неоновых трассеров
+    от пуль.
+  technical_complexity: Medium
+  strengths:
+  - Снижает стресс на мобильных устройствах
+  - Дает глубокий тактический контроль
+  weaknesses:
+  - Шкала энергии должна быстро регенерировать, чтобы не затягивать геймплей
+- name: Неоновый Комбо-Множитель и Перегрев (Heat Surge)
+  category: combat
+  priority: core
+  description: 'Серия быстрых срезов без промахов заполняет счетчик ранга (от ''D''
+    до ''SSS'') и шкалу Heat. На ранге ''SSS'' активируется Overdrive: лезвие воспламеняется
+    плазмой, разрезающей даже бронированные щиты с одного удара, а на экране возникают
+    стильные кибер-глифы.'
+  player_interaction: Поддержание непрерывного ритма нарезки врагов и снарядов до
+    истечения комбо-таймера (1.8 сек).
+  feedback: Увеличивающийся неоновый счетчик в центре экрана, вспышки экрана (Screen
+    Flash), ускорение темпа синтивейв-саундтрека.
+  technical_complexity: Low
+  strengths:
+  - Высокая мотивация играть технично и быстро
+  - Отличная база для соревновательных лидербордов
+  weaknesses:
+  - Визуальные эффекты не должны перекрывать читаемость вражеских снарядов
+- name: Кибер-Аугментации (Roguelite Matrix)
+  category: progression
+  priority: secondary
+  description: 'После зачистки каждой волны игрок выбирает 1 из 3 случайных нейро-чипов:
+    ''Плазменный Рикошет'' (разрезанные пули летят обратно во врагов), ''Квантовое
+    Расщепление'' (один свайп создает две параллельные линии среза), ''Хроно-Вампиризм''
+    (восстановление HP за комбо).'
+  player_interaction: Выбор карточки таланта на голографическом интерфейсе между волнами.
+  feedback: Звук установки микрочипа, изменение визуального шлейфа клинка и появление
+    уникальных иконок в строке активных баффов.
+  technical_complexity: Medium
+  strengths:
+  - Огромная вариативность билдов и высокая реиграбельность
+  - Создание синергий и 'сломанных' фановых комбинаций
+  weaknesses:
+  - Необходим регулярный баланс коэффициентов урона
+- name: Фазовые Дуэли с Мега-Боссами (Boss Slice Telegraphs)
+  category: boss
+  priority: core
+  description: 'Боссы (напр., ''Кибер-Цербер'', ''Титанический Мех-Дракон'') обладают
+    уникальными уязвимыми секторами (Weak Planes). Во время атаки босса появляется
+    подсвеченная голографическая плоскость: если игрок выполнит свайп точно вдоль
+    нее, босс получает критический урон и теряет конечность.'
+  player_interaction: Точное сопоставление угла свайпа с подсвеченной траекторией
+    уязвимости босса за отведенное время.
+  feedback: Замедление камеры, сокрушительный скрежет отсекаемой брони босса, выброс
+    десятков силовых искр и смена музыкальной темы на кульминационную фазу.
+  technical_complexity: High
+  strengths:
+  - Эпичный финал каждого забега
+  - Требует меткости и концентрации, а не просто спама кликов
+  weaknesses:
+  - Требует точной калибровки окна толерантности угла свайпа (±12 градусов)
+gameplay_systems:
+- name: Система процедурного рассечения мешей (Procedural Geometry Slicer)
+  purpose: Осуществление мгновенного математического разделения полигональной сетки
+    врагов в реальном времени с генерацией внутренних граней и физических обломков.
+  input: Координаты луча свайпа (Raycast Start/End) и вектор направления камеры.
+  rules:
+  - Построение бесконечной секущей плоскости на основе двух точек свайпа и нормали
+    взгляда камеры.
+  - 'Итерация по треугольникам входного BufferGeometry: классификация вершин относительно
+    плоскости (Dot Product).'
+  - Интерполяция вершин, UV и нормалей на линии пересечения ребер с плоскостью.
+  - Триангуляция образовавшегося среза (Cap Triangulation) с присвоением материала
+    внутреннего кибер-ядра (Emissive Neon Shader).
+  - Спавн физических RigidBody в Rapier3D для отсеченных частей с радиальным импульсом
+    взрыва.
+  state:
+  - is_slicing_active (boolean)
+  - active_debris_count (integer)
+  - cut_plane_origin (Vector3)
+  - cut_plane_normal (Vector3)
+  interactions: Взаимодействует с Physics System для отталкивания половинок, с Particle
+    VFX для генерации искр и с Combo System для начисления очков.
+  feedback: Неоновый лазерный след свайпа, яркий сноп искр, шлейф дыма, звуковой щелчок
+    рассечения.
+  edge_cases:
+  - Срез проходит мимо объекта -> свайп регистрируется как промах и сбрасывает часть
+    комбо.
+  - Объект уже слишком мал (<0.2м) -> вместо среза происходит мгновенная аннигиляция
+    в частицы во избежание микро-полигонов.
+- name: Система Хронодинамики и Замедления времени (Chrono-Dilation System)
+  purpose: Управление глобальной временной шкалой (Time Scale) для реализации механики
+    Bullet Time при прикосновении к экрану.
+  input: События PointerDown / PointerUp / TouchStart / TouchEnd.
+  rules:
+  - При зажатии экрана time_scale плавно интерполируется от 1.0 до 0.1 за 60 мс.
+  - Расход Chrono-Energy составляет 25 единиц/сек (максимум 100).
+  - При исчерпании энергии time_scale принудительно возвращается к 1.0 с предупреждающим
+    звуковым сигналом перегрузки.
+  - При совершении успешного среза восстанавливается +15 единиц энергии.
+  state:
+  - current_time_scale (float 0.1..1.0)
+  - chrono_energy (float 0..100)
+  - is_dilation_active (boolean)
+  interactions: Модифицирует dt во всех системах (перемещение врагов, полет снарядов,
+    аниматоры), кроме рендерера следа клинка игрока.
+  feedback: Голографический круговой индикатор энергии вокруг пальца игрока, искажение
+    звукового поля, виньетка замедления.
+  edge_cases:
+  - Игрок держит палец и ничего не делает -> энергия заканчивается, враги наносят
+    урон на нормальной скорости.
+- name: Система Комбо, Ранга и Тепловой Перегрузки (Combo & Heat Engine)
+  purpose: Расчет мастерства игрока, динамическое начисление очков и активация режима
+    ярости Overdrive.
+  input: События успешного среза врага, отражения пули или получения урона.
+  rules:
+  - Каждый срез дает базовые очки * текущий комбо-множитель (х1..х10).
+  - Срез 3+ врагов одним свайпом дает бонус 'MULTI-SLICE' (+500 очков и заполнение
+    Heat на 40%).
+  - Получение урона сбрасывает ранг комбо до D и обнуляет Heat.
+  - При 100% Heat активируется Overdrive на 6 секунд (х2 скорость регенерации энергии,
+    взрывные срезы).
+  state:
+  - combo_counter (integer)
+  - combo_rank (enum D, C, B, A, S, SS, SSS)
+  - heat_gauge (float 0..100)
+  - is_overdrive (boolean)
+  interactions: Влияет на размер наград в кибер-кредитах, пост-процессинг камеры (Bloom)
+    и данные таблицы лидеров.
+  feedback: Голографические анимированные буквы ранга (D -> SSS), вспышка экрана при
+    Overdrive, речевые оповещения ИИ-комментатора.
+  edge_cases:
+  - Истечение комбо-таймера во время катсцены босса блокируется.
+- name: Система Роглайт-Генерации и Талантов (Cyber-Augment Draft)
+  purpose: Предоставление игроку стратегического выбора аугментаций между боевыми
+    волнами для создания уникальных билдов.
+  input: Завершение боевой волны (Wave Cleared Event).
+  rules:
+  - Генерация 3 случайных чипов из общего пула с весами редкости (Common 60%, Rare
+    30%, Legendary 10%).
+  - 'Чипы разделены на 3 архетипа: ''Хроно-Мастер'' (управление временем), ''Плазменный
+    Клинок'' (урон и AoE срезы), ''Кибер-Защита'' (щиты и контрудары).'
+  - Игрок может потратить кибер-кредиты или посмотреть Rewarded Ad для реролла предложенных
+    вариантов.
+  state:
+  - active_augments (array of Augment)
+  - available_draft_cards (array of 3 AugmentCards)
+  - reroll_count (integer)
+  interactions: Модифицирует параметры меча, радиус среза, восстановление энергии
+    и триггеры дополнительных снарядов.
+  feedback: Анимация вставки голографического картриджа, звуковой аккорд успеха, визуальное
+    обновление клинка.
+  edge_cases:
+  - Выбор взаимоисключающих перков предотвращается валидатором графа талантов.
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: threejs
+  renderer_version: ^0.170.0
+  physics_engine: Rapier3D (@dimforge/rapier3d-compat 0.13.x)
+  state_manager: Reactive EventBus / Zustand-like Store
+  audio_engine: 'Web Audio API (Howler.js with html5: false)'
+  target_fps: 60
+  max_draw_calls: 65
+  max_triangles_or_sprites: 38000
+  bundle_size_budget_mb: 4.2
+  layers:
+  - name: Presentation Layer
+    description: 'Three.js Scene Graph, InstancedMesh для фонового кибер-города, Custom
+      Shaders (Neon Core, Blade Trail, Bullet Trails), Postprocessing (EffectComposer:
+      Selective Bloom, Chromatic Aberration).'
+  - name: Game Logic & Math Layer
+    description: Алгоритм плоскостного рассечения BufferGeometry (Math3D Slicer),
+      машина состояний боя (FSM), менеджер волн, контроллер замедления времени.
+  - name: Physics & Collision Layer
+    description: Rapier3D для высокоскоростной симуляции разлета обломков, трассировки
+      лучей свайпа и детекции хитбоксов снарядов.
+  - name: Platform & Storage Layer
+    description: Адаптер Playgama Bridge для рекламы, облачных сохранений, внутриигровых
+      покупок и аналитики платформы.
+  modules:
+  - name: GeometrySlicer
+    file: src/core/slicing/GeometrySlicer.ts
+    responsibility: Низкоуровневая триангуляция и генерация двух дочерних BufferGeometry
+      при пересечении плоскостью.
+  - name: TimeDilationManager
+    file: src/core/time/TimeDilationManager.ts
+    responsibility: Плавное масштабирование дельты времени, управление расходом и
+      восстановлением хроно-энергии.
+  - name: BladeInputController
+    file: src/input/BladeInputController.ts
+    responsibility: Отслеживание жестов мыши и мультитача, сглаживание траектории
+      (Catmull-Rom) и генерация меша светового следа (Ribbon Trail).
+  - name: EnemyWaveDirector
+    file: src/gameplay/EnemyWaveDirector.ts
+    responsibility: Спавн волн кибер-дронов, ниндзя-киборгов, турелей и фазовых боссов
+      по таймлайну арены.
+  - name: RogueliteTalentSystem
+    file: src/progression/RogueliteTalentSystem.ts
+    responsibility: Хранение древа перков, расчет синергий и применение пассивных
+      модификаторов к физике и атакам.
+  - name: BridgeIntegrationService
+    file: src/platform/BridgeIntegrationService.ts
+    responsibility: 'Связка с SDK Playgama: показ Rewarded/Interstitial, лидерборды,
+      локализация и cloud save.'
+monetization:
+  strategy_summary: 'Сбалансированная гибридная модель: ненавязчивая реклама за вознаграждение
+    (Rewarded Video) с высокой ценностью для игрока, редкие интерстишелы между забегами
+    с таймером защиты, и косметические покупки премиальных неоновых катан и кибер-эффектов.'
+  rewarded_placements:
+  - id: revive_hero
+    name: Кибер-Реанимация (Revive)
+    benefit: Мгновенное воскрешение на месте гибели со 100% HP, временным щитом неуязвимости
+      на 3 сек и взрывной волной, уничтожающей мелких врагов вокруг.
+    cooldown_or_limit: 1 раз за забег
+    trigger_moment: Экран гибели героя (Game Over Screen) при наличии прогресса более
+      50% волны.
+  - id: double_credits
+    name: Удвоение Кибер-Чипов (Double Rewards)
+    benefit: Умножает собранные за забег нано-кредиты на 2 для ускорения постоянной
+      прокачки в хабе.
+    cooldown_or_limit: После каждого успешного забега
+    trigger_moment: Экран победы или подсчета результатов забега.
+  - id: reroll_augments
+    name: Хакерский Реролл (Augment Reroll)
+    benefit: Бесплатный сброс и повторная генерация 3 карточек roguelite-талантов
+      с гарантированным шансом на 1 эпический/легендарный чип.
+    cooldown_or_limit: 2 раза за забег
+    trigger_moment: Экран драфта талантов между волнами.
+  - id: starter_overdrive
+    name: Стартовый Гипер-Заряд
+    benefit: Начало забега с мгновенно активным режимом Overdrive на первой волне.
+    cooldown_or_limit: 1 раз перед стартом забега
+    trigger_moment: Главное меню перед нажатием кнопки «В БОЙ».
+  interstitial_placements:
+  - trigger_event: Завершение забега (победа или поражение) при возврате в Главное
+      меню.
+    cooldown_seconds: 120
+    conditions: Не показывается, если игрок только что посмотрел Rewarded Video (Revive
+      или Double Rewards), и не показывается новичкам в первых 2 обучающих забегах.
+  in_app_purchases:
+  - sku: cyber_starter_pack
+    name: Стартовый набор Кибер-Самурая
+    description: Легендарная плазменная катана 'Muramasa-2099', 5000 кибер-кредитов
+      и постоянное отключение межстраничной рекламы (No Ads).
+    price_tier: Tier 2 (~199-299 руб / $2.99)
+    reward: Катана Muramasa, 5000 credits, no_interstitial_flag = true
+  - sku: katana_skin_void_reaver
+    name: Катана 'Жнец Пустоты' (Void Reaver)
+    description: Премиальный облик клинка с анимацией черной дыры и фиолетовым шлейфом
+      расщепления материи.
+    price_tier: Tier 1 (~99-149 руб / $1.49)
+    reward: Скин оружия Void Reaver + уникальный след клинка
+  - sku: nanocredits_vault
+    name: Хранилище Нано-Кредитов (25 000)
+    description: Огромный запас валюты для мгновенного открытия всех мета-аугментаций
+      в древе технологий.
+    price_tier: Tier 3 (~499 руб / $4.99)
+    reward: 25 000 кибер-кредитов
+  fairness_rules:
+  - Любой уровень и босс проходимы на 100% чистым навыком игрока без доната и рекламы.
+  - Никаких внезапных рекламных баннеров прямо посреди динамичного боя.
+  - Четкий таймер обратного отсчета перед показом межстраничной рекламы с возможностью
+    быстрого закрытия.
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - crazygames
+  - gamepix
+  - telegram
+  - standalone_web
+  - android_capacitor
+  initialization_flow:
+  - Инициализация bridge.initialize() при старте загрузчика Vite.
+  - Определение платформы окружения и типа управления (touch/desktop mouse).
+  - Загрузка сохраненного профиля игрока через bridge.storage.get(['cyber_profile',
+    'settings']).
+  - Синхронизация локализации bridge.platform.language (RU/EN).
+  - Отправка события bridge.game.ready() после загрузки 3D-ассетов сцены.
+  cloud_save_keys:
+  - cyber_profile_v1
+  - unlocked_weapons
+  - talent_tree_state
+  - high_score_endless
+  - player_settings
+  leaderboards:
+  - cyber_slice_high_score
+  - boss_rush_time_attack
+  - max_combo_streak
+  ads_integration:
+    rewarded_handler: bridge.advertisement.showRewardedVideo() с перехватом событий
+      'rewarded', 'closed', 'failed'
+    interstitial_handler: bridge.advertisement.showInterstitial() с проверкой таймера
+      cooldown
+    banner_support: false
+  lifecycle_hooks:
+  - bridge.game.on('pause', () => pauseGame())
+  - bridge.game.on('resume', () => resumeGame())
+  - window.addEventListener('visibilitychange', () => handleVisibilityChange())
+art:
+  style_name: High-Contrast Cyberpunk Synthwave 3D
+  camera_perspective: Динамический изометрический вид от третьего лица под углом (Dynamic
+    Isometric Action Cam)
+  camera_fov: 52
+  camera_pitch_angle: 42
+  environment_theme: Крыши футуристического неонового мегаполиса с голографическими
+    билбордами, парящими кибер-автомобилями и светящимися сетками энергощитов под
+    дождем.
+  character_proportions: Стилизованные полуреалистичные кибернетические силуэты с
+    четко читаемой геометрией (Stylized Cyberpunk Mecha).
+  lighting_setup: Темное окружение с акцентным динамическим направленным светом (Key
+    Light), холодным голубым заполняющим светом (Fill Light) и яркими неоновыми Rim
+    Lights (малиновый и циан) по контурам врагов.
+  color_palette:
+    background_dark: '#0b0c16'
+    neon_cyan: '#00f0ff'
+    neon_magenta: '#ff0055'
+    neon_amber: '#ffaa00'
+    core_slice_glow: '#ffffff'
+    plasma_purple: '#8a2be2'
+  vfx_list:
+  - Неоновый светящийся шлейф за свайпом (Dynamic Blade Ribbon Mesh)
+  - Взрыв световых осколков и лазерных искр на плоскости среза (GPU Particle Burst)
+  - Кольцевая ударная волна при активации Bullet Time (Shockwave Distortion)
+  - Трассеры вражеских лазеров и пуль с остаточным свечением
+  - Голографические глифы урона и всплывающие комбо-надписи (SSS, SLICE x4!)
+  - Кибер-дождь со световыми отражениями на мокром полу арены
+  ui_theme: Футуристический кибер-HUD со скошенными углами, неоновой неоморфической
+    обводкой, цифровыми глитч-эффектами и моноширинной типографикой.
+ui_ux:
+  hud_elements:
+  - Центральный неоновый счетчик комбо и текущего ранга (D..SSS) с прогресс-баром
+    затухания
+  - Полукруглая шкала Хроно-Энергии (Chrono Energy) в левом нижнем углу
+  - Шкала прочности экзоскелета (HP Bar) и активные иконки перков в левом верхнем
+    углу
+  - Шкала здоровья Босса с сегментами фаз вверху экрана
+  - Счетчик нано-кредитов и номер текущей волны в правом верхнем углу
+  - Тактильный световой след под пальцем/курсором
+  screens:
+  - name: MainMenuScreen
+    description: 3D-витрина кибер-ниндзя с мечом, кнопки «В БОЙ», «ДОДЗЁ АУГМЕНТАЦИЙ»,
+      «АРСЕНАЛ КАТАН», «ЛИДЕРБОРДЫ» и переключатель звука.
+  - name: GameplayScreen
+    description: Минималистичный чистый HUD, максимальный фокус на арене и траекториях
+      свайпа.
+  - name: AugmentDraftModal
+    description: 3 парящие голографические карты кибер-чипов с описанием эффектов,
+      кнопка выбора и кнопка 'Хакерский Реролл' за рекламу.
+  - name: GameOverScreen
+    description: Анализ боя, достигнутый ранг, статистика срезов, кнопка 'Кибер-Реанимация
+      (Ad)' и кнопка перехода в меню.
+  - name: VictoryScreen
+    description: Эпичная победная стойка самурая, подсчет наград, кнопка 'Удвоить
+      кредиты (Ad)' и переход к следующему сектору.
+  mobile_controls_layout: 'Экран свободен от виртуальных джойстиков: вся область экрана
+    является сенсорным полотном. Касание в любой точке замедляет время, свайп в любом
+    направлении производит удар мечом.'
+  keyboard_controls:
+    Mouse Left Drag: Замедление времени и совершение свайп-среза
+    Spacebar: Экстренный рывок / Уклонение
+    Key Q: Активация ультимативного навыка (при 100% Heat)
+    Escape / Key P: Пауза игры
+  touch_controls:
+    Touch & Hold: Активация Bullet Time (замедление времени)
+    Swipe Gesture: Мгновенный срез по траектории пальца
+    Double Tap: Рывок уклонения в сторону тапа
+    Two Finger Tap: Пауза
+  wireframes_ascii: '+---------------------------------------------------+
+
+    | [HP: ======    ]  [WAVE 03/05]        [CREDITS: 1420]|
+
+    | [ACTIVE PERKS: (⚡)(⏳)(🛡️)]                        |
+
+    |                                                   |
+
+    |                    [ SSS ]                        |
+
+    |                   COMBO x14                       |
+
+    |                                                   |
+
+    |               / (Срез врага)                      |
+
+    |              /                                    |
+
+    |             * ===> [CYBER DRONE / 2 PARTS]        |
+
+    |            /                                      |
+
+    |                                                   |
+
+    | [(⚡) CHRONO ENERGY: 85%]                 [OVERDRIVE] |
+
+    +---------------------------------------------------+'
+mobile:
+  orientation: landscape
+  touch_implementation: 'Обработка Pointer Events с пассивными слушателями (passive:
+    false) и отменой системных жестов браузера (touch-action: none; e.preventDefault()).
+    Сглаживание сенсорного ввода с фильтрацией микро-дрожания пальца.'
+  safe_area_handling: Автоматический отступ критических UI элементов от челок и закруглений
+    экрана через CSS env(safe-area-inset-*).
+  performance_throttling:
+  - Динамическое масштабирование разрешения рендера (DPR от 1.0 до 1.5 в зависимости
+    от FPS).
+  - Ограничение максимального количества одновременно существующих физических обломков
+    до 24 штук с авто-растворением через 2.5 сек.
+  - Отключение тяжелых эффектов постобработки на слабых мобильных GPU (автодетект
+    WebGL renderer string).
+audio:
+  master_volume: 0.8
+  music_tracks:
+  - id: bgm_cyber_city
+    title: Neon Katana Protocol
+    style: Dark Synthwave / Cyberpunk Electro (135 BPM)
+    loop: true
+  - id: bgm_boss_surge
+    title: Overclocked Titan
+    style: Industrial Cyber-Metal with Heavy Synth Bass (150 BPM)
+    loop: true
+  sound_effects:
+  - id: sfx_slice_flesh_metal
+    description: Хрустящий лазерный щелчок рассечения брони и металла
+  - id: sfx_bullet_time_in
+    description: Глубокий вакуумный саб-басовый дроп при входе в замедление времени
+  - id: sfx_bullet_time_out
+    description: Звонкий щелчок затвора при возврате времени в норму
+  - id: sfx_parry_clash
+    description: Высокочастотный металлический звон при отражении пули клинком
+  - id: sfx_combo_rank_up
+    description: Стильный неоновый аккорд при повышении ранга комбо
+  - id: sfx_boss_armor_break
+    description: Массивный взрыв и скрежет отваливающейся титановой брони босса
+qa:
+  functional_tests:
+  - 'Тест рассечения: проверка корректности генерации двух валидных BufferGeometry
+    при любом угле свайпа без пропадания полигонов.'
+  - 'Тест Bullet Time: подтверждение замедления перемещения врагов и снарядов ровно
+    в 10 раз при сохранении 60 FPS рендеринга шлейфа пальца.'
+  - 'Тест комбо: проверка корректного сброса ранга при получении урона и сохранения
+    комбо при своевременном рассечении следующего врага.'
+  - 'Тест роглайт-перков: проверка наложения эффектов цепной молнии и корректной модификации
+    статов урона.'
+  - 'Тест Playgama Bridge: проверка корректности выдачи награды после просмотра Rewarded
+    Video и сохранения в Cloud Storage.'
+  performance_benchmarks:
+  - Стабильные 60 FPS на смартфонах уровня Xiaomi Redmi Note 10 / iPhone 11.
+  - Количество Draw Calls в бою не превышает 65.
+  - Потребление оперативной памяти вкладки браузера не превышает 180 МБ.
+  - Время начальной загрузки и старта игры не более 2.8 секунд на 4G соединении.
+  cross_browser_matrix:
+  - Google Chrome (Desktop Windows/Mac)
+  - Apple Safari (iOS 15+ Mobile Safari)
+  - Yandex Browser (Desktop & Android Mobile App)
+  - VK App WebView (Android & iOS)
+  - Samsung Internet (Android)
+  common_bug_checklist:
+  - Отсутствие утечек памяти в Three.js (обязательный geometry.dispose() и material.dispose()
+    для отсеченных частей).
+  - Исключение залипания состояния замедления времени при случайном уводе пальца за
+    пределы экрана.
+  - Корректное возобновление аудио-контекста (AudioContext resume) после первого клика
+    пользователя.
+  - Корректная обработка смены ориентации экрана и изменения размеров окна (window
+    resize).
+roadmap:
+- phase_number: 1
+  title: Прототип ядра механики свайп-среза и замедления времени
+  duration_days: 3
+  tasks:
+  - Настройка Vite + Three.js + TypeScript окружения
+  - Разработка модуля математического рассечения BufferGeometry плоскостью
+  - Реализация контроллера свайпа с шлейфом клинка и механики Bullet Time при тапе
+  - Базовая сцена с летающими тестовыми кубами и манекенами
+  milestone_deliverable: 'Играбельный веб-прототип: игрок может свайпами в замедлении
+    времени разрезать падающие 3D-объекты на кусочки.'
+- phase_number: 2
+  title: Киберпанк-визуализация, комбо-система и боевой цикл врагов
+  duration_days: 4
+  tasks:
+  - Интеграция 3D-моделей кибер-дронов, ниндзя и турелей с материалами расплавленного
+    ядра
+  - Настройка неонового пост-процессинга (Bloom, Chromatic Aberration, шлейфы)
+  - Создание системы комбо-множителей, рангов (D->SSS) и режима Overdrive
+  - Интеграция звукового движка Howler.js с динамической реакцией на Bullet Time
+  milestone_deliverable: Полноценная боевая арена с волнами атакующих противников,
+    снарядами, сочными звуками и вспышками комбо.
+- phase_number: 3
+  title: Боссфайт, древо Roguelite-талантов и мета-прокачка
+  duration_days: 3
+  tasks:
+  - Разработка многофазного босса 'Кибер-Титан' с механикой направленных срезов уязвимостей
+  - Создание системы драфта 15+ уникальных кибер-чипов и перков между волнами
+  - Создание главного меню, додзё постоянных улучшений и арсенала смены катан
+  milestone_deliverable: 'Завершенный игровой цикл: прохождение секторов, прокачка
+    билда, победа над боссом и апгрейды в хабе.'
+- phase_number: 4
+  title: Интеграция Playgama Bridge, монетизация, оптимизация и релиз
+  duration_days: 2
+  tasks:
+  - Подключение @playgama/bridge (Rewarded Ad для Revive, Interstitial с cooldown,
+    Cloud Save)
+  - Настройка глобальных лидербордов и локализации (RU/EN)
+  - Мобильная оптимизация (пулинг объектов, сжатие текстур KTX2/WebP, safe-area)
+  - QA тестирование на мобильных и десктопных браузерах
+  milestone_deliverable: Релизный билд, готовый к публикации на Yandex Games, VK Play
+    и мобильных сторах.
+risks:
+- risk: Просадки производительности (GC Stutter) при частом создании новых BufferGeometry
+    во время интенсивной нарезки десятков врагов.
+  category: technical
+  severity: High
+  mitigation: Использование пула предвыделенных буферов вершин/индексов (TypedArray
+    Object Pooling) и мгновенное ограничение максимального числа активных осколков.
+- risk: Случайные ложные свайпы на мобильных экранах при попытке просто повернуть
+    камеру или нажать на экран.
+  category: design
+  severity: Medium
+  mitigation: Камера фиксирована в динамическом изометрическом ракурсе; любое касание
+    трактуется как вход в Bullet Time, а свайп длиннее 25 пикселей — как удар.
+- risk: Блокировка звука браузером до первого взаимодействия с пользователем.
+  category: technical
+  severity: Low
+  mitigation: Запуск AudioContext строго по первому пользовательскому PointerDown
+    на экране приветствия.
+skills:
+- skill_id: threejs-geometry-slicer
+  name: Процедурный 3D Слайсер Геометрии для Three.js
+  filename: skills/threejs-geometry-slicer.md
+  purpose: Обеспечить высокопроизводительное рассечение BufferGeometry плоскостью
+    с генерацией неонового среза без утечек памяти.
+  when_to_use: При создании боевой системы свайп-слэшеров и разрушаемых трехмерных
+    объектов.
+  rules:
+  - Всегда утилизировать старые BufferGeometry через .dispose() при удалении объектов.
+  - Использовать единый шейдерный материал для всех внутренних срезов для минимизации
+    Draw Calls.
+  - Ограничивать глубину повторного разрезания одного и того же осколка до 2 раз.
+  architecture: Plane Math Intersection -> Vertex Interpolation -> Triangulation Subroutine
+    -> Multi-Mesh Spawn with Rapier3D Impulses.
+  implementation_guidance: Используйте алгоритм классификации вершин по знаку скалярного
+    произведения с нормалью секущей плоскости. Ребра, пересекающие плоскость, делятся
+    в точке интерполяции t = (d - dot(n, v1)) / dot(n, v2 - v1).
+  common_mistakes:
+  - Создание новых материалов в цикле рендера вместо использования общего пула материалов.
+  - Забывание обновления индексного буфера geometry.setIndex().
+  checklist:
+  - Проверен расчет нормалей и UV-координат на срезе
+  - Включен пулинг геометрии
+  - Настроены коллайдеры для половинок в Rapier3D
+  knowledge_refs:
+  - Three.js BufferGeometry documentation
+  - 'Computational Geometry: Plane-Mesh Intersection Algorithms'
+- skill_id: playgama-bridge-integration
+  name: Интеграция Playgama Bridge для WebGL-игр
+  filename: skills/playgama-bridge-integration.md
+  purpose: Обеспечить стабильную работу рекламы, облачных сохранений и лидербордов
+    на всех поддерживаемых площадках (Yandex Games, VK, CrazyGames).
+  when_to_use: При подготовке финальной сборки и настройке монетизации Web/Mobile
+    проектов.
+  rules:
+  - Всегда глушить звук игры при показе рекламы и ставить игровой процесс на паузу.
+  - Никогда не вызывать Interstitial без проверки таймера кулдауна (минимум 90-120
+    сек).
+  - Всегда обрабатывать сценарии сбоя показа рекламы (ad failed) без блокировки интерфейса
+    игрока.
+  architecture: Bridge Facade Pattern -> Platform Event Listeners -> Storage & Ad
+    Handlers.
+  implementation_guidance: Инициализируйте bridge в entry-point файле main.ts до запуска
+    игрового цикла. Подписывайтесь на события паузы и отключения звука.
+  common_mistakes:
+  - Показ рекламы во время динамичного боя или свайпа игрока.
+  - Потеря наград игрока при сетевых ошибках в Rewarded Video.
+  checklist:
+  - Протестированы события ad_started и ad_closed
+  - Настроено сохранение прогресса в Cloud Storage
+  - Проверена работа на мобильных WebView
+  knowledge_refs:
+  - Playgama Bridge SDK 2.x Documentation
+  - Yandex Games SDK Best Practices
+- skill_id: game_skill
+  name: 'CYBER SLICE: BULLET PROTOCOL (Кибер Срез: Протокол Времени) Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for CYBER
+    SLICE: BULLET PROTOCOL (Кибер Срез: Протокол Времени).'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: THREEJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for THREEJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - threejs/adaptive_quality.md
+  - threejs/mobile_shaders.md
+  - threejs/performance_guide.md
+  - threejs/physics_integration.md
+  - threejs/vehicle_wheel_rig.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''CYBER SLICE: BULLET PROTOCOL
+  (Кибер Срез: Протокол Времени)'', a Экшен-слэшер / Аркада game. Visual style: High-Contrast
+  Cyberpunk Synthwave 3D. Camera perspective: Динамический изометрический вид от третьего
+  лица под углом (Dynamic Isometric Action Cam). Environment: Крыши футуристического
+  неонового мегаполиса с голографическими билбордами, парящими кибер-автомобилями
+  и светящимися сетками энергощитов под дождем.. Central Action: The player character
+  (Ты — элитный аугментированный кибер-ниндзя с тактическим ква...) is actively engaging
+  enemies in combat, striking with visible weapon trail arcs and dynamic particle
+  sparks at the impact point. An enemy is reeling with physics momentum. Visible in-game
+  HUD overlay: health bar at top-left, wave and enemies remaining at top-center, gold
+  counter at top-right, crowd hype gauge at bottom-center, and touch action controls
+  at bottom corners. Crisp lighting: Темное окружение с акцентным динамическим направленным
+  светом (Key Light), холодным голубым заполняющим светом (Fill Light) и яркими неоновыми
+  Rim Lights (малиновый и циан) по контурам врагов., high visual clarity, immersive
+  WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Реализовано точное процедурное разрезание 3D-мешей под любым углом свайпа в Three.js.
+- Работает замедление времени (Bullet Time) с расходом и регенерацией энергии.
+- Интегрирована неоновая киберпанк-стилистика, шейдеры следа меча и комбо-счетчик
+  с рангами.
+- Реализована минимум 1 арена с 5 волнами врагов и 1 многофазным боссом.
+- Работает драфт roguelite-талантов между волнами с модификацией способностей игрока.
+- 'Интегрирован Playgama Bridge: показ Rewarded Ad для ревайва и удвоения очков, облачные
+  сохранения.'
+- Обеспечена стабильная производительность 60 FPS на десктопных и мобильных тач-устройствах.

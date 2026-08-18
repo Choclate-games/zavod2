@@ -1,23 +1,31 @@
 """
-Терминальные кодовые агенты кроме AGY: Claude Code, OpenAI Codex и Kimi CLI.
+Терминальные кодовые агенты кроме AGY: Claude Code, OpenAI Codex, Kimi CLI и
+OpenCode CLI.
 
-Все три работают по одной схеме: локальный исполняемый файл получает промпт в
+Все они работают по одной схеме: локальный исполняемый файл получает промпт в
 неинтерактивном режиме и стримит ход работы в stdout. Модуль приводит их вывод
 к тем же событиям, что и `providers.agy.AGYProvider`
 (`system` / `assistant` / `tool` / `tool_result` / `result` / `error` / `raw`),
 поэтому чат-лента и журнал студии работают с любым агентом без изменений.
 
+Список моделей берётся у самого CLI — так же, как `agy models` у AGY:
+`opencode models`, `kimi provider list --json`, кэш моделей Codex
+(`~/.codex/models_cache.json`). Если CLI не отвечает, показывается встроенный
+список по умолчанию.
+
 Флаги CLI меняются от версии к версии, поэтому каждую команду можно поправить
 без правки кода — переменными окружения:
 
-    CLAUDE_CLI_PATH / CODEX_CLI_PATH / KIMI_CLI_PATH   путь к исполняемому файлу
-    CLAUDE_MODEL   / CODEX_MODEL   / KIMI_MODEL        модель по умолчанию
-    CLAUDE_MODELS  / CODEX_MODELS  / KIMI_MODELS       список моделей для GUI
+    CLAUDE_CLI_PATH / CODEX_CLI_PATH / KIMI_CLI_PATH / OPENCODE_CLI_PATH
+                                                       путь к исполняемому файлу
+    CLAUDE_MODEL  / CODEX_MODEL  / KIMI_MODEL  / OPENCODE_MODEL
+                                                       модель по умолчанию
+    CLAUDE_MODELS / CODEX_MODELS / KIMI_MODELS / OPENCODE_MODELS
+                                                       свой список моделей для GUI
+    CLAUDE_EFFORT / CODEX_EFFORT / OPENCODE_EFFORT     уровень рассуждений
+                                                       (у Kimi CLI такого флага нет)
     CLAUDE_EXTRA_ARGS / ...                            доп. аргументы к запуску
     KIMI_PRINT_FLAG                                    флаг неинтерактивного режима
-
-Kimi CLI намеренно запускается в текстовом режиме: у него нет стабильного
-машинного формата вывода, поэтому строки показываются как ответ ассистента.
 """
 
 from __future__ import annotations
@@ -78,6 +86,8 @@ class CodingCLIAgent(AIProvider):
     env_prefix = "CLI"
     supports_resume = False
     default_models: tuple[str, ...] = ()
+    # Уровни рассуждений, которые понимает CLI (пусто — флага нет вовсе)
+    effort_levels: tuple[str, ...] = ()
     # Подкоманда входа в аккаунт (None — вход делается изнутри сессии, /login)
     login_command: Optional[str] = None
     login_hint = "Запустите CLI в терминале и выполните вход в аккаунт."
@@ -92,9 +102,9 @@ class CodingCLIAgent(AIProvider):
     ):
         self.cli_path = cli_path or os.getenv(f"{self.env_prefix}_CLI_PATH", self.default_cli)
         self.model = (model or os.getenv(f"{self.env_prefix}_MODEL") or "").strip() or None
-        # `effort` принимает только AGY; здесь параметр есть ради единого вызова
-        # из GUI и намеренно игнорируется.
-        self.effort = effort
+        # Уровень рассуждений: применяется только теми CLI, у которых он есть
+        # (см. effort_levels), остальные молча его игнорируют.
+        self.effort = (effort or os.getenv(f"{self.env_prefix}_EFFORT") or "").strip() or None
         self.yolo = yolo
         self.timeout_seconds = timeout_seconds
         self.fallback = LocalAIProvider()
@@ -105,6 +115,10 @@ class CodingCLIAgent(AIProvider):
 
     def resolve_cli(self) -> Optional[str]:
         """Абсолютный путь к CLI или None, если его нет в системе."""
+        found = self._resolve_raw()
+        return self._native_binary(found) or found if found else None
+
+    def _resolve_raw(self) -> Optional[str]:
         found = shutil.which(self.cli_path)
         if found:
             return found
@@ -126,11 +140,51 @@ class CodingCLIAgent(AIProvider):
                     return str(probe)
         return None
 
+    @staticmethod
+    def _native_binary(shim: Optional[str]) -> Optional[str]:
+        """
+        Родной .exe вместо npm-обёртки .cmd.
+
+        Обёртка запускается через cmd.exe, а тот обрезает аргумент на первом
+        переносе строки — многострочный промпт (а он у нас всегда такой) дошёл
+        бы до агента только первой строкой. Родной бинарник получает аргументы
+        напрямую и такой проблемы не имеет.
+        """
+        if not shim or sys.platform != "win32":
+            return None
+        path = Path(shim)
+        if path.suffix.lower() not in (".cmd", ".bat"):
+            return None
+
+        sibling = path.with_suffix(".exe")
+        if sibling.is_file():
+            return str(sibling)
+
+        # npm кладёт бинарник пакета в node_modules/<пакет>/bin/<имя>.exe
+        modules = path.parent / "node_modules"
+        for pattern in (f"*/bin/{path.stem}.exe", f"*/*/bin/{path.stem}.exe"):
+            for candidate in modules.glob(pattern):
+                if candidate.is_file():
+                    return str(candidate)
+        return None
+
     def is_available(self) -> bool:
         return self.resolve_cli() is not None
 
     def extra_args(self) -> List[str]:
         return _split_args(os.getenv(f"{self.env_prefix}_EXTRA_ARGS", ""))
+
+    def prepare_env(self, env: Dict[str, str]) -> Dict[str, str]:
+        """Окружение дочернего процесса — наследники могут его подчистить."""
+        return env
+
+    def effort_args(self) -> List[str]:
+        """Аргументы уровня рассуждений (пусто, если CLI его не поддерживает)."""
+        return []
+
+    def effort_flag(self) -> Optional[str]:
+        """Выбранный уровень, если CLI действительно умеет такие уровни."""
+        return self.effort if self.effort in self.effort_levels else None
 
     # ── Команды (переопределяются наследниками) ──────────────────────────
 
@@ -274,7 +328,7 @@ class CodingCLIAgent(AIProvider):
         )
         emit({"kind": "system", "icon": "▶", "text": shown_cmd})
 
-        env = os.environ.copy()
+        env = self.prepare_env(os.environ.copy())
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -356,6 +410,10 @@ class CodingCLIAgent(AIProvider):
 
         return proc.returncode, "".join(collected)
 
+    def postprocess_plain_output(self, raw: str) -> str:
+        """Приведение вывода «одним ответом» к чистому тексту (по умолчанию — как есть)."""
+        return raw
+
     def run_once(self, prompt: str, cwd: Optional[Path] = None) -> str:
         """Одноразовый неинтерактивный прогон — для генерации текста и тестов."""
         cli = self.resolve_cli()
@@ -364,7 +422,7 @@ class CodingCLIAgent(AIProvider):
 
         cmd = self.build_plain_command(prompt)
         cmd[0] = cli
-        env = os.environ.copy()
+        env = self.prepare_env(os.environ.copy())
         env["PYTHONIOENCODING"] = "utf-8"
         work_dir = str(Path(cwd).resolve()) if cwd and Path(cwd).is_dir() else None
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -387,7 +445,7 @@ class CodingCLIAgent(AIProvider):
             err = (result.stderr or "").strip() or (result.stdout or "").strip()[-500:]
             raise RuntimeError(f"{self.title}: ошибка выполнения — {err or result.returncode}")
 
-        return (result.stdout or "").strip()
+        return self.postprocess_plain_output(result.stdout or "").strip()
 
     def launch_interactive_terminal(
         self,
@@ -405,18 +463,67 @@ class CodingCLIAgent(AIProvider):
         else:
             subprocess.Popen(["x-terminal-emulator", "-e", f'cd "{cwd}" && {cmd_part}'])
 
+    def discover_models(self, timeout_seconds: int = 60) -> List[str]:
+        """
+        Настоящий список моделей от CLI (пустой — если узнать нельзя).
+
+        Наследники спрашивают свой CLI так же, как AGY спрашивает `agy models`.
+        """
+        return []
+
+    def run_cli(self, args: List[str], timeout_seconds: int = 60) -> str:
+        """Служебный вызов CLI (`models`, `provider list` и т. п.) → stdout."""
+        cli = self.resolve_cli()
+        if not cli:
+            raise RuntimeError(f"CLI '{self.cli_path}' не найден.")
+        env = self.prepare_env(os.environ.copy())
+        env["PYTHONIOENCODING"] = "utf-8"
+        result = subprocess.run(
+            [cli] + args,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL, timeout=timeout_seconds, env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip()[-300:]
+            raise RuntimeError(err or f"код возврата {result.returncode}")
+        return result.stdout or ""
+
     def list_models(self, timeout_seconds: int = 60) -> Dict[str, Any]:
-        """Список моделей для выпадающего списка (из .env либо встроенный)."""
+        """
+        Список моделей для выпадающего списка.
+
+        Приоритет: явный список из .env → ответ самого CLI → встроенный список.
+        """
         configured = [m.strip() for m in os.getenv(f"{self.env_prefix}_MODELS", "").split(",") if m.strip()]
-        models = configured or list(self.default_models)
-        if not models:
-            return {"status": "error", "models": [],
-                    "message": f"Для {self.title} список моделей не задан "
-                               f"(укажите {self.env_prefix}_MODELS в .env)."}
+        if configured:
+            return {"status": "success", "models": configured,
+                    "message": f"Список из .env ({self.env_prefix}_MODELS): {len(configured)}"}
+
         if not self.is_available():
-            return {"status": "error", "models": models,
+            return {"status": "error", "models": list(self.default_models),
                     "message": f"CLI '{self.cli_path}' не найден, показан список по умолчанию."}
-        return {"status": "success", "models": models, "message": f"Найдено моделей: {len(models)}"}
+
+        problem = ""
+        try:
+            discovered = self.discover_models(timeout_seconds)
+        except subprocess.TimeoutExpired:
+            discovered, problem = [], f"{self.title} не ответил за {timeout_seconds} с."
+        except Exception as exc:
+            discovered, problem = [], str(exc)
+
+        if discovered:
+            return {"status": "success", "models": discovered,
+                    "message": f"Найдено моделей: {len(discovered)}"}
+
+        fallback = list(self.default_models)
+        if not fallback:
+            return {"status": "error", "models": [],
+                    "message": problem or f"Для {self.title} список моделей не задан "
+                                          f"(укажите {self.env_prefix}_MODELS в .env)."}
+        return {"status": "success", "models": fallback,
+                "message": (f"CLI не отдал список ({problem}), показан встроенный."
+                            if problem else "Встроенный список моделей.")}
 
     def test_connection(self) -> Dict[str, Any]:
         if not self.is_available():
@@ -499,7 +606,20 @@ class ClaudeCodeAgent(CodingCLIAgent):
     env_prefix = "CLAUDE"
     supports_resume = True
     default_models = ("opus", "sonnet", "haiku")
+    effort_levels = ("low", "medium", "high", "xhigh", "max")
     login_hint = "В открытом терминале выполните /login и вернитесь в фабрику."
+
+    def effort_args(self) -> List[str]:
+        level = self.effort_flag()
+        return ["--effort", level] if level else []
+
+    def discover_models(self, timeout_seconds: int = 60) -> List[str]:
+        """
+        У Claude Code нет команды со списком моделей: CLI принимает псевдонимы
+        (`opus` / `sonnet` / `haiku`) и полные имена. Отдаём псевдонимы —
+        они всегда указывают на актуальную версию модели.
+        """
+        return list(self.default_models)
 
     def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
         cmd = [self.cli_path, "-p", prompt, "--output-format", "stream-json", "--verbose"]
@@ -509,7 +629,7 @@ class ClaudeCodeAgent(CodingCLIAgent):
             cmd.extend(["--model", self.model])
         if conversation_id:
             cmd.extend(["--resume", conversation_id])
-        return cmd + self.extra_args()
+        return cmd + self.effort_args() + self.extra_args()
 
     def build_plain_command(self, prompt: str) -> List[str]:
         cmd = [self.cli_path, "-p", prompt]
@@ -517,7 +637,7 @@ class ClaudeCodeAgent(CodingCLIAgent):
             cmd.append("--dangerously-skip-permissions")
         if self.model:
             cmd.extend(["--model", self.model])
-        return cmd + self.extra_args()
+        return cmd + self.effort_args() + self.extra_args()
 
     def extract_conversation_id(self, data: Dict[str, Any]) -> Optional[str]:
         return data.get("session_id")
@@ -604,10 +724,35 @@ class CodexAgent(CodingCLIAgent):
     default_cli = "codex"
     env_prefix = "CODEX"
     supports_resume = True
-    default_models = ("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5", "o3")
+    default_models = ("gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini")
+    # Отдельного флага у codex нет — уровень задаётся ключом конфигурации
+    effort_levels = ("low", "medium", "high", "xhigh", "max")
     login_command = "login"
     login_hint = "Пройдите вход в открывшемся терминале и вернитесь в фабрику."
     noise_patterns = ("reading additional input from stdin",)
+
+    def effort_args(self) -> List[str]:
+        level = self.effort_flag()
+        return ["-c", f'model_reasoning_effort="{level}"'] if level else []
+
+    def discover_models(self, timeout_seconds: int = 60) -> List[str]:
+        """
+        Codex не умеет печатать список моделей, но хранит его в кэше
+        `~/.codex/models_cache.json` — оттуда список и берём (без скрытых
+        служебных моделей вроде codex-auto-review).
+        """
+        cache = Path(os.getenv("CODEX_HOME", Path.home() / ".codex")) / "models_cache.json"
+        if not cache.is_file():
+            raise RuntimeError(f"кэш моделей не найден: {cache}")
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        models: List[str] = []
+        for item in data.get("models") or []:
+            if not isinstance(item, dict) or item.get("visibility") == "hide":
+                continue
+            slug = (item.get("slug") or "").strip()
+            if slug and slug not in models:
+                models.append(slug)
+        return models
 
     def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
         cmd = [self.cli_path, "exec"]
@@ -618,7 +763,7 @@ class CodexAgent(CodingCLIAgent):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if self.model:
             cmd.extend(["--model", self.model])
-        return cmd + self.extra_args() + [prompt]
+        return cmd + self.effort_args() + self.extra_args() + [prompt]
 
     def build_plain_command(self, prompt: str) -> List[str]:
         cmd = [self.cli_path, "exec", "--skip-git-repo-check"]
@@ -626,7 +771,7 @@ class CodexAgent(CodingCLIAgent):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if self.model:
             cmd.extend(["--model", self.model])
-        return cmd + self.extra_args() + [prompt]
+        return cmd + self.effort_args() + self.extra_args() + [prompt]
 
     def interactive_command(self, prompt: Optional[str], bare: bool) -> str:
         exe = self.resolve_cli() or self.cli_path
@@ -745,9 +890,15 @@ class KimiAgent(CodingCLIAgent):
     default_cli = "kimi"
     env_prefix = "KIMI"
     supports_resume = True
-    default_models = ("kimi-k2-turbo-preview", "kimi-k2-0905-preview", "kimi-latest")
+    default_models = ("kimi-code/kimi-for-coding", "kimi-code/kimi-for-coding-highspeed")
     login_command = "login"
     login_hint = "В открытом терминале пройдите вход по коду устройства и вернитесь в фабрику."
+
+    def discover_models(self, timeout_seconds: int = 60) -> List[str]:
+        """Псевдонимы моделей из конфигурации CLI (`kimi provider list --json`)."""
+        raw = self.run_cli(["provider", "list", "--json"], timeout_seconds)
+        data = json.loads(_extract_json_string(raw))
+        return [str(alias) for alias in (data.get("models") or {})]
 
     def print_flag(self) -> str:
         return os.getenv("KIMI_PRINT_FLAG", "-p").strip()
@@ -813,10 +964,194 @@ class KimiAgent(CodingCLIAgent):
         return self._generic_json_event(data)
 
 
+# ---------------------------------------------------------------------------
+# OpenCode CLI
+# ---------------------------------------------------------------------------
+
+class OpenCodeCLIAgent(CodingCLIAgent):
+    """
+    OpenCode CLI (`opencode run --format json`).
+
+    Модель задаётся в формате `provider/model` (`opencode-go/kimi-k3`), список
+    отдаёт сама команда `opencode models`. Возобновление беседы — `--session`,
+    авто-подтверждение инструментов — `--auto` (наш режим YOLO).
+    """
+
+    key = "opencode"
+    title = "OpenCode CLI"
+    icon = "💎"
+    default_cli = "opencode"
+    env_prefix = "OPENCODE"
+    supports_resume = True
+    default_models = ("opencode-go/kimi-k3", "opencode-go/glm-5.3", "opencode-go/gpt-5.6-luna")
+    # У opencode уровень называется variant и зависит от провайдера модели
+    effort_levels = ("minimal", "low", "medium", "high", "max")
+    login_command = "auth login"
+    login_hint = "В открытом терминале выберите провайдера и выполните вход, затем вернитесь в фабрику."
+
+    # Ключи, по которым opencode сам подключает «чужого» провайдера. У фабрики
+    # DASHSCOPE_* нужен только для картинок Qwen, но CLI видит его и уходит на
+    # dashscope.aliyuncs.com («Incorrect API key provided»), игнорируя подписку.
+    hidden_env_keys = ("DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL")
+
+    def prepare_env(self, env: Dict[str, str]) -> Dict[str, str]:
+        for key in self.hidden_env_keys:
+            env.pop(key, None)
+        return env
+
+    @staticmethod
+    def authorized_providers() -> List[str]:
+        """
+        Провайдеры, для которых в CLI сохранён вход (`opencode auth login`).
+
+        `opencode models` печатает весь каталог models.dev — полторы сотни строк,
+        из которых доступны единицы. Ключи из auth.json позволяют оставить в
+        выпадающем списке только то, чем реально можно пользоваться.
+        """
+        candidates: List[Path] = []
+        xdg = os.getenv("XDG_DATA_HOME")
+        if xdg:
+            candidates.append(Path(xdg) / "opencode" / "auth.json")
+        candidates.append(Path.home() / ".local" / "share" / "opencode" / "auth.json")
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                continue
+            if isinstance(data, dict):
+                return [str(key) for key in data]
+        return []
+
+    def discover_models(self, timeout_seconds: int = 60) -> List[str]:
+        """Список `provider/model` от самого CLI (`opencode models`)."""
+        raw = self.run_cli(["models"], timeout_seconds)
+        models: List[str] = []
+        for line in raw.splitlines():
+            token = line.strip()
+            if "/" in token and " " not in token and token not in models:
+                models.append(token)
+
+        # «opencode» — бесплатный шлюз, он доступен всегда; остальные провайдеры
+        # показываем, только если для них выполнен вход.
+        allowed = tuple(f"{name}/" for name in ["opencode"] + self.authorized_providers())
+        mine = [m for m in models if m.startswith(allowed)]
+        return mine or models
+
+    def effort_args(self) -> List[str]:
+        level = self.effort_flag()
+        return ["--variant", level] if level else []
+
+    def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
+        cmd = [self.cli_path, "run", "--format", "json"]
+        if self.yolo:
+            cmd.append("--auto")
+        if self.model:
+            cmd.extend(["--model", self.model])
+        if conversation_id:
+            cmd.extend(["--session", conversation_id])
+        return cmd + self.effort_args() + self.extra_args() + [prompt]
+
+    def build_plain_command(self, prompt: str) -> List[str]:
+        # Тоже json: в обычном режиме CLI рисует рамки и цвета, из которых не
+        # вытащить ни текст ответа, ни JSON для структурированного вывода.
+        cmd = [self.cli_path, "run", "--format", "json"]
+        if self.yolo:
+            cmd.append("--auto")
+        if self.model:
+            cmd.extend(["--model", self.model])
+        return cmd + self.effort_args() + self.extra_args() + [prompt]
+
+    def postprocess_plain_output(self, raw: str) -> str:
+        """Склеивает текстовые части из потока событий в обычный ответ."""
+        chunks: List[str] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            part = data.get("part") if isinstance(data.get("part"), dict) else {}
+            if (part.get("type") or data.get("type")) != "text":
+                continue
+            time_info = part.get("time")
+            if isinstance(time_info, dict) and not time_info.get("end"):
+                continue
+            text = part.get("text") or data.get("text") or ""
+            if text.strip():
+                chunks.append(text)
+        return "\n".join(chunks).strip() or raw.strip()
+
+    def interactive_command(self, prompt: Optional[str], bare: bool) -> str:
+        exe = self.resolve_cli() or self.cli_path
+        exe_part = f'"{exe}"' if " " in exe else exe
+        if bare:
+            return f"{exe_part} auth login"
+        if not prompt:
+            return exe_part
+        clean = prompt.replace('"', '""').replace("\n", " ").replace("\r", "")[:1200]
+        auto_flag = " --auto" if self.yolo else ""
+        return f'{exe_part} run{auto_flag} "{clean}"'
+
+    def extract_conversation_id(self, data: Dict[str, Any]) -> Optional[str]:
+        return data.get("sessionID")
+
+    def parse_json_event(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        etype = data.get("type")
+        part = data.get("part") if isinstance(data.get("part"), dict) else {}
+        ptype = part.get("type") or etype
+
+        if ptype in ("step-start", "step_start"):
+            return None
+
+        if ptype == "text":
+            text = part.get("text") or data.get("text") or ""
+            # Текстовая часть приходит несколько раз по мере генерации: в ленту
+            # отдаём только готовую (с проставленным временем окончания).
+            time_info = part.get("time")
+            if isinstance(time_info, dict) and not time_info.get("end"):
+                return None
+            return {"kind": "assistant", "text": text + "\n"} if text.strip() else None
+
+        if ptype == "reasoning":
+            text = (part.get("text") or "").strip()
+            return {"kind": "meta", "text": f"💭 {_shorten(text, 200)}"} if text else None
+
+        if ptype == "tool":
+            state = part.get("state") if isinstance(part.get("state"), dict) else {}
+            status = state.get("status")
+            name = part.get("tool") or "tool"
+            if status in ("completed", "error"):
+                output = state.get("output") or state.get("error") or "готово"
+                return {"kind": "tool_result", "text": _shorten(str(output)), "meta": str(status)}
+            params = state.get("input") if isinstance(state.get("input"), dict) else {}
+            detail = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
+            return {"kind": "tool", "tool": name,
+                    "title": f"Инструмент: {name}", "detail": _shorten(detail, 300)}
+
+        if ptype in ("step-finish", "step_finish"):
+            tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+            total = (int(tokens.get("input") or 0) + int(tokens.get("output") or 0)
+                     + int(tokens.get("reasoning") or 0))
+            return {"kind": "result", "status": "SUCCESS", "text": "",
+                    "tokens": total, "duration": "—"}
+
+        if etype == "error" or data.get("error"):
+            error = data.get("error") or part.get("error") or data.get("message")
+            text = error.get("message") if isinstance(error, dict) else str(error)
+            return {"kind": "error", "text": text or "OpenCode сообщил об ошибке."}
+
+        return self._generic_json_event(data)
+
+
 AGENT_CLASSES: Dict[str, Type[CodingCLIAgent]] = {
     ClaudeCodeAgent.key: ClaudeCodeAgent,
     CodexAgent.key: CodexAgent,
     KimiAgent.key: KimiAgent,
+    OpenCodeCLIAgent.key: OpenCodeCLIAgent,
 }
 
 # Ключи, которые GUI и фабрика провайдеров считают «терминальными агентами».

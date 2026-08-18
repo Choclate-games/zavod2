@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Воксельный Измельчитель ASMR 3D</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Three.js Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- Loading Splash Screen -->
+  <div id="loading-screen" class="loading-overlay">
+    <div class="loading-content">
+      <div class="shredder-icon-anim">⚙️⚡⚙️</div>
+      <h1 class="game-title">ВОКСЕЛЬНЫЙ ИЗМЕЛЬЧИТЕЛЬ</h1>
+      <div class="subtitle">ASMR 3D</div>
+      <div class="progress-bar-container">
+        <div id="loading-progress-bar" class="progress-bar-fill"></div>
+      </div>
+      <div id="loading-status-text" class="loading-status">Загрузка ресурсов...</div>
+    </div>
+  </div>
+
+  <!-- Main Game HUD Overlay -->
+  <div id="game-hud" class="hud-layer hidden">
+    <!-- Top Header -->
+    <header class="hud-top">
+      <div class="hud-top-left">
+        <button id="btn-gallery" class="icon-btn" title="Коллекции">
+          <span class="icon">📦</span>
+          <span class="badge" id="gallery-badge">1/16</span>
+        </button>
+        <button id="btn-shop" class="icon-btn" title="Магазин">
+          <span class="icon">🛒</span>
+        </button>
+      </div>
+
+      <div class="hud-top-center">
+        <div class="model-info">
+          <span id="model-name-text" class="model-title">Пончик с глазурью</span>
+          <div class="model-progress-bar">
+            <div id="model-progress-fill" class="model-progress-fill"></div>
+            <span id="model-percent-text" class="model-percent">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-top-right">
+        <div class="coins-pill">
+          <span class="coin-icon">🪙</span>
+          <span id="hud-coins-text" class="coins-amount">0</span>
+        </div>
+        <button id="btn-sound" class="icon-btn sound-toggle" title="Звук">
+          <span id="sound-icon" class="icon">🔊</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Floating Tap / Boost Guide & Combo Indicator -->
+    <div class="center-hud-zone">
+      <div id="turbo-banner" class="turbo-banner hidden">
+        <div class="turbo-pulse">⚡ ТУРБО x3! ⚡</div>
+      </div>
+      <div id="combo-gauge-wrapper" class="combo-gauge-wrapper">
+        <div class="combo-text">ТАПАЙ ДЛЯ УСКОРЕНИЯ!</div>
+        <div class="combo-bar">
+          <div id="combo-fill" class="combo-fill"></div>
+        </div>
+      </div>
+      <div id="floating-numbers-container" class="floating-numbers-container"></div>
+    </div>
+
+    <!-- Active Bonuses / Ad Boost Bar -->
+    <div class="bonus-quick-bar">
+      <button id="btn-mega-boost" class="bonus-btn" title="Мега-Турбо (30 сек)">
+        <span class="bonus-icon">🚀</span>
+        <div class="bonus-info">
+          <span class="bonus-name">Мега-Турбо x5</span>
+          <span id="mega-boost-timer" class="bonus-timer">Реклама</span>
+        </div>
+      </button>
+    </div>
+
+    <!-- Bottom Upgrades Shelf -->
+    <footer class="hud-bottom">
+      <div class="upgrades-scroll-container">
+        <!-- Upgrade Card 1: Width -->
+        <button id="btn-upgrade-width" class="upgrade-card">
+          <div class="upg-header">
+            <span class="upg-icon">↔️</span>
+            <span class="upg-title">Ширина</span>
+            <span id="upg-width-lvl" class="upg-lvl">Ур. 1</span>
+          </div>
+          <div class="upg-desc" id="upg-width-desc">+Захват</div>
+          <div class="upg-price">
+            <span class="coin-mini">🪙</span>
+            <span id="upg-width-cost" class="cost-val">10</span>
+          </div>
+        </button>
+
+        <!-- Upgrade Card 2: Sharpness -->
+        <button id="btn-upgrade-sharpness" class="upgrade-card">
+          <div class="upg-header">
+            <span class="upg-icon">⚙️</span>
+            <span class="upg-title">Острота</span>
+            <span id="upg-sharpness-lvl" class="upg-lvl">Ур. 1</span>
+          </div>
+          <div class="upg-desc" id="upg-sharpness-desc">+Урон & Скол</div>
+          <div class="upg-price">
+            <span class="coin-mini">🪙</span>
+            <span id="upg-sharpness-cost" class="cost-val">15</span>
+          </div>
+        </button>
+
+        <!-- Upgrade Card 3: Voxel Value -->
+        <button id="btn-upgrade-value" class="upgrade-card">
+          <div class="upg-header">
+            <span class="upg-icon">💎</span>
+            <span class="upg-title">Ценность</span>
+            <span id="upg-value-lvl" class="upg-lvl">Ур. 1</span>
+          </div>
+          <div class="upg-desc" id="upg-value-desc">+Доход xN</div>
+          <div class="upg-price">
+            <span class="coin-mini">🪙</span>
+            <span id="upg-value-cost" class="cost-val">25</span>
+          </div>
+        </button>
+
+        <!-- Upgrade Card 4: Auto Feed Speed -->
+        <button id="btn-upgrade-speed" class="upgrade-card">
+          <div class="upg-header">
+            <span class="upg-icon">⏩</span>
+            <span class="upg-title">Подача</span>
+            <span id="upg-speed-lvl" class="upg-lvl">Ур. 1</span>
+          </div>
+          <div class="upg-desc" id="upg-speed-desc">+Авто-скорость</div>
+          <div class="upg-price">
+            <span class="coin-mini">🪙</span>
+            <span id="upg-speed-cost" class="cost-val">30</span>
+          </div>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Victory / Completion Modal -->
+  <div id="modal-victory" class="modal-overlay hidden">
+    <div class="modal-card victory-card">
+      <div class="victory-ribbon">УНИЧТОЖЕНО НА 100%!</div>
+      <div id="victory-model-icon" class="victory-icon">🎉</div>
+      <h2 id="victory-model-title">Объект Перемолот!</h2>
+      
+      <div class="victory-stats">
+        <div class="stat-row">
+          <span>Вокселей разбито:</span>
+          <strong id="victory-voxels-count">1,240</strong>
+        </div>
+        <div class="stat-row">
+          <span>Заработано монет:</span>
+          <strong id="victory-coins-earned" class="gold-text">+450 🪙</strong>
+        </div>
+      </div>
+
+      <div class="modal-buttons">
+        <button id="btn-victory-double" class="action-btn gold-btn">
+          <span class="btn-icon">🎬</span>
+          <span>Удвоить (x2) за рекламу</span>
+        </button>
+        <button id="btn-victory-next" class="action-btn primary-btn">
+          <span>Следующий предмет ➡️</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collections Gallery Modal -->
+  <div id="modal-gallery" class="modal-overlay hidden">
+    <div class="modal-card gallery-card">
+      <div class="modal-header">
+        <h2>📦 Коллекции Предметов</h2>
+        <button id="btn-close-gallery" class="close-btn">&times;</button>
+      </div>
+      
+      <!-- Category Tabs -->
+      <div class="collection-tabs" id="gallery-tabs"></div>
+
+      <!-- Items Grid -->
+      <div class="gallery-grid" id="gallery-items-grid"></div>
+    </div>
+  </div>
+
+  <!-- Shop Modal -->
+  <div id="modal-shop" class="modal-overlay hidden">
+    <div class="modal-card shop-card">
+      <div class="modal-header">
+        <h2>🛒 Магазин Улучшений</h2>
+        <button id="btn-close-shop" class="close-btn">&times;</button>
+      </div>
+      
+      <div class="shop-list">
+        <!-- Item 1: Golden Crusher -->
+        <div class="shop-item">
+          <div class="shop-item-icon">✨⚙️✨</div>
+          <div class="shop-item-info">
+            <h3>Золотой Измельчитель</h3>
+            <p>Золотой скин валов + множитель монет x1.5 навсегда!</p>
+          </div>
+          <button id="btn-buy-gold-skin" class="shop-buy-btn">
+            <span id="gold-skin-price">Купить (10,000 🪙)</span>
+          </button>
+        </div>
+
+        <!-- Item 2: Free Instant Upgrade -->
+        <div class="shop-item">
+          <div class="shop-item-icon">🎁</div>
+          <div class="shop-item-info">
+            <h3>Бесплатный Апгрейд</h3>
+            <p>Мгновенно дает +1 уровень самому дорогому улучшению!</p>
+          </div>
+          <button id="btn-reward-upgrade" class="shop-buy-btn ad-btn">
+            <span>🎬 Бесплатно</span>
+          </button>
+        </div>
+
+        <!-- Item 3: Golden Coin Chest -->
+        <div class="shop-item">
+          <div class="shop-item-icon">💰</div>
+          <div class="shop-item-info">
+            <h3>Сундук Монет</h3>
+            <p>Мгновенный бонус +2,500 золотых монет!</p>
+          </div>
+          <button id="btn-reward-coins" class="shop-buy-btn ad-btn">
+            <span>🎬 Получить</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Overlay -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Script Bootstrap -->
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

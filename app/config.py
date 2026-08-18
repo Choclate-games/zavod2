@@ -45,16 +45,16 @@ class AppConfig:
         self.default_mode = os.getenv("DEFAULT_MODE", "standard")
         
         # Provider & GUI settings
-        self.opencode_api_key = os.getenv("OPENCODE_API_KEY", "")
-        self.opencode_base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
-        self.opencode_model = os.getenv("OPENCODE_MODEL", "opencode-zen")
+        # OpenCode Zen REST API отключён вместе с остальными API-моделями:
+        # self.opencode_api_key = os.getenv("OPENCODE_API_KEY", "")
+        # self.opencode_base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
         self.agy_cli_path = os.getenv("AGY_CLI_PATH", "agy")
         self.agy_model = os.getenv("AGY_MODEL", "")
         # Пусто = не передавать --effort: модель по умолчанию его не принимает
         # ("invalid model selection: --effort is not supported for the current model")
         self.agy_effort = os.getenv("AGY_EFFORT", "")
 
-        # Терминальные кодовые агенты кроме AGY: Claude Code, Codex, Kimi.
+        # Терминальные кодовые агенты кроме AGY: Claude Code, Codex, Kimi, OpenCode.
         # Пути к CLI и модели читаются провайдерами из этих же переменных.
         self.default_agent = os.getenv("DEFAULT_AGENT", "agy")
         self.claude_cli_path = os.getenv("CLAUDE_CLI_PATH", "claude")
@@ -63,6 +63,14 @@ class AppConfig:
         self.codex_model = os.getenv("CODEX_MODEL", "")
         self.kimi_cli_path = os.getenv("KIMI_CLI_PATH", "kimi")
         self.kimi_model = os.getenv("KIMI_MODEL", "")
+        self.opencode_cli_path = os.getenv("OPENCODE_CLI_PATH", "opencode")
+        # Уровень рассуждений там, где CLI его понимает (kimi — не понимает).
+        self.claude_effort = os.getenv("CLAUDE_EFFORT", "")
+        self.codex_effort = os.getenv("CODEX_EFFORT", "")
+        self.kimi_effort = os.getenv("KIMI_EFFORT", "")
+        self.opencode_effort = os.getenv("OPENCODE_EFFORT", "")
+        # Модель OpenCode задаётся как provider/model, напр. opencode-go/kimi-k3
+        self.opencode_model = os.getenv("OPENCODE_MODEL", "")
         self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
         self.gui_port = int(os.getenv("GUI_PORT", "7860"))
 

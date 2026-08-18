@@ -25,7 +25,8 @@ from providers.agent_usage import AgentUsageTracker
 from providers.quota_probe import read_live_quota
 from app.chat_jobs import ChatJobManager
 from app.gui.chat_terminal import ChatTerminal
-from providers.opencode import OpenCodeProvider
+# API-провайдеры отключены (кодят хуже терминальных агентов):
+# from providers.opencode import OpenCodeProvider
 from providers.base import NoneImageProvider
 from validators.output_validator import OutputValidator
 from agents.idea_analyzer import IdeaAnalyzerAgent
@@ -60,6 +61,7 @@ AGENT_LABELS: Dict[str, str] = {
     "claude": "🟣 claude (Claude Code CLI)",
     "codex": "⚫ codex (OpenAI Codex CLI)",
     "kimi": "🌙 kimi (Kimi CLI)",
+    "opencode": "💎 opencode (OpenCode CLI)",
 }
 AGENT_KEYS = tuple(AGENT_LABELS)
 
@@ -245,18 +247,23 @@ class CTkMarkdownViewer(ctk.CTkFrame):
 class BrainstormIdeasWindow(ctk.CTkToplevel):
     """
     Sub-window for AI Game Idea Brainstorming.
-    Generates IDEAS_PER_BATCH creative concepts from AI and lets user select 1 to load into Studio.
+
+    Идею можно взять одну (кнопка на карточке) либо отметить галочками сразу
+    несколько и отправить их в пакетную генерацию документации.
     """
 
     IDEAS_PER_BATCH = 10
 
-    def __init__(self, master, on_idea_selected):
+    def __init__(self, master, on_idea_selected, on_batch_selected=None):
         super().__init__(master)
         self.title("💡 AI Game Idea Brainstormer (Генератор идей)")
         self.geometry("920x680")
         self.minsize(780, 500)
         self.on_idea_selected = on_idea_selected
+        self.on_batch_selected = on_batch_selected
         self.brainstormer = IdeaBrainstormerAgent()
+        # Отмеченные галочками идеи: [(чекбокс, идея), ...]
+        self._idea_checks: List[Any] = []
 
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -274,7 +281,8 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             top_frame,
-            text="ИИ придумает несколько виральных концептов для Яндекс Игры / WebGL. Выберите любой понравившийся вариант.",
+            text="ИИ придумает несколько виральных концептов для Яндекс Игры / WebGL. "
+                 "Возьмите один вариант в студию или отметьте несколько галочками и соберите ТЗ пакетом.",
             font=ctk.CTkFont(size=11),
             text_color="#94a3b8"
         ).pack(anchor="w", padx=15, pady=(0, 10))
@@ -300,7 +308,40 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         # Scrollable Ideas Cards
         self.scroll_cards = ctk.CTkScrollableFrame(self, fg_color="#080d16", corner_radius=10)
-        self.scroll_cards.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        self.scroll_cards.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 8))
+
+        # Пакетный выбор: отмеченные идеи уходят в очередь генерации ТЗ
+        batch_bar = ctk.CTkFrame(self, fg_color="#121a2b", corner_radius=10)
+        batch_bar.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 15))
+
+        ctk.CTkButton(
+            batch_bar, text="☑ Выбрать все", width=110, height=28,
+            fg_color="#1e293b", hover_color="#334155", font=ctk.CTkFont(size=11),
+            command=lambda: self._toggle_all(True)
+        ).pack(side="left", padx=(12, 6), pady=10)
+
+        ctk.CTkButton(
+            batch_bar, text="☐ Снять все", width=100, height=28,
+            fg_color="#1e293b", hover_color="#334155", font=ctk.CTkFont(size=11),
+            command=lambda: self._toggle_all(False)
+        ).pack(side="left", padx=(0, 12), pady=10)
+
+        self.lbl_batch_count = ctk.CTkLabel(
+            batch_bar, text="Выбрано идей: 0",
+            font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8"
+        )
+        self.lbl_batch_count.pack(side="left")
+
+        self.btn_batch = ctk.CTkButton(
+            batch_bar,
+            text="📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ",
+            height=32,
+            fg_color="#00ff88", hover_color="#00d970", text_color="#050b14",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            state="disabled",
+            command=self._start_batch
+        )
+        self.btn_batch.pack(side="right", padx=12, pady=10)
 
         # Auto-load initial ideas
         self._generate_ideas()
@@ -309,6 +350,8 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
         hint = self.ent_hint.get().strip()
         self.btn_run_brainstorm.configure(state="disabled", text="⏳ Генерация идей...")
 
+        self._idea_checks = []
+        self._update_batch_state()
         for widget in self.scroll_cards.winfo_children():
             widget.destroy()
 
@@ -326,6 +369,8 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
     def _render_ideas(self, ideas: List[BrainstormedIdea]):
         self.btn_run_brainstorm.configure(state="normal", text=f"⚡ Придумать {self.IDEAS_PER_BATCH} идей")
+        self._idea_checks = []
+        self._update_batch_state()
         for widget in self.scroll_cards.winfo_children():
             widget.destroy()
 
@@ -340,6 +385,14 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
             # Title Row
             row_title = ctk.CTkFrame(card, fg_color="transparent")
             row_title.pack(fill="x", padx=12, pady=(10, 4))
+
+            check = ctk.CTkCheckBox(
+                row_title, text="", width=24,
+                fg_color="#00ff88", hover_color="#00d970", checkmark_color="#050b14",
+                command=self._update_batch_state
+            )
+            check.pack(side="left", padx=(0, 6))
+            self._idea_checks.append((check, idea))
 
             ctk.CTkLabel(
                 row_title,
@@ -390,6 +443,34 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
     def _select_and_close(self, prompt_seed: str, renderer: str):
         self.on_idea_selected(prompt_seed, renderer)
+        self.destroy()
+
+    def _toggle_all(self, selected: bool):
+        for check, _idea in self._idea_checks:
+            check.select() if selected else check.deselect()
+        self._update_batch_state()
+
+    def _selected_ideas(self) -> List[Dict[str, str]]:
+        return [
+            {"title": idea.title, "prompt_seed": idea.prompt_seed, "renderer": idea.renderer}
+            for check, idea in self._idea_checks if check.get()
+        ]
+
+    def _update_batch_state(self):
+        """Счётчик и доступность кнопки пакетной генерации."""
+        count = len(self._selected_ideas())
+        self.lbl_batch_count.configure(text=f"Выбрано идей: {count}")
+        self.btn_batch.configure(
+            state="normal" if (count and self.on_batch_selected) else "disabled",
+            text=(f"📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ ({count})" if count
+                  else "📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ")
+        )
+
+    def _start_batch(self):
+        ideas = self._selected_ideas()
+        if not ideas or not self.on_batch_selected:
+            return
+        self.on_batch_selected(ideas)
         self.destroy()
 
 
@@ -453,6 +534,12 @@ class GamePromptFactoryGUI(ctk.CTk):
         # Проект, к которому относится последняя завершённая задача чата —
         # его можно запустить прямо из чата кнопкой «Играть».
         self._last_finished_slug: Optional[str] = None
+        # Выпадающие списки моделей в настройках: по одному на каждый CLI.
+        # Значения приходят от самих CLI, поэтому список тянем в фоне.
+        self.combo_agent_model: Dict[str, ctk.CTkComboBox] = {}
+        self.combo_agent_effort: Dict[str, ctk.CTkComboBox] = {}
+        self.btn_agent_models: Dict[str, ctk.CTkButton] = {}
+        self._settings_models_loaded = False
 
         # Register global logging listener so all agent/CLI logs appear in GUI console
         register_log_listener(self._on_global_log_event)
@@ -672,6 +759,12 @@ class GamePromptFactoryGUI(ctk.CTk):
             self._populate_play_projects_dropdown()
         elif tab_name == "quota":
             self._refresh_agy_quota_display()
+        elif tab_name == "settings":
+            # Списки моделей спрашиваем у CLI при первом открытии настроек:
+            # на старте приложения это лишние запуски процессов.
+            if not self._settings_models_loaded:
+                self._settings_models_loaded = True
+                self._reload_settings_models()
 
     # =================================================================
     # TAB 1: STUDIO GENERATOR (ГЛАВНАЯ СТУДИЯ СОЗДАНИЯ ИГР)
@@ -747,10 +840,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         ctk.CTkLabel(col1, text="🤖 AI Provider", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8").pack(anchor="w")
         self.combo_provider = ctk.CTkComboBox(
             col1,
-            values=list(AGENT_LABELS.values()) + [
-                "💎 opencode (OpenCode Go)", "💻 local (Offline Expert)", "🧠 openai (GPT-4o API)",
-                "🅰️ anthropic (API-ключ)", "🔷 google (Gemini API)",
-            ],
+            # API-модели (openai / anthropic / google / OpenCode Zen) отключены —
+            # спека и код идут через терминальные агенты либо офлайн-эксперта.
+            values=list(AGENT_LABELS.values()) + ["💻 local (Offline Expert)"],
             height=32,
             fg_color="#0e1626"
         )
@@ -789,8 +881,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         ctk.CTkLabel(col4, text="🖼️ Превью Арт", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8").pack(anchor="w")
         self.combo_img_provider = ctk.CTkComboBox(
             col4,
+            # DALL-E убран вместе с остальными API-моделями: превью рисует Qwen.
             values=["🐉 qwen (DashScope, дёшево)", "⚡ agy (Antigravity AI/Canvas)", "🚫 none (Без превью)",
-                    "💻 local (Procedural Pixel)", "🧠 openai (DALL-E 3)"],
+                    "💻 local (Procedural Pixel)"],
             height=32,
             fg_color="#0e1626"
         )
@@ -1151,7 +1244,25 @@ class GamePromptFactoryGUI(ctk.CTk):
             widget.bind("<Button-1>", lambda _e, s=slug: self._select_project_by_slug(s))
 
     def _open_brainstorm_window(self):
-        BrainstormIdeasWindow(self, on_idea_selected=self._on_idea_picked_from_brainstorm)
+        BrainstormIdeasWindow(
+            self,
+            on_idea_selected=self._on_idea_picked_from_brainstorm,
+            on_batch_selected=self._on_ideas_batch_from_brainstorm,
+        )
+
+    def _on_ideas_batch_from_brainstorm(self, ideas: List[Dict[str, str]]):
+        """Несколько идей из брейнсторма → очередь генерации пакета документации."""
+        if self.generation_running:
+            self._append_studio_log_raw(
+                "⚠️ Генерация уже идёт — дождитесь её завершения и повторите выбор.")
+            return
+        self._show_tab("studio")
+        self._set_studio_prompt(ideas[0]["prompt_seed"])
+        self._append_studio_log_raw(
+            "💡 Из брейнсторма выбрано идей: "
+            + str(len(ideas)) + " — " + ", ".join(i["title"] for i in ideas)
+        )
+        self._start_batch_generation(ideas)
 
     def _on_idea_picked_from_brainstorm(self, prompt_seed: str, renderer: str):
         self._set_studio_prompt(prompt_seed)
@@ -1202,17 +1313,15 @@ class GamePromptFactoryGUI(ctk.CTk):
 
     def _get_selected_provider_key(self) -> str:
         val = self.combo_provider.get().lower()
-        # Порядок важен: подпись API-провайдера не должна перехватывать ключ
-        # одноимённого терминального агента (anthropic ≠ claude CLI).
-        for key in ("agy", "opencode", "codex", "kimi", "anthropic", "claude",
-                    "openai", "google", "local"):
+        for key in ("agy", "opencode", "codex", "kimi", "claude", "local"):
             if key in val:
                 return key
         return "agy"
 
     def _agent_provider(self, key: str, model: Optional[str] = None, yolo: bool = True):
         """
-        Провайдер терминального агента по ключу ('agy' | 'claude' | 'codex' | 'kimi').
+        Провайдер терминального агента по ключу
+        ('agy' | 'claude' | 'codex' | 'kimi' | 'opencode').
 
         У всех одинаковый интерфейс stream_run / launch_interactive_terminal,
         поэтому вызывающий код не знает, какой именно CLI сейчас работает.
@@ -1222,10 +1331,11 @@ class GamePromptFactoryGUI(ctk.CTk):
             "claude": config.claude_cli_path,
             "codex": config.codex_cli_path,
             "kimi": config.kimi_cli_path,
+            "opencode": config.opencode_cli_path,
         }.get(key)
         return make_cli_agent(
             key, cli_path=cli_path, model=model,
-            yolo=yolo, effort=config.agy_effort if key == "agy" else None,
+            yolo=yolo, effort=getattr(config, f"{key}_effort", "") or None,
         )
 
     def _get_selected_image_provider_key(self) -> str:
@@ -1429,6 +1539,99 @@ class GamePromptFactoryGUI(ctk.CTk):
     # -----------------------------------------------------------------
     # SPECIFICATION ONLY (DOCS & PROMPT)
     # -----------------------------------------------------------------
+    def _run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
+                           mode: str, img_provider: str, label: str = "") -> Path:
+        """
+        Прогон пайплайна спецификаций для одной идеи (синхронно, в фоновом потоке).
+
+        `label` подставляется в шаги прогресса — при пакетной генерации по нему
+        видно, какая из выбранных идей сейчас обрабатывается.
+        """
+        tag = f"{label} " if label else ""
+
+        self._update_progress(5, f"{tag}Инициализация контекста генерации...")
+        self._append_studio_log_raw(
+            f"{tag}Запуск пайплайна спецификаций | Провайдер: {provider} | "
+            f"Рендерер: {renderer or 'auto'} | Превью: {img_provider} | Режим: {mode}"
+        )
+
+        ctx = GenerationContext(
+            raw_prompt=prompt,
+            output_base_dir=config.output_dir,
+            mode=mode,
+            forced_renderer=renderer,
+            provider_name=provider,
+            image_provider_name=img_provider,
+            ai_provider=ProviderFactory.get_ai_provider(provider),
+            image_provider=ProviderFactory.get_image_provider(img_provider)
+        )
+
+        # 1-13 Standard multi-agent steps
+        self._update_progress(12, f"{tag}1/13 Idea Analyzer: Анализ идеи...")
+        IdeaAnalyzerAgent().run(ctx)
+        self._append_studio_log_raw(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
+
+        self._update_progress(22, f"{tag}2/13 Game Designer: Core loop...")
+        GameDesignerAgent().run(ctx)
+
+        self._update_progress(32, f"{tag}3/13 Reference Analyst: Референсы...")
+        ReferenceAnalystAgent().run(ctx)
+
+        self._update_progress(42, f"{tag}4/13 Mechanics Architect: Механики...")
+        MechanicsArchitectAgent().run(ctx)
+
+        self._update_progress(52, f"{tag}5/13 Renderer Selector: Выбор движка...")
+        RendererSelectorAgent().run(ctx)
+
+        self._update_progress(62, f"{tag}6/13 Technical Architect: Архитектура...")
+        TechnicalArchitectAgent().run(ctx)
+
+        self._update_progress(70, f"{tag}7/13 Playgama Specialist: Bridge SDK...")
+        PlaygamaSpecialistAgent().run(ctx)
+
+        self._update_progress(78, f"{tag}8/13 Monetization Designer: Экономика...")
+        MonetizationDesignerAgent().run(ctx)
+
+        self._update_progress(84, f"{tag}9/13 Art & UX: Визуал и интерфейс...")
+        ArtDirectorAgent().run(ctx)
+        UXDesignerAgent().run(ctx)
+
+        self._update_progress(89, f"{tag}10/13 Preview Designer: Концепт-арт...")
+        PreviewDesignerAgent().run(ctx)
+
+        self._update_progress(93, f"{tag}11/13 Skill Generator: Скиллы...")
+        SkillGeneratorAgent().run(ctx)
+        SelfCritiqueAgent().run(ctx)
+
+        self._update_progress(97, f"{tag}12/13 Output Generator: Запись файлов...")
+        game_dir = OutputGenerator().generate_package(ctx)
+
+        self._update_progress(99, f"{tag}13/13 Validator: Валидация...")
+        OutputValidator().run_all(game_dir)
+
+        sandbox.ensure_project_docs(game_dir, ctx.concept.title)
+        return game_dir
+
+    def _studio_settings(self) -> Dict[str, Any]:
+        """Провайдер, рендерер, режим и генератор превью, выбранные в студии."""
+        renderer_raw = self.combo_renderer.get().split()[0]
+        return {
+            "provider": self._get_selected_provider_key(),
+            "renderer": None if renderer_raw == "✨" or "auto" in renderer_raw else renderer_raw,
+            "mode": self.combo_mode.get().split()[0],
+            "img_provider": self._get_selected_image_provider_key(),
+        }
+
+    def _lock_studio_buttons(self, locked: bool, generate_text: str = ""):
+        """Блокировка кнопок студии на время генерации (одиночной и пакетной)."""
+        state = "disabled" if locked else "normal"
+        self.btn_generate.configure(
+            state=state,
+            text=generate_text or "📄 Только ТЗ и Спека\n(25+ файлов Markdown)"
+        )
+        self.btn_create_full_game.configure(state=state)
+        self.btn_analyze.configure(state=state)
+
     def _start_generation_thread(self):
         if self.generation_running:
             return
@@ -1438,92 +1641,101 @@ class GamePromptFactoryGUI(ctk.CTk):
             self._append_studio_log_raw("❌ ОШИБКА: Поле идеи игры не должно быть пустым.")
             return
 
-        provider = self._get_selected_provider_key()
-        renderer_raw = self.combo_renderer.get().split()[0]
-        renderer = None if renderer_raw == "✨" or "auto" in renderer_raw else renderer_raw
-        mode = self.combo_mode.get().split()[0]
-        img_provider = self._get_selected_image_provider_key()
+        opts = self._studio_settings()
 
         self.generation_running = True
         self.agy_stop_requested = False
         self._start_stopwatch()
         self._show_studio_log(True)
-        self.btn_generate.configure(state="disabled", text="⏳ ГЕНЕРАЦИЯ...")
-        self.btn_create_full_game.configure(state="disabled")
-        self.btn_analyze.configure(state="disabled")
+        self._lock_studio_buttons(True, "⏳ ГЕНЕРАЦИЯ...")
 
         def run():
             try:
-                self._update_progress(5, "Инициализация контекста генерации...")
-                self._append_studio_log_raw(f"Запуск пайплайна спецификаций | Провайдер: {provider} | Рендерер: {renderer or 'auto'} | Превью: {img_provider} | Режим: {mode}")
-
-                ctx = GenerationContext(
-                    raw_prompt=prompt,
-                    output_base_dir=config.output_dir,
-                    mode=mode,
-                    forced_renderer=renderer,
-                    provider_name=provider,
-                    image_provider_name=img_provider,
-                    ai_provider=ProviderFactory.get_ai_provider(provider),
-                    image_provider=ProviderFactory.get_image_provider(img_provider)
+                game_dir = self._run_spec_pipeline(
+                    prompt, opts["renderer"], opts["provider"], opts["mode"], opts["img_provider"]
                 )
-
-                # 1-13 Standard multi-agent steps
-                self._update_progress(12, "1/13 Idea Analyzer: Анализ идеи...")
-                IdeaAnalyzerAgent().run(ctx)
-                self._append_studio_log_raw(f"Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
-
-                self._update_progress(22, "2/13 Game Designer: Core loop...")
-                GameDesignerAgent().run(ctx)
-
-                self._update_progress(32, "3/13 Reference Analyst: Референсы...")
-                ReferenceAnalystAgent().run(ctx)
-
-                self._update_progress(42, "4/13 Mechanics Architect: Механики...")
-                MechanicsArchitectAgent().run(ctx)
-
-                self._update_progress(52, "5/13 Renderer Selector: Выбор движка...")
-                RendererSelectorAgent().run(ctx)
-
-                self._update_progress(62, "6/13 Technical Architect: Архитектура...")
-                TechnicalArchitectAgent().run(ctx)
-
-                self._update_progress(70, "7/13 Playgama Specialist: Bridge SDK...")
-                PlaygamaSpecialistAgent().run(ctx)
-
-                self._update_progress(78, "8/13 Monetization Designer: Экономика...")
-                MonetizationDesignerAgent().run(ctx)
-
-                self._update_progress(84, "9/13 Art & UX: Визуал и интерфейс...")
-                ArtDirectorAgent().run(ctx)
-                UXDesignerAgent().run(ctx)
-
-                self._update_progress(89, "10/13 Preview Designer: Концепт-арт...")
-                PreviewDesignerAgent().run(ctx)
-
-                self._update_progress(93, "11/13 Skill Generator: Скиллы...")
-                SkillGeneratorAgent().run(ctx)
-                SelfCritiqueAgent().run(ctx)
-
-                self._update_progress(97, "12/13 Output Generator: Запись файлов...")
-                game_dir = OutputGenerator().generate_package(ctx)
-
-                self._update_progress(99, "13/13 Validator: Валидация...")
-                OutputValidator().run_all(game_dir)
-
-                sandbox.ensure_project_docs(game_dir, ctx.concept.title)
                 self._update_progress(100, "✅ Спецификация готова!")
-                self._append_studio_log_raw(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
+                self._append_studio_log_raw(
+                    f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
                 self.after(500, lambda: self._select_project_by_slug(game_dir.name))
-
             except Exception as e:
                 self._update_progress(0, "Ошибка генерации")
                 self._append_studio_log_raw(f"❌ ОШИБКА: {str(e)}")
             finally:
                 self.generation_running = False
-                self.btn_generate.configure(state="normal", text="📄 Только ТЗ и Спека\n(25+ файлов Markdown)")
-                self.btn_create_full_game.configure(state="normal")
-                self.btn_analyze.configure(state="normal")
+                self._lock_studio_buttons(False)
+                self._refresh_projects_list()
+                self._refresh_agy_quota_display()
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _start_batch_generation(self, ideas: List[Dict[str, str]]):
+        """
+        Пакетная генерация документации по нескольким идеям брейнсторма.
+
+        Идеи обрабатываются подряд одним потоком: сбой на одной не прерывает
+        остальные, а кнопка «Стоп» останавливает очередь после текущей идеи.
+        """
+        if self.generation_running or not ideas:
+            return
+
+        opts = self._studio_settings()
+        total = len(ideas)
+
+        self.generation_running = True
+        self.agy_stop_requested = False
+        self._start_stopwatch()
+        self._show_studio_log(True)
+        self._lock_studio_buttons(True, f"⏳ ПАКЕТ 0/{total}...")
+        self._append_studio_log_raw(
+            f"\n📦 Пакетная генерация ТЗ: {total} идей | "
+            f"Провайдер: {opts['provider']} | Режим: {opts['mode']}"
+        )
+
+        def run():
+            done: List[str] = []
+            failed: List[str] = []
+            try:
+                for index, idea in enumerate(ideas, start=1):
+                    if self.agy_stop_requested:
+                        self._append_studio_log_raw(
+                            f"⏹️ Очередь остановлена: обработано {index - 1} из {total}.")
+                        break
+
+                    title = idea.get("title") or f"Идея {index}"
+                    label = f"[{index}/{total}]"
+                    self.after(0, lambda i=index: self._lock_studio_buttons(
+                        True, f"⏳ ПАКЕТ {i}/{total}..."))
+                    self._append_studio_log_raw(
+                        f"\n{'─' * 60}\n{label} {title}\n{'─' * 60}")
+
+                    # Рендерер идеи важнее выбранного в студии: брейнсторм уже
+                    # решил, 2D это или 3D.
+                    renderer = idea.get("renderer") or opts["renderer"]
+                    try:
+                        game_dir = self._run_spec_pipeline(
+                            idea["prompt_seed"], renderer, opts["provider"],
+                            opts["mode"], opts["img_provider"], label=label
+                        )
+                        done.append(game_dir.name)
+                        self._append_studio_log_raw(
+                            f"{label} ✅ Готово: workspace/{game_dir.name}")
+                        self.after(0, self._refresh_projects_list)
+                    except Exception as exc:
+                        failed.append(title)
+                        self._append_studio_log_raw(f"{label} ❌ ОШИБКА: {exc}")
+
+                self._update_progress(100, f"✅ Пакет завершён: {len(done)} из {total}")
+                self._append_studio_log_raw(
+                    f"\n📦 ИТОГ: готово {len(done)} из {total}. "
+                    f"Проекты: {', '.join(done) if done else '—'}"
+                    + (f"\n⚠️ С ошибкой: {', '.join(failed)}" if failed else "")
+                )
+                if done:
+                    self.after(500, lambda: self._select_project_by_slug(done[0]))
+            finally:
+                self.generation_running = False
+                self._lock_studio_buttons(False)
                 self._refresh_projects_list()
                 self._refresh_agy_quota_display()
 
@@ -2437,7 +2649,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="💬 Чат разработки (AGY · Claude · Codex · Kimi)",
+            text="💬 Чат разработки (AGY · Claude · Codex · Kimi · OpenCode)",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color="#e2e8f0"
         ).pack(side="left")
@@ -3164,7 +3376,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         # ── Карточки остальных терминальных агентов ──
         ctk.CTkLabel(
-            head, text="🖥 Claude Code · Codex · Kimi — локальный счётчик запусков фабрики",
+            head, text="🖥 Claude Code · Codex · Kimi · OpenCode — локальный счётчик запусков фабрики",
             font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8"
         ).grid(row=3, column=0, sticky="w", padx=15, pady=(0, 4))
 
@@ -3172,7 +3384,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         agent_cards.grid(row=4, column=0, sticky="ew", padx=15, pady=(0, 14))
 
         self.agent_quota_widgets: Dict[str, Dict[str, Any]] = {}
-        agent_accents = {"claude": "#c084fc", "codex": "#94a3b8", "kimi": "#38bdf8"}
+        agent_accents = {"claude": "#c084fc", "codex": "#94a3b8", "kimi": "#38bdf8",
+                         "opencode": "#00f0ff"}
         agent_keys = list(AGENT_CLASSES)
 
         for col, agent_key in enumerate(agent_keys):
@@ -3846,38 +4059,13 @@ class GamePromptFactoryGUI(ctk.CTk):
             text_color="#ffffff"
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=15, pady=(15, 12))
 
-        # 1. OpenCode Go Card
-        card_opencode = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_opencode.grid(row=1, column=0, sticky="nsew", padx=(15, 8), pady=8)
-
-        ctk.CTkLabel(card_opencode, text="💎 OpenCode Go / Zen Подписка", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 4))
-        ctk.CTkLabel(card_opencode, text="OpenAI-совместимый шлюз OpenCode для кодинга и рассуждений.", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(card_opencode, text="OpenCode API Key:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
-        self.ent_opencode_key = ctk.CTkEntry(card_opencode, placeholder_text="sk-...", show="*")
-        self.ent_opencode_key.pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(card_opencode, text="OpenCode Base URL:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
-        self.ent_opencode_url = ctk.CTkEntry(card_opencode)
-        self.ent_opencode_url.pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(card_opencode, text="OpenCode Model:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
-        self.ent_opencode_model = ctk.CTkEntry(card_opencode)
-        self.ent_opencode_model.pack(fill="x", padx=12, pady=(2, 10))
-
-        self.btn_test_opencode = ctk.CTkButton(
-            card_opencode,
-            text="🔌 Проверить подключение OpenCode",
-            height=30,
-            fg_color="#1e293b",
-            hover_color="#334155",
-            command=self._test_opencode_conn
-        )
-        self.btn_test_opencode.pack(fill="x", padx=12, pady=(0, 12))
+        # 1. Карточка подписки OpenCode Go / Zen (REST API) убрана вместе с
+        #    остальными API-моделями: теперь OpenCode работает как CLI-агент и
+        #    настраивается в карточке терминальных агентов ниже.
 
         # 2. Antigravity CLI (AGY) Card
         card_agy = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_agy.grid(row=1, column=1, sticky="nsew", padx=(8, 15), pady=8)
+        card_agy.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=15, pady=8)
 
         ctk.CTkLabel(card_agy, text="⚡ Antigravity CLI (agy)", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 4))
         ctk.CTkLabel(card_agy, text="Локальный агент Google Antigravity CLI.", font=ctk.CTkFont(size=10), text_color="#94a3b8").pack(anchor="w", padx=12, pady=(0, 8))
@@ -3886,13 +4074,13 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.ent_agy_path = ctk.CTkEntry(card_agy)
         self.ent_agy_path.pack(fill="x", padx=12, pady=(2, 6))
 
-        ctk.CTkLabel(card_agy, text="AGY Model (опционально):", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
-        self.ent_agy_model = ctk.CTkEntry(card_agy, placeholder_text="inherit, gemini-2.5-pro...")
-        self.ent_agy_model.pack(fill="x", padx=12, pady=(2, 6))
+        ctk.CTkLabel(card_agy, text="AGY Model (список от CLI):", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
+        self.combo_agent_model["agy"] = self._build_model_picker(card_agy, "agy")
 
         ctk.CTkLabel(card_agy, text="Reasoning Effort:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
         self.combo_agy_effort = ctk.CTkComboBox(card_agy, values=[EFFORT_AUTO, "high", "medium", "low"])
         self.combo_agy_effort.pack(fill="x", padx=12, pady=(2, 2))
+        self.combo_agent_effort["agy"] = self.combo_agy_effort
         ctk.CTkLabel(
             card_agy,
             text="Работает только с явно указанной моделью — иначе AGY отвечает\n«--effort is not supported for the current model».",
@@ -3914,7 +4102,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         card_agents.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=15, pady=8)
 
         ctk.CTkLabel(
-            card_agents, text="🖥 Терминальные агенты: Claude Code · Codex · Kimi",
+            card_agents, text="🖥 Терминальные агенты: Claude Code · Codex · Kimi · OpenCode",
             font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff"
         ).pack(anchor="w", padx=12, pady=(10, 4))
         ctk.CTkLabel(
@@ -3928,7 +4116,6 @@ class GamePromptFactoryGUI(ctk.CTk):
         agents_row.pack(fill="x", padx=6, pady=(0, 10))
 
         self.ent_agent_path: Dict[str, ctk.CTkEntry] = {}
-        self.ent_agent_model: Dict[str, ctk.CTkEntry] = {}
         self.btn_agent_test: Dict[str, ctk.CTkButton] = {}
 
         for key in AGENT_CLASSES:
@@ -3945,10 +4132,24 @@ class GamePromptFactoryGUI(ctk.CTk):
             entry_path.pack(fill="x", padx=10, pady=(2, 6))
             self.ent_agent_path[key] = entry_path
 
-            ctk.CTkLabel(column, text="Модель (опционально):", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=10)
-            entry_model = ctk.CTkEntry(column)
-            entry_model.pack(fill="x", padx=10, pady=(2, 8))
-            self.ent_agent_model[key] = entry_model
+            ctk.CTkLabel(column, text="Модель (список от CLI):", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=10)
+            self.combo_agent_model[key] = self._build_model_picker(column, key, compact=True)
+
+            levels = AGENT_CLASSES[key].effort_levels
+            ctk.CTkLabel(
+                column,
+                text="Reasoning Effort:" if levels else "Reasoning Effort: нет у этого CLI",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color="#cbd5e1" if levels else "#475569"
+            ).pack(anchor="w", padx=10)
+            combo_effort = ctk.CTkComboBox(
+                column, values=[EFFORT_AUTO] + list(levels),
+                font=ctk.CTkFont(size=11), fg_color="#0e1626", border_color="#1e293b",
+                state="normal" if levels else "disabled"
+            )
+            combo_effort.set(EFFORT_AUTO)
+            combo_effort.pack(fill="x", padx=10, pady=(2, 8))
+            self.combo_agent_effort[key] = combo_effort
 
             btn_test = ctk.CTkButton(
                 column, text=f"🔌 Проверить {key}", height=28,
@@ -3959,27 +4160,13 @@ class GamePromptFactoryGUI(ctk.CTk):
             btn_test.pack(fill="x", padx=10, pady=(0, 10))
             self.btn_agent_test[key] = btn_test
 
-        # 4. Other AI Keys Card
-        card_others = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_others.grid(row=3, column=0, sticky="nsew", padx=(15, 8), pady=8)
-
-        ctk.CTkLabel(card_others, text="🌐 Другие AI Ключи", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 8))
-
-        ctk.CTkLabel(card_others, text="OpenAI API Key:", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
-        self.ent_openai_key = ctk.CTkEntry(card_others, show="*")
-        self.ent_openai_key.pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(card_others, text="Anthropic API Key:", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
-        self.ent_anthropic_key = ctk.CTkEntry(card_others, show="*")
-        self.ent_anthropic_key.pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(card_others, text="Google Gemini API Key:", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
-        self.ent_gemini_key = ctk.CTkEntry(card_others, show="*")
-        self.ent_gemini_key.pack(fill="x", padx=12, pady=(2, 12))
+        # 4. Карточка «Другие AI ключи» (OpenAI / Anthropic / Gemini) отключена:
+        #    API-модели кодят хуже терминальных агентов и в фабрике не вызываются.
+        #    Ключ Qwen/DashScope для превью живёт в .env (DASHSCOPE_API_KEY).
 
         # 5. Save Card
         card_save = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_save.grid(row=3, column=1, sticky="nsew", padx=(8, 15), pady=8)
+        card_save.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=15, pady=8)
 
         ctk.CTkLabel(card_save, text="💾 Сохранение и Вывод", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 8))
 
@@ -4024,22 +4211,94 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.lbl_settings_msg = ctk.CTkLabel(card_save, text="", font=ctk.CTkFont(size=11), text_color="#00ff88")
         self.lbl_settings_msg.pack(padx=12, pady=(0, 8))
 
-    def _load_settings_to_ui(self):
-        self.ent_opencode_key.insert(0, config.opencode_api_key or "")
-        self.ent_opencode_url.insert(0, config.opencode_base_url or "https://opencode.ai/zen/v1")
-        self.ent_opencode_model.insert(0, config.opencode_model or "opencode-zen")
+    # ── Выпадающие списки моделей в настройках ───────────────────────────
 
+    def _build_model_picker(self, parent, key: str, compact: bool = False):
+        """
+        Список моделей CLI + кнопка обновления. Значение MODEL_DEFAULT означает
+        «не передавать --model» — так же, как в чате.
+        """
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=10 if compact else 12, pady=(2, 8 if compact else 6))
+
+        combo = ctk.CTkComboBox(
+            row, values=[MODEL_DEFAULT],
+            font=ctk.CTkFont(size=11 if compact else 12),
+            fg_color="#0e1626", border_color="#1e293b"
+        )
+        combo.set(MODEL_DEFAULT)
+        combo.pack(side="left", fill="x", expand=True)
+
+        button = ctk.CTkButton(
+            row, text="🔄", width=28,
+            fg_color="#1e293b", hover_color="#334155",
+            font=ctk.CTkFont(size=12),
+            command=lambda k=key: self._reload_settings_models(k)
+        )
+        button.pack(side="left", padx=(4, 0))
+        self.btn_agent_models[key] = button
+        return combo
+
+    def _reload_settings_models(self, key: Optional[str] = None):
+        """Тянет списки моделей у CLI (все сразу или один) в фоне."""
+        keys = [key] if key else list(self.combo_agent_model)
+        for agent_key in keys:
+            button = self.btn_agent_models.get(agent_key)
+            if button:
+                button.configure(state="disabled", text="⏳")
+
+            def run(k=agent_key):
+                try:
+                    res = self._agent_provider(k).list_models()
+                except Exception as exc:
+                    res = {"status": "error", "models": [], "message": str(exc)}
+                self.after(0, lambda: self._apply_settings_models(k, res))
+
+            threading.Thread(target=run, daemon=True).start()
+
+    def _apply_settings_models(self, key: str, res: Dict[str, Any]):
+        button = self.btn_agent_models.get(key)
+        if button:
+            button.configure(state="normal", text="🔄")
+        combo = self.combo_agent_model.get(key)
+        if combo is None:
+            return
+
+        models = res.get("models") or []
+        current = combo.get()
+        combo.configure(values=[MODEL_DEFAULT] + models)
+        # Сохранённая в .env модель могла исчезнуть из списка — не теряем её.
+        if current and current not in ([MODEL_DEFAULT] + models):
+            combo.configure(values=[MODEL_DEFAULT] + models + [current])
+
+    def _agent_effort_value(self, key: str) -> str:
+        """Уровень рассуждений из настроек ('' = флаг не передаётся)."""
+        combo = self.combo_agent_effort.get(key)
+        value = (combo.get() or "").strip() if combo else ""
+        if key == "agy":
+            return _effort_value(value)
+        levels = AGENT_CLASSES[key].effort_levels if key in AGENT_CLASSES else ()
+        return value if value in levels else ""
+
+    def _agent_model_value(self, key: str) -> str:
+        """Значение модели из настроек ('' = флаг --model не передаётся)."""
+        combo = self.combo_agent_model.get(key)
+        value = (combo.get() or "").strip() if combo else ""
+        return "" if value in ("", MODEL_DEFAULT, "inherit") else value
+
+    def _load_settings_to_ui(self):
         self.ent_agy_path.insert(0, config.agy_cli_path or "agy")
-        self.ent_agy_model.insert(0, config.agy_model or "")
         self.combo_agy_effort.set(config.agy_effort or EFFORT_AUTO)
 
         for key in AGENT_CLASSES:
             self.ent_agent_path[key].insert(0, getattr(config, f"{key}_cli_path", key) or key)
-            self.ent_agent_model[key].insert(0, getattr(config, f"{key}_model", "") or "")
 
-        self.ent_openai_key.insert(0, os.getenv("OPENAI_API_KEY", ""))
-        self.ent_anthropic_key.insert(0, os.getenv("ANTHROPIC_API_KEY", ""))
-        self.ent_gemini_key.insert(0, os.getenv("GEMINI_API_KEY", ""))
+        for key in self.combo_agent_model:
+            self.combo_agent_model[key].set(getattr(config, f"{key}_model", "") or MODEL_DEFAULT)
+
+        for key, combo in self.combo_agent_effort.items():
+            combo.set(getattr(config, f"{key}_effort", "") or EFFORT_AUTO)
+
         self.ent_out_dir.insert(0, str(config.output_dir))
 
     def _persist_env_value(self, key: str, value: str):
@@ -4076,31 +4335,25 @@ class GamePromptFactoryGUI(ctk.CTk):
                         k, v = line_s.split("=", 1)
                         env_lines[k.strip()] = v.strip()
 
-        env_lines["OPENCODE_API_KEY"] = self.ent_opencode_key.get().strip()
-        env_lines["OPENCODE_BASE_URL"] = self.ent_opencode_url.get().strip()
-        env_lines["OPENCODE_MODEL"] = self.ent_opencode_model.get().strip()
         env_lines["AGY_CLI_PATH"] = self.ent_agy_path.get().strip()
-        env_lines["AGY_MODEL"] = self.ent_agy_model.get().strip()
-        env_lines["AGY_EFFORT"] = _effort_value(self.combo_agy_effort.get())
+        env_lines["AGY_MODEL"] = self._agent_model_value("agy")
+        env_lines["AGY_EFFORT"] = self._agent_effort_value("agy")
         for key in AGENT_CLASSES:
             path_value = self.ent_agent_path[key].get().strip() or key
-            model_value = self.ent_agent_model[key].get().strip()
+            model_value = self._agent_model_value(key)
+            effort_value = self._agent_effort_value(key)
             env_lines[f"{key.upper()}_CLI_PATH"] = path_value
             env_lines[f"{key.upper()}_MODEL"] = model_value
+            env_lines[f"{key.upper()}_EFFORT"] = effort_value
             setattr(config, f"{key}_cli_path", path_value)
             setattr(config, f"{key}_model", model_value)
+            setattr(config, f"{key}_effort", effort_value)
         env_lines["DEFAULT_AGENT"] = self._selected_agent_key()
 
-        env_lines["OPENAI_API_KEY"] = self.ent_openai_key.get().strip()
-        env_lines["ANTHROPIC_API_KEY"] = self.ent_anthropic_key.get().strip()
-        env_lines["GEMINI_API_KEY"] = self.ent_gemini_key.get().strip()
         workspace_value = self.ent_out_dir.get().strip()
         env_lines["WORKSPACE_DIR"] = workspace_value
         env_lines["OUTPUT_DIR"] = workspace_value
 
-        config.opencode_api_key = env_lines["OPENCODE_API_KEY"]
-        config.opencode_base_url = env_lines["OPENCODE_BASE_URL"]
-        config.opencode_model = env_lines["OPENCODE_MODEL"]
         config.agy_cli_path = env_lines["AGY_CLI_PATH"]
         config.agy_model = env_lines["AGY_MODEL"]
         config.agy_effort = env_lines["AGY_EFFORT"]
@@ -4119,27 +4372,13 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.lbl_settings_msg.configure(text="✅ Настройки сохранены в .env!")
         self.after(2500, lambda: self.lbl_settings_msg.configure(text=""))
 
-    def _test_opencode_conn(self):
-        key = self.ent_opencode_key.get().strip()
-        url = self.ent_opencode_url.get().strip()
-        model = self.ent_opencode_model.get().strip()
-        prov = OpenCodeProvider(api_key=key, base_url=url, model=model)
-        
-        self.btn_test_opencode.configure(text="⏳ Проверка...", state="disabled")
-        def run():
-            res = prov.test_connection()
-            if res.get("status") == "success":
-                self.btn_test_opencode.configure(text="✅ OpenCode подключен!", state="normal")
-            else:
-                self.btn_test_opencode.configure(text=f"❌ Ошибка: {res.get('message')[:30]}", state="normal")
-            self.after(3000, lambda: self.btn_test_opencode.configure(text="🔌 Проверить подключение OpenCode"))
-
-        threading.Thread(target=run, daemon=True).start()
+    # Проверка REST API OpenCode Zen убрана: OpenCode подключён как CLI-агент и
+    # проверяется общей кнопкой «🔌 Проверить opencode» (_test_agent_conn).
 
     def _test_agy_conn(self):
         path = self.ent_agy_path.get().strip()
-        model = self.ent_agy_model.get().strip() or None
-        effort = _effort_value(self.combo_agy_effort.get())
+        model = self._agent_model_value("agy") or None
+        effort = self._agent_effort_value("agy")
         prov = AGYProvider(cli_path=path, model=model, effort=effort)
         
         self.btn_test_agy.configure(text="⏳ Проверка...", state="disabled")
@@ -4156,9 +4395,10 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _test_agent_conn(self, key: str):
         """Проверка терминального агента (claude/codex/kimi) прямо из настроек."""
         path = self.ent_agent_path[key].get().strip() or key
-        model = self.ent_agent_model[key].get().strip() or None
+        model = self._agent_model_value(key) or None
         button = self.btn_agent_test[key]
-        prov = make_cli_agent(key, cli_path=path, model=model)
+        prov = make_cli_agent(key, cli_path=path, model=model,
+                              effort=self._agent_effort_value(key) or None)
 
         button.configure(text="⏳ Проверка...", state="disabled")
 

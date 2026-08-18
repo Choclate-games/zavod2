@@ -1,0 +1,294 @@
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --vp-h: 100dvh;
+  --panel: rgba(13, 23, 42, 0.78);
+  --line: rgba(148, 163, 184, 0.34);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  background: #07111f;
+  color: #f8fafc;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+button {
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+
+#app,
+.game-root,
+.canvas-host,
+.ui-root {
+  position: fixed;
+  inset: 0;
+}
+
+.canvas-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.ui-root {
+  pointer-events: none;
+  padding: calc(12px + var(--safe-t)) calc(12px + var(--safe-r)) calc(14px + var(--safe-b)) calc(12px + var(--safe-l));
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+}
+
+.top-bar,
+.bottom-panel,
+.modal {
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.top-bar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.title {
+  min-width: 0;
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.pill {
+  min-width: 72px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.74);
+  border: 1px solid var(--line);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wave-progress {
+  grid-column: 1 / -1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.wave-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #22c55e, #facc15, #f97316);
+  transition: width 140ms linear;
+}
+
+.bottom-panel {
+  align-self: end;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  touch-action: none;
+}
+
+.slot {
+  position: relative;
+  aspect-ratio: 1;
+  min-height: 54px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 2px solid rgba(148, 163, 184, 0.3);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.slot.compatible {
+  border-color: #22c55e;
+}
+
+.slot.blocked {
+  border-color: #ef4444;
+}
+
+.slot.selected {
+  outline: 3px solid rgba(250, 204, 21, 0.8);
+}
+
+.turret-token {
+  width: 76%;
+  height: 76%;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: clamp(14px, 5vw, 24px);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 8px 16px rgba(255, 255, 255, 0.22), 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.action-button {
+  min-height: 64px;
+  border-radius: 8px;
+  background: #2563eb;
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 1.1;
+  padding: 8px;
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.22);
+}
+
+.action-button.primary {
+  background: #16a34a;
+}
+
+.action-button.warn {
+  background: #ca8a04;
+}
+
+.action-button.danger {
+  background: #dc2626;
+}
+
+.action-button:disabled {
+  opacity: 0.45;
+}
+
+.modal-layer {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(18px + var(--safe-t)) calc(18px + var(--safe-r)) calc(18px + var(--safe-b)) calc(18px + var(--safe-l));
+}
+
+.modal-layer.visible {
+  pointer-events: auto;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.modal {
+  width: min(420px, 100%);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.modal p {
+  margin: 0 0 14px;
+  color: #cbd5e1;
+}
+
+.touch-layer {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  display: none;
+  touch-action: none;
+}
+
+.touch-layer.visible {
+  display: block;
+}
+
+.pan-zone {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0 50% 0 0;
+  touch-action: none;
+}
+
+.stick-base,
+.stick-knob {
+  position: absolute;
+  border-radius: 50%;
+  display: none;
+  transform: translate(-50%, -50%);
+}
+
+.stick-base {
+  width: 104px;
+  height: 104px;
+  border: 2px solid rgba(226, 232, 240, 0.5);
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.stick-knob {
+  width: 42px;
+  height: 42px;
+  background: rgba(34, 211, 238, 0.82);
+}
+
+.touch-actions {
+  pointer-events: auto;
+  position: absolute;
+  right: calc(18px + var(--safe-r));
+  bottom: calc(18px + var(--safe-b));
+  display: grid;
+  gap: 12px;
+}
+
+.touch-button {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.86);
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.touch-button.main {
+  width: 100px;
+  height: 100px;
+  background: rgba(22, 163, 74, 0.9);
+}

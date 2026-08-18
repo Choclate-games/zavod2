@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
-from providers.opencode import OpenCodeProvider
+from providers.cli_agents import ClaudeCodeAgent, CodexAgent, KimiAgent, OpenCodeCLIAgent
 from providers.base import NoneImageProvider
 from agents.idea_brainstormer import IdeaBrainstormerAgent
 from app.models import GameConcept
@@ -19,16 +19,42 @@ def test_provider_factory_agy():
     assert isinstance(prov, AGYProvider)
     assert prov.cli_path == "agy"
 
-def test_provider_factory_opencode():
+def test_provider_factory_opencode_cli():
     prov = ProviderFactory.get_ai_provider("opencode")
-    assert isinstance(prov, OpenCodeProvider)
-    assert "opencode.ai" in prov.base_url
+    assert isinstance(prov, OpenCodeCLIAgent)
+    assert prov.cli_path == "opencode"
 
-def test_opencode_provider_fallback_when_unconfigured():
-    prov = OpenCodeProvider(api_key="")
-    assert not prov.is_configured()
-    text = prov.generate_text("System", "User prompt")
-    assert len(text) > 0
+def test_opencode_cli_command_building():
+    prov = OpenCodeCLIAgent(model="opencode-go/kimi-k3", yolo=True)
+    cmd = prov.build_stream_command("Build game engine", conversation_id="ses_1")
+    assert cmd[1:4] == ["run", "--format", "json"]
+    assert "--auto" in cmd
+    assert cmd[-1] == "Build game engine"
+    assert "--session" in cmd and "ses_1" in cmd
+
+def test_cli_agents_effort_flags():
+    """Уровень рассуждений передаётся так, как его понимает конкретный CLI."""
+    assert ClaudeCodeAgent(effort="xhigh").build_plain_command("X")[-2:] == ["--effort", "xhigh"]
+    assert CodexAgent(effort="high").build_plain_command("X")[-3:-1] == [
+        "-c", 'model_reasoning_effort="high"']
+    assert OpenCodeCLIAgent(effort="minimal").build_plain_command("X")[-3:-1] == [
+        "--variant", "minimal"]
+
+    # У Kimi CLI уровней нет, а неизвестный уровень не должен попадать в команду
+    assert KimiAgent(effort="high").effort_args() == []
+    assert "--effort" not in ClaudeCodeAgent(effort="turbo").build_plain_command("X")
+
+
+def test_opencode_plain_output_is_extracted_from_json_events():
+    """`run --format json` отдаёт события — наружу должен уйти только текст ответа."""
+    raw = "\n".join([
+        '{"type":"step_start","part":{"type":"step-start"}}',
+        '{"type":"text","part":{"type":"text","text":"первая часть","time":{"start":1,"end":2}}}',
+        '{"type":"text","part":{"type":"text","text":"хвост","time":{"start":3}}}',
+        '{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1,"output":2}}}',
+    ])
+    assert OpenCodeCLIAgent().postprocess_plain_output(raw) == "первая часть"
+
 
 def test_agy_extract_json():
     prov = AGYProvider()
@@ -43,11 +69,22 @@ Done."""
     extracted = prov._extract_json_string(raw_markdown)
     assert '{"title": "Space Arena"' in extracted or '"title": "Space Arena"' in extracted
 
-def test_opencode_extract_json():
-    prov = OpenCodeProvider()
-    raw_markdown = '{"title": "Card Roguelike", "status": "ok"}'
-    extracted = prov._extract_json_string(raw_markdown)
-    assert extracted == raw_markdown
+def test_opencode_cli_stream_events():
+    prov = OpenCodeCLIAgent()
+    text_line = ('{"type":"text","sessionID":"ses_1","part":{"type":"text",'
+                 '"text":"OK","time":{"start":1,"end":2}}}')
+    event = prov.parse_stream_event(text_line)
+    assert event["kind"] == "assistant" and "OK" in event["text"]
+
+    tool_line = ('{"type":"tool","sessionID":"ses_1","part":{"type":"tool","tool":"bash",'
+                 '"state":{"status":"completed","output":"hi"}}}')
+    tool_event = prov.parse_stream_event(tool_line)
+    assert tool_event["kind"] == "tool_result" and "hi" in tool_event["text"]
+
+    finish_line = ('{"type":"step_finish","sessionID":"ses_1","part":{"type":"step-finish",'
+                   '"tokens":{"input":3,"output":5,"reasoning":0}}}')
+    finish = prov.parse_stream_event(finish_line)
+    assert finish["kind"] == "result" and finish["tokens"] == 8
 
 def test_agy_is_available_check():
     prov = AGYProvider()

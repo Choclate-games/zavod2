@@ -20,7 +20,8 @@ from app.logging import log_info, log_error, log_success
 from app.models import GameConcept
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider
-from providers.opencode import OpenCodeProvider
+# REST API OpenCode Zen отключён вместе с остальными API-моделями:
+# from providers.opencode import OpenCodeProvider
 from validators.output_validator import OutputValidator
 
 # Global state for background generation tasks
@@ -426,15 +427,16 @@ def create_app() -> Flask:
         return jsonify({
             "default_provider": config.default_provider,
             "default_mode": config.default_mode,
-            "opencode_api_key": config.opencode_api_key[:6] + "..." if len(config.opencode_api_key) > 6 else ("configured" if config.opencode_api_key else ""),
-            "opencode_base_url": config.opencode_base_url,
+            # OpenCode теперь CLI-агент, а не REST API: ключ и base_url не нужны.
+            "opencode_cli_path": config.opencode_cli_path,
             "opencode_model": config.opencode_model,
             "agy_cli_path": config.agy_cli_path,
             "agy_model": config.agy_model,
             "agy_effort": config.agy_effort,
-            "openai_api_key": "configured" if os.getenv("OPENAI_API_KEY") else "",
-            "anthropic_api_key": "configured" if os.getenv("ANTHROPIC_API_KEY") else "",
-            "gemini_api_key": "configured" if os.getenv("GEMINI_API_KEY") else "",
+            # Ключи API-моделей больше не отдаются: провайдеры отключены.
+            # "openai_api_key": "configured" if os.getenv("OPENAI_API_KEY") else "",
+            # "anthropic_api_key": "configured" if os.getenv("ANTHROPIC_API_KEY") else "",
+            # "gemini_api_key": "configured" if os.getenv("GEMINI_API_KEY") else "",
             "output_dir": str(config.output_dir)
         })
 
@@ -454,15 +456,10 @@ def create_app() -> Flask:
                         env_lines[k.strip()] = v.strip()
 
         # Update values if supplied
-        if "opencode_api_key" in data and data["opencode_api_key"] and not data["opencode_api_key"].endswith("..."):
-            env_lines["OPENCODE_API_KEY"] = data["opencode_api_key"]
-            os.environ["OPENCODE_API_KEY"] = data["opencode_api_key"]
-            config.opencode_api_key = data["opencode_api_key"]
-
-        if "opencode_base_url" in data and data["opencode_base_url"]:
-            env_lines["OPENCODE_BASE_URL"] = data["opencode_base_url"]
-            os.environ["OPENCODE_BASE_URL"] = data["opencode_base_url"]
-            config.opencode_base_url = data["opencode_base_url"]
+        if "opencode_cli_path" in data and data["opencode_cli_path"]:
+            env_lines["OPENCODE_CLI_PATH"] = data["opencode_cli_path"]
+            os.environ["OPENCODE_CLI_PATH"] = data["opencode_cli_path"]
+            config.opencode_cli_path = data["opencode_cli_path"]
 
         if "opencode_model" in data and data["opencode_model"]:
             env_lines["OPENCODE_MODEL"] = data["opencode_model"]
@@ -489,17 +486,10 @@ def create_app() -> Flask:
             os.environ["DEFAULT_PROVIDER"] = data["default_provider"]
             config.default_provider = data["default_provider"]
 
-        if "openai_api_key" in data and data["openai_api_key"] and not data["openai_api_key"].endswith("..."):
-            env_lines["OPENAI_API_KEY"] = data["openai_api_key"]
-            os.environ["OPENAI_API_KEY"] = data["openai_api_key"]
-
-        if "gemini_api_key" in data and data["gemini_api_key"] and not data["gemini_api_key"].endswith("..."):
-            env_lines["GEMINI_API_KEY"] = data["gemini_api_key"]
-            os.environ["GEMINI_API_KEY"] = data["gemini_api_key"]
-
-        if "anthropic_api_key" in data and data["anthropic_api_key"] and not data["anthropic_api_key"].endswith("..."):
-            env_lines["ANTHROPIC_API_KEY"] = data["anthropic_api_key"]
-            os.environ["ANTHROPIC_API_KEY"] = data["anthropic_api_key"]
+        # Сохранение ключей API-моделей отключено вместе с самими провайдерами:
+        # if "openai_api_key" in data and ...: env_lines["OPENAI_API_KEY"] = ...
+        # if "gemini_api_key" in data and ...: env_lines["GEMINI_API_KEY"] = ...
+        # if "anthropic_api_key" in data and ...: env_lines["ANTHROPIC_API_KEY"] = ...
 
         # Write to .env
         with open(env_path, "w", encoding="utf-8") as f:

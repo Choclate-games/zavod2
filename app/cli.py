@@ -38,8 +38,8 @@ def create(
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Run interactive prompt wizard"),
     mode: str = typer.Option("standard", "--mode", "-m", help="Generation mode: fast, standard, deep"),
     renderer: str = typer.Option("auto", "--renderer", "-r", help="Rendering engine: auto, threejs, pixijs"),
-    provider: str = typer.Option("local", "--provider", "-p", help="AI provider: agy, opencode, local, openai, anthropic, google"),
-    image_provider: str = typer.Option("local", "--image-provider", help="Image generator: local, openai"),
+    provider: str = typer.Option("local", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, kimi, opencode, local"),
+    image_provider: str = typer.Option("local", "--image-provider", help="Image generator: qwen, agy, local, none"),
     output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o", help="Target output directory")
 ):
     final_prompt = ""
@@ -80,7 +80,7 @@ def create(
 @app.command(name="analyze", help="Analyze game concept and estimate viability scores without generating full package.")
 def analyze(
     idea: str = typer.Argument(..., help="Game concept to analyze"),
-    provider: str = typer.Option("local", "--provider", "-p", help="AI provider: agy, opencode, local, openai, anthropic, google")
+    provider: str = typer.Option("local", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, kimi, opencode, local")
 ):
     console.print(f"[bold cyan]🔍 Analyzing Game Concept Viability...[/bold cyan]")
     ctx = GenerationContext(
@@ -183,9 +183,9 @@ def list_projects(
 
     console.print(table)
 
-@app.command(name="test-provider", help="Test connectivity and response of an AI provider (agy, opencode, local, openai, etc.).")
+@app.command(name="test-provider", help="Test connectivity and response of an AI provider (agy, claude, codex, kimi, opencode, local).")
 def test_provider(
-    provider: str = typer.Argument("agy", help="Provider name: agy, opencode, local, openai, anthropic, google")
+    provider: str = typer.Argument("agy", help="Provider name: agy, claude, codex, kimi, opencode, local")
 ):
     console.print(f"[bold cyan]Testing AI Provider: {provider}[/bold cyan]")
     prov = ProviderFactory.get_ai_provider(provider)

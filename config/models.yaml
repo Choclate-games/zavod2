@@ -7,28 +7,30 @@ providers:
     default_model: "expert-heuristic-v1"
     supports_structured: true
     supports_image: true
-  openai:
-    name: "OpenAI"
-    api_key_env: "OPENAI_API_KEY"
-    default_model: "gpt-4o"
-    fallback_model: "gpt-4o-mini"
-    image_model: "dall-e-3"
-    temperature: 0.7
-    max_tokens: 4096
-  anthropic:
-    name: "Anthropic"
-    api_key_env: "ANTHROPIC_API_KEY"
-    default_model: "claude-3-5-sonnet-20241022"
-    fallback_model: "claude-3-5-haiku-20241022"
-    temperature: 0.7
-    max_tokens: 4096
-  google:
-    name: "Google Gemini"
-    api_key_env: "GEMINI_API_KEY"
-    default_model: "gemini-1.5-pro"
-    fallback_model: "gemini-1.5-flash"
-    temperature: 0.7
-    max_tokens: 4096
+# API-модели отключены: код и спеку пишут терминальные CLI-агенты
+# (agy, claude, codex, kimi, opencode). Раскомментируйте, если вернёте API.
+#   openai:
+#     name: "OpenAI"
+#     api_key_env: "OPENAI_API_KEY"
+#     default_model: "gpt-4o"
+#     fallback_model: "gpt-4o-mini"
+#     image_model: "dall-e-3"
+#     temperature: 0.7
+#     max_tokens: 4096
+#   anthropic:
+#     name: "Anthropic"
+#     api_key_env: "ANTHROPIC_API_KEY"
+#     default_model: "claude-3-5-sonnet-20241022"
+#     fallback_model: "claude-3-5-haiku-20241022"
+#     temperature: 0.7
+#     max_tokens: 4096
+#   google:
+#     name: "Google Gemini"
+#     api_key_env: "GEMINI_API_KEY"
+#     default_model: "gemini-1.5-pro"
+#     fallback_model: "gemini-1.5-flash"
+#     temperature: 0.7
+#     max_tokens: 4096
 
 agent_settings:
   idea_analyzer:

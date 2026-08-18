@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a12" />
+  <title>Бурильщик Бездны: Рикошет Руды</title>
+  <style>
+    :root {
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-r: env(safe-area-inset-right, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-l: env(safe-area-inset-left, 0px);
+      --vp-w: 100vw;
+      --vp-h: 100dvh;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    html {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+      background: #0a0a12;
+    }
+    body {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #0a0a12;
+      color: #ffffff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #game-canvas {
+      position: fixed;
+      inset: 0;
+      touch-action: none;
+      z-index: 1;
+    }
+    #ui-layer {
+      position: fixed;
+      top: var(--safe-t);
+      left: var(--safe-l);
+      width: calc(100% - var(--safe-l) - var(--safe-r));
+      height: calc(100% - var(--safe-t) - var(--safe-b));
+      z-index: 10;
+      pointer-events: none;
+    }
+    #ui-layer > * {
+      pointer-events: auto;
+    }
+    #touch-controls {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      touch-action: none;
+      display: none;
+    }
+    #touch-controls.active {
+      display: block;
+    }
+    img, canvas, svg {
+      -webkit-user-drag: none;
+    }
+    input[type='text'], textarea {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+  <div id="ui-layer"></div>
+  <div id="touch-controls"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

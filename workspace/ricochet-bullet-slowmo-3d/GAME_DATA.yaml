@@ -1,0 +1,854 @@
+raw_prompt: 'Создай 3D физическую головоломку на Three.js: игрок от первого лица целится
+  лазерным лучом рикошета и стреляет одной пулей. Камера следует за пулей в режиме
+  Slow-Motion. Пуля отскакивает от стен по закону отражения (векторы нормалей), взрывает
+  бочки и сбивает красных ragdoll/кубических врагов. 20 уровней с нарастающей сложностью
+  (порталы, движущиеся щиты), система оценки на 3 звезды и кнопка мгновенного рестарта.'
+title: 'Рикошет Снайпер 3D: Замедленный Выстрел'
+slug: ricochet-bullet-slowmo-3d
+genre: Физическая головоломка / Тактический 3D-шутер
+subgenre: Рикошет-пазл от первого лица со Slow-Motion Bullet-Cam
+renderer: threejs
+renderer_reason: User explicitly specified 'threejs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Web & Mobile)
+orientation: landscape
+target_audience: Игроки 12-45 лет, ценящие тактические физические головоломки, кинематографичный
+  экшен в стиле Superhot / Sniper Elite и залипательный гиперказуальный геймплей с
+  реиграбельностью.
+core_loop: Оценка геометрии уровня -> Прицеливание лазерным лучом с расчетом рикошетов
+  -> Выстрел -> Замедленный полет пули (Bullet-Cam) с физическими рикошетами и цепными
+  реакциями -> Уничтожение всех врагов -> Получение 1-3 звезд -> Переход на следующий
+  уровень или мгновенный рестарт.
+hook: Гипнотический кинематографический Slow-Motion полет пули от первого лица с физически
+  честными рикошетами, взрывами бочек и эпичным разлетом красных врагов одним точным
+  выстрелом.
+player_fantasy: Гениальный снайпер-трикшотер, способный одним математически выверенным
+  выстрелом запустить смертоносный рикошет через порталы и щиты, уничтожив всю вражескую
+  базу.
+session_model: Быстрые микро-сессии по 30-90 секунд на уровень с мгновенным перезапуском
+  одной кнопкой и возможностью пройти 20 уровней за 15-25 минут с последующей охотой
+  за 3 звездами.
+unique_value_proposition: Сочетание точного геометрического расчета траектории от
+  первого лица с эффектом кинематографической камеры слежения за пулей в честном 3D-пространстве
+  с интерактивной физикой Ragdoll и порталами.
+vision: Создать эталонную WebGL/Mobile физическую головоломку с непревзойденным сочным
+  геймфилом, где каждый успешный выстрел ощущается как сцена из блокбастера благодаря
+  замедлению времени, динамической камере и цепным реакциям.
+elevator_pitch: '«Superhot встречает Sniper Elite в формате 3D-головоломки»: целься
+  лазерным лучом с учетом нормалей стен, жми на спуск и наблюдай в кинематографичном
+  slow-mo, как твоя пуля огибает препятствия, проходит сквозь порталы, детонирует
+  бочки и сокрушает красных врагов!'
+win_conditions: Все красные враги на уровне нейтрализованы (убиты прямым попаданием
+  пули, осколками или взрывной волной бочек).
+lose_conditions: Пуля израсходована и остановилась (превышен лимит отскоков или попадание
+  в поглощающую преграду), при этом хотя бы один враг остался жив.
+progression_summary: '20 уровней с нарастающей комплексностью: уровни 1-4 (базовые
+  углы отражения и взрывные бочки), 5-9 (движущиеся стальные щиты и стеклянные препятствия),
+  10-15 (входные/выходные порталы и гравитационные ловушки), 16-20 (комбинированные
+  многоступенчатые трикшоты с кнопками-триггерами и движущимися целями). Зарабатываемые
+  звезды открывают кастомные скины пуль и неоновые цвета лазеров.'
+difficulty_curve: 'Плавное введение базовых механик с постоянным ростом удовлетворения
+  от решения задач: от простых выстрелов в 1-2 отскока до сложных многоуровневых головоломок
+  с движущимися платформами и портальными петлями.'
+scores:
+  fun: 9
+  originality: 8
+  replayability: 8
+  development_cost: 8
+  visual_appeal: 9
+  mobile_fit: 9
+  monetization: 8
+  platform_fit: 9
+  overall_score: 8.5
+  justification: Концепт обладает высочайшей вирусной привлекательностью и instant-fun
+    фактором за счет bullet-cam и slow-motion. Архитектура на Three.js + Rapier3D
+    гарантирует 60 FPS на смартфонах и ПК, а Playgama Bridge обеспечивает органичную
+    монетизацию и сохранение прогресса в облаке.
+references:
+- name: Superhot
+  genre: FPS / Time-bending Puzzle
+  mechanics:
+  - Slow-Motion при взаимодействии
+  - Минималистичный визуальный стиль с красными силуэтами врагов
+  - Осколочный разлет при попадании
+  lessons: Минималистичный контрастный визуальный стиль (белый фон + красные враги)
+    обеспечивает идеальную читаемость сцены и снижает нагрузку на рендер.
+  what_to_avoid: Слишком медленный темп ожидания между уровнями.
+- name: Sniper Elite (Bullet Cam)
+  genre: Tactical Shooter
+  mechanics:
+  - Кинематографическое следование камеры за пулей
+  - Динамическое замедление времени при сближении с целью
+  - Сокрушительный финальный импакт
+  lessons: Камера за пулей создает мощный эмоциональный отклик и превращает каждый
+    удачный выстрел в зрелищную награду.
+  what_to_avoid: Потеря ориентации игрока из-за хаотичных поворотов камеры при отскоках.
+- name: Portal
+  genre: First-Person Physics Puzzle
+  mechanics:
+  - Сохранение импульса при прохождении через порталы
+  - Пространственная переориентация вектора скорости
+  - Интерактивные кнопки и лазерные лучи
+  lessons: Порталы кардинально углубляют головоломку, превращая простые рикошеты в
+    многомерные тактические задачи.
+  what_to_avoid: Избыточная визуальная путаница при входе в порталы под острым углом.
+mechanics:
+- name: Лазерный предиктивный прицел (Raycast Trajectory)
+  category: combat
+  priority: core
+  description: Луч от оружия игрока математически рассчитывает до 3-5 отскоков от
+    поверхностей по вектору отражения (R = V - 2*(V·N)*N) в реальном времени, отображая
+    пунктирную неоновую линию траектории.
+  player_interaction: Перемещение мыши или свайп пальцем по экрану для наведения луча.
+    Прекращение удержания или клик производит выстрел.
+  feedback: Неоновое свечение лазера, яркие маркеры в точках соприкосновения со стенами,
+    пульсация луча при наведении на взрывную бочку или врага.
+  technical_complexity: Medium
+  strengths:
+  - Дает игроку полный контроль и уверенность в выстреле
+  - Снижает фрустрацию от слепых промахов
+  weaknesses:
+  - Слишком длинный предикшн может упростить игру (требуется ограничение дальности
+    или числа отображаемых отскоков).
+- name: Кинематографический Slow-Motion Bullet-Cam
+  category: movement
+  priority: core
+  description: После нажатия на спуск камера плавно интерполируется за летящую пулю
+    в режиме замедленного времени (0.2x от реальной скорости), динамически сглаживая
+    вращение при рикошетах.
+  player_interaction: Пассивное наблюдение с возможностью ускорить время (удержание
+    пробела/экрана) или пропустить полет повторным тапом.
+  feedback: Искажение пространства (шлейф/heat distortion), низкочастотный звук рассекаемого
+    воздуха (Whoosh), замедленные звуки окружения, частицы рикошета.
+  technical_complexity: High
+  strengths:
+  - Высочайший уровень зрелищности и вовлечения
+  - Игрок видит каждую деталь трикшота
+  weaknesses:
+  - Риск укачивания при резких разворотах камеры (решается плавной интерполяцией кватернионов
+    Slerp).
+- name: Физические рикошеты и цепные реакции
+  category: environment
+  priority: core
+  description: Пуля отскакивает от твердых поверхностей с сохранением кинетической
+    энергии, детонирует красные бочки с радиусом поражения взрывной волной и активирует
+    физические переключатели.
+  player_interaction: Игрок целится в стены, наклонные пластины и бочки для поражения
+    врагов за укрытиями.
+  feedback: Вспышки искр, звуки металлических и каменных рикошетов, объемные взрывы
+    бочек с разлетом обломков и толканием объектов.
+  technical_complexity: Medium
+  strengths:
+  - Огромное поле для креативных решений головоломки
+  - Сочный визуальный отклик
+  weaknesses:
+  - Необходимость точной физической синхронизации коллизий без проваливания сквозь
+    геометрию (CCD).
+- name: Разрушаемые кубические / Ragdoll-враги
+  category: combat
+  priority: core
+  description: Враги состоят из связанных физических сегментов или составных блоков,
+    которые при попадании пули или взрыве эффектно разлетаются под действием импульса
+    удара.
+  player_interaction: Прямое или косвенное попадание пулей/обломками бочки.
+  feedback: Звук сокрушительного удара (Impact SFX), замедленный разлет частей тела
+    врага, появление победного индикатора.
+  technical_complexity: Medium
+  strengths:
+  - Невероятно приятное ощущение уничтожения цели
+  - Комедийный и динамичный рэгдолл-эффект
+  weaknesses:
+  - Требуется оптимизация физических тел для стабильных 60 FPS на мобильных устройствах.
+- name: Пространственные порталы и динамические щиты
+  category: puzzle
+  priority: progression
+  description: Синие и оранжевые порталы мгновенно телепортируют пулю с сохранением
+    скорости и трансформацией вектора направления; движущиеся щиты требуют точного
+    тайминга выстрела.
+  player_interaction: Выбор момента выстрела и направления входа в портал.
+  feedback: Энергетическое свечение портала, звуковой хлопок телепортации, изменение
+    цвета трассирующего следа пули.
+  technical_complexity: High
+  strengths:
+  - Взрывной рост вариативности головоломок на поздних уровнях
+  - Интеллектуальный вызов для игрока
+  weaknesses:
+  - Сложность визуализации лазерного предикшна сквозь порталы.
+gameplay_systems:
+- name: Система расчета лазерного предикшена (Laser Trajectory Predictor)
+  purpose: Отрисовка точной траектории полета пули с учетом отражений от нормалей
+    поверхностей и прохождения через порталы.
+  input: Координаты прицела игрока (Vector3) и стартовая точка ствола.
+  rules:
+  - Raycast пускается из дула оружия в направлении взгляда
+  - 'При пересечении с твердым телом вычисляется точка удара и нормаль: D_reflect
+    = D - 2 * (D · N) * N'
+  - Новый луч пускается из точки удара с небольшим смещением по нормали (epsilon =
+    0.001) для исключения самопересечения
+  - При попадании в портал луч переносится в выходной портал с трансформацией кватерниона
+    направления
+  - 'Лимит предикшена: до 4 последовательных отскоков'
+  - При попадании во врага или бочку луч завершается ярким маркером попадания
+  state:
+  - origin
+  - direction
+  - bounce_points
+  - hit_targets
+  - is_valid_aim
+  interactions: Передает массив точек сегментов в Three.js LineSegments / TubeGeometry
+    для рендера светящегося луча.
+  feedback: Анимированная пульсация лазера, смена цвета маркера при наведении на взрывные
+    цели (желтый) или врагов (красный).
+  edge_cases:
+  - Попадание точно в острый угол между двумя стенами (разрешается выбором доминирующей
+    нормали)
+  - Зацикливание луча между двумя параллельными зеркальными щитами (ограничение счетчиком
+    итераций)
+- name: Система кинематографической камеры Slow-Motion (Bullet Time Controller)
+  purpose: Управление временем и перемещением камеры во время выстрела для создания
+    максимального эффекта вовлечения.
+  input: Триггер выстрела, текущая позиция и скорость пули.
+  rules:
+  - В режиме прицеливания камера зафиксирована в позиции глаз персонажа (FOV 65)
+  - В момент выстрела timescale снижается до 0.25 (slow-motion)
+  - 'Камера переходит в режим слежения: позиция = bullet.pos - bullet.velocity.normalized
+    * 1.5 + Vector3(0, 0.4, 0)'
+  - При приближении пули к врагу на дистанцию < 2 метров timescale снижается до 0.1
+    (супер-замедление)
+  - После поражения последнего врага запускается 2-секундный победный ракурс с облетом
+    сцены (orbit camera)
+  - При промахе камера возвращается в режим прицеливания с затемнением или мгновенным
+    рестартом
+  state:
+  - camera_mode (AIM / FOLLOW / IMPACT / VICTORY)
+  - current_timescale
+  - target_transform
+  - lerp_factor
+  interactions: Взаимодействует с Physics Engine (управление fixedDeltaTime) и Audio
+    Engine (питч звуков снижается до 0.5x).
+  feedback: Эффект виньетки и легкого Chromatic Aberration по краям экрана в момент
+    Slow-Motion.
+  edge_cases:
+  - Пуля летит в узкий туннель (камера использует raycast против стен для предотвращения
+    клиппинга геометрии)
+  - Игрок нажимает кнопку пропуска полета (timescale мгновенно сбрасывается в 3.0x
+    до завершения расчета)
+- name: Физическая система разрушений и Ragdoll (Impact & Destruction Engine)
+  purpose: Реалистичный просчет ударов пули, детонации бочек и физического разлета
+    тел врагов.
+  input: Столкновения коллайдеров Rapier3D / Three.js Raycast Hits.
+  rules:
+  - Прямое попадание пули передает импульс телу врага в точке контакта
+  - 'Взрыв бочки генерирует радиальную силу: Force = MaxForce * (1 - Distance / Radius)'
+  - Кубический враг распадается на 6-8 независимых физических блоков с рандомизированным
+    вращательным моментом
+  - Разрушенные объекты деактивируют свои коллайдеры через 3 секунды для экономии
+    ресурсов
+  state:
+  - active_rigidbodies
+  - destroyed_entities
+  - explosion_queue
+  interactions: Посылает события в Level Manager для проверки условий победы.
+  feedback: Спавн облака дыма и искр (Particle System), тряска экрана (Camera Shake
+    0.3s), сочный звук взрыва.
+  edge_cases:
+  - Обломок бочки сбивает врага (засчитывается как убийство окружением)
+  - Враг падает за пределы карты (триггер KillZone снизу уровня засчитывает устранение)
+- name: Система рейтинга уровней и мгновенного рестарта (Level Flow & Scoring)
+  purpose: Оценка мастерства игрока, сохранение звезд и обеспечение нулевой задержки
+    при повторной попытке.
+  input: Количество потраченных выстрелов, время прохождения, нажатие клавиши рестарта
+    (R / кнопка в UI).
+  rules:
+  - Каждый уровень имеет лимит выстрелов (1 выстрел = 3 звезды, 2 выстрела = 2 звезды,
+    3 выстрела = 1 звезда)
+  - Убийство всех врагов одним выстрелом с первого рикошета дает идеальный рейтинг
+    (3 звезды)
+  - Нажатие клавиши 'R' или экранной кнопки перезапускает уровень менее чем за 100
+    мс без перезагрузки сцены (сброс позиций объектов через пул)
+  - Результаты уровня сохраняются в Cloud Storage через Playgama Bridge
+  state:
+  - shots_fired
+  - current_level
+  - stars_awarded
+  - level_status (READY/IN_FLIGHT/WON/FAILED)
+  interactions: Связь с UI Manager и Playgama Bridge Save Storage.
+  feedback: Анимация появления 3 сияющих звезд со звуковыми аккордами, всплывающая
+    плашка 'ИДЕАЛЬНЫЙ ТРИКШОТ!'.
+  edge_cases:
+  - Игрок нажимает рестарт прямо во время полета пули (анимация и физика мгновенно
+    прерываются, пуля возвращается в ствол)
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: threejs
+  renderer_version: ^0.170.0
+  physics_engine: Rapier3D (@dimforge/rapier3d-compat 0.13.x)
+  state_manager: Reactive EventBus / Custom Store
+  audio_engine: 'Web Audio API (Howler.js with html5: false)'
+  target_fps: 60
+  max_draw_calls: 60
+  max_triangles_or_sprites: 35000
+  bundle_size_budget_mb: 3.8
+  layers:
+  - name: UI & Input Layer
+    description: HTML5/Canvas оверлей, обработка тач-свайпов, мыши, виртуального прицеливания,
+      HUD и экранов победы/поражения.
+  - name: Game Logic & State Layer
+    description: Контроллер уровней, система звезд, правила рикошетов, спавнер сущностей
+      и стейт-машина игры.
+  - name: Physics & Simulation Layer
+    description: 'Rapier3D физический мир: непрерывная детекция столкновений (CCD)
+      для скоростной пули, рэгдоллы, взрывы.'
+  - name: Rendering & VFX Layer
+    description: Three.js сцена, шейдеры лазерного луча, камера слежения со сглаживанием
+      Slerp, партикловые системы и пост-процессинг.
+  - name: Platform & Storage Layer
+    description: Интеграция с @playgama/bridge (Яндекс Игры, VK), полноэкранная реклама,
+      rewarded видео, облачные сохранения.
+  modules:
+  - name: LaserPredictor
+    description: Выполняет быстрый математический raycasting для отрисовки траектории
+      отражений лазера.
+  - name: BulletCameraController
+    description: Управляет плавной интерполяцией камеры за пулей и регулирует timescale
+      в слоу-мо.
+  - name: LevelManager
+    description: Хранит конфигурации 20 уровней, осуществляет быстрый сброс и перезапуск
+      сущностей.
+  - name: RagdollSystem
+    description: Управляет физическими телами составных кубических врагов и их разлетом
+      при попаданиях.
+  - name: PortalManager
+    description: Обрабатывает телепортацию пули и трансформацию вектора скорости между
+      порталами.
+  - name: BridgeService
+    description: Обертка над SDK Playgama для безопасных вызовов рекламы, лидербордов
+      и сохранения прогресса.
+monetization:
+  strategy_summary: 'Ненавязчивая гибридная модель: межстраничная реклама с умным
+    таймером между уровнями, просмотр Rewarded видео для разблокировки подсказки идеальной
+    траектории (Laser Guide) и пропуска сложного уровня, а также косметические покупки
+    скинов оружия и эффектов трассировки пули.'
+  rewarded_placements:
+  - id: show_laser_hint
+    name: Идеальная Траектория
+    benefit: Показывает полную траекторию со всеми рикошетами прямо в цель на текущем
+      уровне.
+    cooldown_or_limit: Без ограничений
+    trigger_moment: Кнопка с иконкой лампочки в верхнем меню при затруднении игрока.
+  - id: skip_level
+    name: Пропустить Уровень
+    benefit: Автоматически засчитывает прохождение уровня на 1 звезду и открывает
+      следующий.
+    cooldown_or_limit: 1 раз за уровень после 3 неудачных попыток
+    trigger_moment: Экран поражения при повторном промахе.
+  - id: unlock_neon_skin
+    name: Эксклюзивный Скин Пули
+    benefit: Временный доступ к золотой светящейся пуле с огненным шлейфом на 3 уровня.
+    cooldown_or_limit: Раз в 15 минут
+    trigger_moment: Внутриигровой магазин кастомизации.
+  interstitial_placements:
+  - trigger_event: Завершение уровня (Level Complete)
+    cooldown_seconds: 90
+    conditions: Показывается только после успешного прохождения уровня и не чаще 1
+      раза в 90 секунд; не прерывает активный геймплей или процесс прицеливания.
+  - trigger_event: Многократный рестарт уровня
+    cooldown_seconds: 120
+    conditions: Показывается при 5-м рестарте одного и того же уровня подряд при соблюдении
+      общего кулдауна.
+  in_app_purchases:
+  - sku: no_ads_vip
+    name: Отключение рекламы + VIP Скин
+    description: Полное отключение межстраничной рекламы навсегда + эксклюзивная лазерная
+      винтовка 'Cyber-Ghost'.
+    price_tier: tier_2
+    reward: Отключение Interstitial рекламы + уникальный скин лазера
+  - sku: all_levels_unlock
+    name: Набор Трикшотера
+    description: Мгновенная разблокировка всех 20 уровней + 500 монет на скины.
+    price_tier: tier_1
+    reward: Разблокировка уровней 1-20 + внутриигровая валюта
+  fairness_rules:
+  - Реклама никогда не прерывает полет пули или процесс прицеливания
+  - Все 20 уровней полностью проходимы на 3 звезды абсолютно бесплатно благодаря навыку
+    игрока
+  - Принудительный кулдаун между полноэкранными баннерами строго соблюдает лимит 90
+    секунд
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - crazygames
+  - gamepix
+  - web
+  initialization_flow:
+  - 1. Инициализация Bridge.init() на этапе прелоадера
+  - 2. Проверка доступности платформенного SDK и языка пользователя (ru/en)
+  - 3. Загрузка данных сохранений игрока из Bridge.storage.get()
+  - 4. Инициализация аудио-контекста по первому пользовательскому клику/тапу
+  - 5. Скрытие загрузочного экрана и плавный показ Главного Меню
+  cloud_save_keys:
+  - current_unlocked_level
+  - level_stars_map
+  - total_stars_count
+  - selected_bullet_skin
+  - selected_laser_color
+  - unlocked_cosmetics_list
+  - sound_volume
+  - music_volume
+  leaderboards:
+  - total_stars_rating
+  - least_shots_completed
+  ads_integration:
+    interstitial: Bridge.advertisement.showInterstitial() с проверкой Bridge.advertisement.isInterstitialSupported()
+    rewarded: Bridge.advertisement.showRewarded() с колбэками onRewarded и onClose
+    banner: Bridge.advertisement.showBanner() для десктопных экранов меню
+  lifecycle_hooks:
+  - 'Bridge.on(''visibility_change'', (isVisible) => isVisible ? resumeGame() : pauseGameAndAudio())'
+  - Bridge.on('audio_mute_request', () => muteAllAudio())
+  - Bridge.on('audio_unmute_request', () => unmuteAllAudio())
+art:
+  style_name: Стилизованный минималистичный Кибер-Неон / Superhot-Low-Poly
+  camera_perspective: First-Person при прицеливании с динамическим переходом в Third-Person
+    Cinematic Follow-Cam при полете пули
+  camera_fov: 65
+  camera_pitch_angle: 0
+  environment_theme: Стерильные абстрактные полигональные тренировочные залы с чистыми
+    белыми/серыми поверхностями и контрастными неоновыми интерактивными объектами.
+  character_proportions: Ярко-красные граненые кубические манекены-силуэты (Low-poly
+    humanoid dummies) без лишних текстур.
+  lighting_setup: 'Контрастный трехточечный свет: Directional Light с мягкими тенями,
+    заливающий Ambient Light и динамические точечные Point Lights в местах взрывов
+    и порталов.'
+  color_palette:
+    background_clean: '#ECEFF1'
+    walls_geometry: '#B0BEC5'
+    player_laser: '#00E5FF'
+    bullet_glow: '#FFD600'
+    enemy_red: '#FF1744'
+    explosive_barrel: '#FF6D00'
+    portal_blue: '#2979FF'
+    portal_orange: '#FF9100'
+    shield_steel: '#37474F'
+    ui_accent_gold: '#FFC107'
+  vfx_list:
+  - Неоновый светящийся лазерный луч с анимацией бегущих точек
+  - Искры и брызги раскаленного металла при каждом рикошете
+  - Следящий шлейф пули (Ribbon Trail / Bullet Shockwave)
+  - Объемный огненный взрыв бочки с физическими осколками и дымом
+  - Разлет красных кристаллических осколков при разрушении врагов
+  - Энергетическое искажение и частицы у входа/выхода порталов
+  - Виньетка замедления времени и радиальный blur
+  ui_theme: 'Минималистичный высококонтрастный кибер-интерфейс: полупрозрачные стеклянные
+    панели, четкая геометрическая типографика, золотые звезды и крупные акцентные
+    кнопки.'
+ui_ux:
+  hud_elements:
+  - Индикатор номера текущего уровня (например, 'УРОВЕНЬ 12')
+  - 'Счетчик оставшихся выстрелов (Иконка патрона: 1/1)'
+  - Рейтинг звезд текущей попытки (3 сияющие звезды, гаснущие при лишних выстрелах)
+  - Кнопка мгновенного перезапуска уровня [R] в правом верхнем углу
+  - Кнопка включения/выключения звука и паузы
+  - Кнопка подсказки идеальной траектории (Лампочка)
+  screens:
+  - name: MainMenu
+    description: Главный экран с 3D-фоном летящей пули, кнопкой 'ИГРАТЬ', выбором
+      уровней (Сетка 1-20) и магазином скинов.
+  - name: LevelSelectScreen
+    description: Сетка из 20 уровней с отображением заработанных звезд (0-3) и заблокированных
+      этапов.
+  - name: GameplayHUD
+    description: Минималистичный интерфейс прицеливания, не закрывающий обзор геометрии
+      уровня.
+  - name: VictoryModal
+    description: Победный экран с анимацией вручения звезд, временем прохождения,
+      кнопкой 'СЛЕДУЮЩИЙ УРОВЕНЬ' и 'ПОВТОРИТЬ'.
+  - name: DefeatModal
+    description: Экран поражения при нехватке выстрелов с крупной кнопкой 'МГНОВЕННЫЙ
+      РЕСТАРТ' и опцией 'ВЗЯТЬ ПОДСКАЗКУ'.
+  - name: SkinShopModal
+    description: Витрина кастомизации цвета лазера (Cyan, Lime, Purple) и шлейфа пули
+      (Fire, Neon, Rainbow).
+  mobile_controls_layout: 'Интуитивное управление одним пальцем: касание и перетаскивание
+    в любой части экрана наводит лазерный прицел; отпускание пальца производит выстрел.
+    Отдельная плавающая кнопка быстрого рестарта в удобной зоне большого пальца.'
+  keyboard_controls:
+    Mouse Look / Left Click: Прицеливание и выстрел
+    R / Space: Мгновенный перезапуск уровня
+    Shift (Hold): Ускорение полета пули в slow-mo
+    Escape / P: Пауза / Меню уровней
+  touch_controls:
+    Touch & Drag: Плавное наведение лазерного прицела
+    Release Touch: Выстрел пулей
+    Tap Screen During Flight: Ускорение slow-mo полета
+    Restart Button Tap: Мгновенный сброс уровня
+  wireframes_ascii: '+---------------------------------------------------+
+
+    | [=] Меню       УРОВЕНЬ 07   ***      (R) Рестарт |
+
+    |                                                   |
+
+    |                                                   |
+
+    |           [ СТАЛЬНОЙ ЩИТ ]                        |
+
+    |            \                                      |
+
+    |             \  (Лазер)                            |
+
+    |              \                                    |
+
+    |    (Враг)     *------------> [ ПОРТАЛ А ]         |
+
+    |   [ RED ]                                         |
+
+    |                                                   |
+
+    |                                                   |
+
+    |           (Прицел)                                |
+
+    |             (+)                                   |
+
+    |              |                                    |
+
+    |        [ ПУШКА ИГРОКА ]       [ ? Подсказка ]     |
+
+    +---------------------------------------------------+'
+mobile:
+  orientation: landscape
+  touch_implementation: 'Кастомный TouchController с поддержкой PointerEvents, предотвращением
+    скролла страницы (touch-action: none) и субпиксельной интерполяцией сглаживания
+    прицела.'
+  safe_area_handling: Динамические CSS отступы env(safe-area-inset-*) для корректного
+    отображения HUD на экранах с вырезами (iPhone Notch/Dynamic Island) и скругленными
+    углами.
+  performance_throttling:
+  - Автоматическое определение мобильного GPU и адаптивное разрешение (DPR от 1.0
+    до 1.5 вместо тяжелого 3.0)
+  - Пул объектов (Object Pooling) для частиц взрыва, обломков и сегментов лазерного
+    луча без выделения памяти в рантайме
+  - Отключение тяжелых пост-эффектов (Bloom заменяется на аддитивные спрайты) на слабых
+    мобильных чипсетах
+  - Фиксированный шаг физики 60 Гц с максимальным числом суб-степов не более 2
+audio:
+  bgm_style: Энергичный, но ненавязчивый электронный Synthwave / Cyberpunk Ambient
+    с динамическим низкочастотным Low-Pass фильтром во время замедления времени (Slow-Motion).
+  sfx_list:
+  - whoosh_bullet_fly (Свистящий замедленный полет пули)
+  - laser_aim_hum (Тихий высокотехнологичный гул лазерного прицела)
+  - ricochet_metal_01-04 (Звонкие рикошеты от металла и камня)
+  - barrel_explode (Сокрушительный объемный взрыв бочки)
+  - enemy_shatter (Хрустящий звук разлета кубического врага на куски)
+  - portal_teleport (Характерный вакуумный хлопок телепортации)
+  - star_award_01-03 (Мажорные колокольчики вручения звезд)
+  - instant_restart_click (Мгновенный механический щелчок перезарядки)
+  slowmo_audio_processing: При входе в slow-motion частота воспроизведения всех звуков
+    (playbackRate) плавно опускается до 0.5x с включением WebAudio BiquadFilter (Lowpass
+    600Hz).
+qa:
+  functional_tests:
+  - Проверка корректности отражения лазера от плоских и наклонных поверхностей (угол
+    падения строго равен углу отражения)
+  - 'Проверка непрерывности детекции столкновений (CCD): скоростная пуля ни при каких
+    условиях не должна пролетать сквозь тонкие стены'
+  - Проверка телепортации пули через порталы с сохранением скорости и правильным углом
+    выхода
+  - 'Проверка работы мгновенного рестарта [R]: состояние уровня, физика и счетчик
+    патронов сбрасываются мгновенно без утечек памяти'
+  - Проверка корректности начисления звезд (1-3) в зависимости от числа выстрелов
+    на всех 20 уровнях
+  performance_benchmarks:
+  - Стабильные 60 FPS на средних смартфонах (уровня Mali-G52 / Adreno 610)
+  - Количество Draw Calls в сцене не превышает 50 на самых насыщенных уровнях
+  - Время загрузки ассетов первого уровня не превышает 1.5 секунды на 4G-соединении
+  - Потребление оперативной памяти вкладки браузера не более 120 МБ
+  cross_browser_matrix:
+  - Chrome Desktop & Mobile (Android)
+  - Safari Desktop & Mobile (iOS 15+)
+  - Yandex Browser (Desktop & Mobile)
+  - VK App In-App WebView (Android/iOS)
+  common_bug_checklist:
+  - Отсутствие залипания камеры внутри геометрии стен при крутых рикошетах
+  - Отсутствие рассинхронизации визуального луча лазера и фактической физической траектории
+    пули
+  - Корректный сброс аудио-фильтра LowPass при возврате из Slow-Mo в меню
+  - Правильная обработка потери фокуса вкладки (авто-пауза)
+roadmap:
+- phase_number: 1
+  title: Физическое ядро, Лазер и Рикошеты
+  duration_days: 2
+  tasks:
+  - Настройка сцены Three.js, освещения и физического мира Rapier3D
+  - Создание математического модуля LaserPredictor (расчет нормалей отражения)
+  - Реализация контроллера прицеливания от первого лица и механики выстрела пулей
+    с CCD
+  milestone_deliverable: Рабочий прототип прицеливания с точным предикшеном и физическим
+    рикошетом пули от стен.
+- phase_number: 2
+  title: Slow-Motion Камера, Враги и Интерактивные Объекты
+  duration_days: 2
+  tasks:
+  - Разработка кинематографической камеры слежения за пулей с плавным slerp-сглаживанием
+  - Интеграция разрушаемых кубических ragdoll-врагов и детонирующих бочек
+  - Создание порталов (трансформация вектора импульса) и движущихся щитов
+  milestone_deliverable: Полноценный геймплейный цикл с кинематографичным полетом,
+    взрывами, порталами и сокрушением врагов.
+- phase_number: 3
+  title: Дизайн 20 Уровней, Прогрессия и 3-Звездная Система
+  duration_days: 2
+  tasks:
+  - Создание и балансировка 20 разнообразных уровней с нарастающей комплексностью
+  - Реализация системы оценки (1-3 звезды), мгновенного рестарта [R] и меню выбора
+    уровней
+  - Интеграция аудио-подсистемы Howler.js с эффектом замедления времени
+  milestone_deliverable: Полная кампания из 20 уровней с законченной прогрессией,
+    звездами и сочным аудиорядом.
+- phase_number: 4
+  title: Интеграция Playgama Bridge, Монетизация и Полишинг
+  duration_days: 1
+  tasks:
+  - Подключение @playgama/bridge (облачные сохранения, реклама, лидерборды)
+  - Добавление визуальных скинов пуль и цветов лазера в магазине
+  - Оптимизация производительности под мобильные устройства и финальное QA-тестирование
+  milestone_deliverable: Релизный билд, готовый к публикации на платформе Яндекс Игры
+    и партнерских площадках.
+risks:
+- risk: Туннелирование пули (пролет сквозь тонкие стены при высокой скорости)
+  category: technical
+  severity: High
+  mitigation: Использование режима Continuous Collision Detection (CCD) в Rapier3D
+    в сочетании с дополнительным сглаженным Raycast-тестом на каждом физическом тике.
+- risk: Резкие и дезориентирующие рывки камеры при частых рикошетах в замкнутых пространствах
+  category: gameplay
+  severity: Medium
+  mitigation: Применение плавной интерполяции кватернионов камеры (Damping/Slerp)
+    и ограничение максимальной угловой скорости поворота виртуального оператора.
+- risk: Падение производительности на слабых мобильных устройствах при одновременном
+    взрыве нескольких бочек и рэгдоллов
+  category: performance
+  severity: Medium
+  mitigation: Жесткий пул физических тел (максимум 24 активных обломка), инстансированный
+    рендеринг (InstancedMesh) для кубических осколков и авто-засыпание (sleep) покоящихся
+    тел.
+skills:
+- skill_id: bullet_ricochet_math
+  name: Математика векторных рикошетов и порталов
+  filename: skills/bullet_ricochet_math.md
+  purpose: Обеспечение математической точности расчета векторов отражения и преобразования
+    координат при прохождении сквозь порталы.
+  when_to_use: При реализации лазерного предикшна и физического отражения пули в Three.js.
+  rules:
+  - 'Формула отражения: R = V - 2.0 * dot(V, N) * N, где N — нормализованный вектор
+    нормали поверхности'
+  - Смещение точки старта следующего луча на EPSILON = 0.001 вдоль нормали для исключения
+    самоколлизий
+  - 'Матричное преобразование направления при выходе из портала: V_out = RotationMatrix_Portal
+    * V_in'
+  architecture: Статический чистый математический модуль без сторонних зависимостей
+    для максимальной скорости выполнения.
+  implementation_guidance: Использовать переиспользуемые экземпляры THREE.Vector3
+    для предотвращения сборки мусора (GC) в цикле анимации.
+  common_mistakes:
+  - Забывание нормализации вектора нормали N
+  - Отсутствие эпсилон-смещения, приводящее к застреванию луча в точке контакта
+  checklist:
+  - Проверен угол отражения от наклонных поверхностей под 45 градусов
+  - Проверена работа порталов под произвольными углами входа
+  - Отсутствуют аллокации new Vector3 в update-цикле
+  knowledge_refs:
+  - Three.js Vector3 Docs
+  - Real-Time Rendering 4th Edition - Collision & Reflection
+- skill_id: game_skill
+  name: 'Рикошет Снайпер 3D: Замедленный Выстрел Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for Рикошет
+    Снайпер 3D: Замедленный Выстрел.'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: THREEJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for THREEJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - threejs/adaptive_quality.md
+  - threejs/mobile_shaders.md
+  - threejs/performance_guide.md
+  - threejs/physics_integration.md
+  - threejs/vehicle_wheel_rig.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Рикошет Снайпер 3D: Замедленный
+  Выстрел'', a Физическая головоломка / Тактический 3D-шутер game. Visual style: Стилизованный
+  минималистичный Кибер-Неон / Superhot-Low-Poly. Camera perspective: First-Person
+  при прицеливании с динамическим переходом в Third-Person Cinematic Follow-Cam при
+  полете пули. Environment: Стерильные абстрактные полигональные тренировочные залы
+  с чистыми белыми/серыми поверхностями и контрастными неоновыми интерактивными объектами..
+  Central Action: The player character (Гениальный снайпер-трикшотер, способный одним
+  математически ...) is actively engaging enemies in combat, striking with visible
+  weapon trail arcs and dynamic particle sparks at the impact point. An enemy is reeling
+  with physics momentum. Visible in-game HUD overlay: health bar at top-left, wave
+  and enemies remaining at top-center, gold counter at top-right, crowd hype gauge
+  at bottom-center, and touch action controls at bottom corners. Crisp lighting: Контрастный
+  трехточечный свет: Directional Light с мягкими тенями, заливающий Ambient Light
+  и динамические точечные Point Lights в местах взрывов и порталов., high visual clarity,
+  immersive WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Создана сцена Three.js со стилизованной полигональной графикой и освещением
+- Реализован лазерный луч с расчетом до 4 рикошетов в реальном времени
+- Настроена физика Rapier3D с непрерывным контролем коллизий (CCD) для пули
+- Реализована кинематографичная камера слежения в режиме Slow-Motion
+- Созданы интерактивные взрывные бочки, порталы, движущиеся щиты и разрушаемые враги
+- Спроектированы и протестированы 20 уникальных уровней с нарастающей сложностью
+- Реализована система оценки на 3 звезды и мгновенный перезапуск уровня [R]
+- Полная интеграция с @playgama/bridge (сохранения, реклама, лидерборд)
+- Стабильные 60 FPS на десктопе и мобильных устройствах

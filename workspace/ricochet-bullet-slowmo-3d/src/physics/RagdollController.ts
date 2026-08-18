@@ -1,0 +1,2 @@
+import * as THREE from 'three';
+export class RagdollController { private readonly velocity = new THREE.Vector3(); constructor(readonly root: THREE.Group) {} explode(direction: THREE.Vector3): void { this.velocity.copy(direction).multiplyScalar(4); } update(dt: number): void { this.velocity.y -= 9.81 * dt; this.root.position.addScaledVector(this.velocity, dt); this.root.rotation.x += dt * 3; this.root.rotation.z += dt * 2; } }
