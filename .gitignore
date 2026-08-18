@@ -1,34 +1,35 @@
-# Generated outputs and artifacts
-output/
-outputs/
-workspace/
-out/
+# =============================================================================
+# Правило репозитория: код фабрики И сами игры (workspace/, output/) едут в git.
+# Игнорируем только то, что пересоздаётся само: кеши, сборки, зависимости, логи.
+# Поэтому пути к «питоновским» каталогам заякорены на корень (/build/, /dist/),
+# чтобы одноимённые папки внутри игр обрабатывались своими правилами ниже.
+# =============================================================================
 
-# Python
+# --- Python (только корень проекта фабрики) ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
+/share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# Virtual Environments
+# --- Виртуальные окружения ---
 venv/
 .venv/
 ENV/
@@ -36,7 +37,7 @@ env/
 env.bak/
 venv.bak/
 
-# Testing & Coverage
+# --- Тесты, покрытие, статический анализ ---
 .pytest_cache/
 .coverage
 .coverage.*
@@ -47,8 +48,6 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-
-# Type checking & Linters
 .mypy_cache/
 .dmypy.json
 dmypy.json
@@ -56,22 +55,73 @@ dmypy.json
 .pytype/
 .ruff_cache/
 
-# Node & Frontend (for generated game prototypes/builds)
+# --- Зависимости и сборки игр (в любом проекте на любой глубине) ---
 node_modules/
+bower_components/
+.pnp/
+.pnp.js
+**/dist/
+**/dist-ssr/
+**/build/
+**/out/
+**/.vite/
+**/.cache/
+**/.parcel-cache/
+**/.turbo/
+**/.rollup.cache/
+**/.next/
+**/.nuxt/
+**/.svelte-kit/
+**/.vuepress/dist/
+**/.serverless/
+**/.fusebox/
+**/.dynamodb/
+**/storybook-static/
+*.tsbuildinfo
+**/coverage/
+**/.eslintcache
+**/.stylelintcache
+
+# Артефакты выкладки игр на платформы
+**/*.zip
+**/*.tar.gz
+**/*.7z
+!**/assets/**/*.zip
+
+# --- Capacitor / Android сборки внутри игр ---
+**/android/build/
+**/android/app/build/
+**/android/.gradle/
+**/android/local.properties
+**/android/app/release/
+**/ios/App/Pods/
+**/ios/App/build/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# --- Внутреннее состояние фабрики внутри проектов ---
+# История чатов и служебные метки пересоздаются и часто конфликтуют при мерже.
+**/.factory/
+# Логи dev-сервера и превью-браузера
+**/.dev-server.log
+
+# --- Логи и временные файлы ---
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .pnpm-debug.log*
 lerna-debug.log*
-.next/
-.nuxt/
-.vuepress/dist
-.serverless/
-.fusebox/
-.dynamodb/
+*.tmp
+*.temp
+tmp/
+temp/
 
-# Environment Variables & Secrets
+# --- Секреты и переменные окружения ---
 .env
 .env.local
 .env.*.local
@@ -81,7 +131,7 @@ lerna-debug.log*
 *.key
 *.cert
 
-# IDE & Editor files
+# --- Редакторы и IDE ---
 .vscode/
 .idea/
 *.sublime-project
@@ -94,7 +144,7 @@ lerna-debug.log*
 *.swo
 *~
 
-# Operating System Files
+# --- Операционная система ---
 .DS_Store
 .DS_Store?
 ._*
@@ -104,15 +154,10 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# Logs & Temporary Files
-logs/
-*.log
-*.tmp
-*.temp
-tmp/
-temp/
-
-# Antigravity / CLI internal history
+# --- Внутренняя история CLI-агентов ---
 .agy_quota_history.json
 .agy/
 .gemini/
+.claude/
+.codex/
+.kimi/

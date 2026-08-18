@@ -20,6 +20,7 @@ from app import sandbox, chat_store, notify
 from app.gui.game_runner import DevServer, detect_start_command, open_internal_browser
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
+from providers.cli_agents import AGENT_CLASSES, make_cli_agent
 from providers.quota_probe import read_live_quota
 from app.chat_jobs import ChatJobManager
 from app.gui.chat_terminal import ChatTerminal
@@ -50,6 +51,25 @@ ctk.set_default_color_theme("blue")
 EFFORT_AUTO = "auto (не передавать)"
 # Значение «не передавать --model в agy»
 MODEL_DEFAULT = "по умолчанию"
+
+# Терминальные кодовые агенты, которыми умеет управлять фабрика.
+# Порядок задаёт порядок пунктов в выпадающих списках.
+AGENT_LABELS: Dict[str, str] = {
+    "agy": "⚡ agy (Antigravity CLI)",
+    "claude": "🟣 claude (Claude Code CLI)",
+    "codex": "⚫ codex (OpenAI Codex CLI)",
+    "kimi": "🌙 kimi (Kimi CLI)",
+}
+AGENT_KEYS = tuple(AGENT_LABELS)
+
+
+def _agent_key_from_label(label: str) -> str:
+    """Ключ агента по подписи выпадающего списка ('agy', если не распознан)."""
+    value = (label or "").lower()
+    for key in AGENT_KEYS:
+        if key in value:
+            return key
+    return "agy"
 
 
 def _effort_value(raw: str) -> str:
@@ -212,8 +232,10 @@ class CTkMarkdownViewer(ctk.CTkFrame):
 class BrainstormIdeasWindow(ctk.CTkToplevel):
     """
     Sub-window for AI Game Idea Brainstorming.
-    Generates 5-8 creative concepts from AI and lets user select 1 to load into Studio.
+    Generates IDEAS_PER_BATCH creative concepts from AI and lets user select 1 to load into Studio.
     """
+
+    IDEAS_PER_BATCH = 10
 
     def __init__(self, master, on_idea_selected):
         super().__init__(master)
@@ -232,7 +254,7 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             top_frame,
-            text="💡 Генератор идей от ИИ (AGY / OpenCode / Local)",
+            text="💡 Генератор идей от ИИ (AGY / Claude / Codex / Kimi / OpenCode / Local)",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color="#00f0ff"
         ).pack(anchor="w", padx=15, pady=(10, 2))
@@ -254,7 +276,7 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         self.btn_run_brainstorm = ctk.CTkButton(
             ctrl_frame,
-            text="⚡ Придумать 6 идей",
+            text=f"⚡ Придумать {self.IDEAS_PER_BATCH} идей",
             fg_color="#00f0ff",
             hover_color="#00c8d6",
             text_color="#050b14",
@@ -282,13 +304,15 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         def worker():
             provider_name = self.master._get_selected_provider_key()
-            ideas = self.brainstormer.brainstorm(provider_name=provider_name, theme_hint=hint, count=6)
+            ideas = self.brainstormer.brainstorm(
+                provider_name=provider_name, theme_hint=hint, count=self.IDEAS_PER_BATCH
+            )
             self.after(0, lambda: self._render_ideas(ideas))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _render_ideas(self, ideas: List[BrainstormedIdea]):
-        self.btn_run_brainstorm.configure(state="normal", text="⚡ Придумать 6 идей")
+        self.btn_run_brainstorm.configure(state="normal", text=f"⚡ Придумать {self.IDEAS_PER_BATCH} идей")
         for widget in self.scroll_cards.winfo_children():
             widget.destroy()
 
@@ -362,8 +386,12 @@ from app.logging import register_log_listener, unregister_log_listener, log_info
 class GamePromptFactoryGUI(ctk.CTk):
     """
     Native CustomTkinter Desktop GUI for AI Game Prompt Factory.
-    Integrates AGY CLI, OpenCode Go API, Rich Markdown Viewer, and Multi-Agent Game Pipeline.
+    Integrates AGY / Claude Code / Codex / Kimi CLI, OpenCode Go API,
+    Rich Markdown Viewer, and Multi-Agent Game Pipeline.
     """
+
+    # Сколько обложек готовых игр помещается в ряд на главной странице
+    GALLERY_COLUMNS = 3
 
     def __init__(self):
         super().__init__()
@@ -615,7 +643,10 @@ class GamePromptFactoryGUI(ctk.CTk):
         frame.grid(row=0, column=0, sticky="nsew")
         buttons.get(tab_name, self.btn_nav_studio).configure(fg_color="#00f0ff", text_color="#050b14")
 
-        if tab_name == "projects":
+        if tab_name == "studio":
+            if not self.studio_log_visible:
+                self._refresh_studio_gallery()
+        elif tab_name == "projects":
             self._refresh_projects_list()
         elif tab_name == "agy":
             self._populate_agy_projects_dropdown()
@@ -700,11 +731,14 @@ class GamePromptFactoryGUI(ctk.CTk):
         ctk.CTkLabel(col1, text="🤖 AI Provider", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8").pack(anchor="w")
         self.combo_provider = ctk.CTkComboBox(
             col1,
-            values=["⚡ agy (Antigravity CLI)", "💎 opencode (OpenCode Go)", "💻 local (Offline Expert)", "🧠 openai (GPT-4o)", "🟣 anthropic (Claude 3.5)", "🔷 google (Gemini)"],
+            values=list(AGENT_LABELS.values()) + [
+                "💎 opencode (OpenCode Go)", "💻 local (Offline Expert)", "🧠 openai (GPT-4o API)",
+                "🅰️ anthropic (API-ключ)", "🔷 google (Gemini API)",
+            ],
             height=32,
             fg_color="#0e1626"
         )
-        self.combo_provider.set("⚡ agy (Antigravity CLI)")
+        self.combo_provider.set(AGENT_LABELS["agy"])
         self.combo_provider.pack(fill="x", pady=(2, 0))
 
         # 2. Renderer
@@ -789,7 +823,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         )
         self.btn_analyze.pack(side="right")
 
-        # Bottom Live Progress & Log Console Panel
+        # Bottom Panel: прогресс + витрина готовых игр (журнал прячется за кнопкой)
         bottom_box = ctk.CTkFrame(self.tab_studio_frame, fg_color="#121a2b", corner_radius=12)
         bottom_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 5))
         bottom_box.grid_rowconfigure(2, weight=1)
@@ -824,15 +858,86 @@ class GamePromptFactoryGUI(ctk.CTk):
         )
         self.lbl_pipeline_pct.pack(side="right")
 
+        # Журнал выполнения живёт за кнопкой: на главной странице его место
+        # занимает витрина готовых игр.
+        self.btn_toggle_studio_log = ctk.CTkButton(
+            status_bar,
+            text="📟 Журнал",
+            height=24, width=100,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._toggle_studio_log
+        )
+        self.btn_toggle_studio_log.pack(side="right", padx=(0, 10))
+
         self.progress_bar = ctk.CTkProgressBar(bottom_box, height=7, fg_color="#0e1626", progress_color="#00ff88")
         self.progress_bar.grid(row=1, column=0, sticky="ew", padx=15, pady=(0, 6))
         self.progress_bar.set(0)
 
-        # Terminal Console Frame (Toolbar + Output)
-        console_frame = ctk.CTkFrame(bottom_box, fg_color="#070a10", corner_radius=8)
-        console_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 12))
+        # Контейнер, в котором витрина и журнал сменяют друг друга
+        self.studio_stage = ctk.CTkFrame(bottom_box, fg_color="transparent")
+        self.studio_stage.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 12))
+        self.studio_stage.grid_rowconfigure(0, weight=1)
+        self.studio_stage.grid_columnconfigure(0, weight=1)
+
+        # ── Витрина готовых игр (главный экран студии) ──
+        self.studio_gallery_frame = ctk.CTkFrame(self.studio_stage, fg_color="#0e1626", corner_radius=8)
+        self.studio_gallery_frame.grid(row=0, column=0, sticky="nsew")
+        self.studio_gallery_frame.grid_rowconfigure(1, weight=1)
+        self.studio_gallery_frame.grid_columnconfigure(0, weight=1)
+
+        gallery_bar = ctk.CTkFrame(self.studio_gallery_frame, fg_color="#121a2b", height=28, corner_radius=0)
+        gallery_bar.grid(row=0, column=0, sticky="ew")
+
+        ctk.CTkLabel(
+            gallery_bar,
+            text="🎮 Готовые игры студии",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#e2e8f0"
+        ).pack(side="left", padx=10)
+
+        self.lbl_studio_gallery_count = ctk.CTkLabel(
+            gallery_bar, text="", font=ctk.CTkFont(size=10), text_color="#64748b"
+        )
+        self.lbl_studio_gallery_count.pack(side="left", padx=(4, 0))
+
+        ctk.CTkButton(
+            gallery_bar,
+            text="📂 Папка",
+            height=20, width=70,
+            fg_color="transparent",
+            hover_color="#1a263e",
+            font=ctk.CTkFont(size=10),
+            command=self._open_output_dir
+        ).pack(side="right", padx=(0, 6), pady=2)
+
+        ctk.CTkButton(
+            gallery_bar,
+            text="🔄 Обновить",
+            height=20, width=80,
+            fg_color="transparent",
+            hover_color="#1a263e",
+            font=ctk.CTkFont(size=10),
+            command=self._refresh_studio_gallery
+        ).pack(side="right", padx=(0, 4), pady=2)
+
+        self.scroll_studio_gallery = ctk.CTkScrollableFrame(
+            self.studio_gallery_frame, fg_color="#0a0f1a", corner_radius=0
+        )
+        self.scroll_studio_gallery.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+        for column in range(self.GALLERY_COLUMNS):
+            self.scroll_studio_gallery.grid_columnconfigure(column, weight=1, uniform="games")
+
+        # Обложки держим по ссылке: CTkImage без неё собирает сборщик мусора.
+        self._gallery_thumbs: Dict[str, ctk.CTkImage] = {}
+
+        # Terminal Console Frame (Toolbar + Output) — скрыт, пока не нажат «📟 Журнал»
+        console_frame = ctk.CTkFrame(self.studio_stage, fg_color="#070a10", corner_radius=8)
         console_frame.grid_rowconfigure(1, weight=1)
         console_frame.grid_columnconfigure(0, weight=1)
+        self.studio_console_frame = console_frame
+        self.studio_log_visible = False
 
         # Console Toolbar
         c_toolbar = ctk.CTkFrame(console_frame, fg_color="#0e1626", height=28, corner_radius=0)
@@ -897,6 +1002,138 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.txt_studio_logs.grid(row=1, column=0, sticky="nsew", padx=8, pady=(4, 6))
         self._append_studio_log_raw("Система готова к разработке. Выберите идею и нажмите '🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ'.")
 
+        self._refresh_studio_gallery()
+
+    # ── Витрина готовых игр на главной странице ──────────────────────────
+
+    def _toggle_studio_log(self):
+        self._show_studio_log(not self.studio_log_visible)
+
+    def _show_studio_log(self, visible: bool):
+        """Переключает главную область студии: витрина игр ⇄ журнал выполнения."""
+        if not getattr(self, "studio_console_frame", None):
+            return
+        self.studio_log_visible = visible
+        if visible:
+            self.studio_gallery_frame.grid_forget()
+            self.studio_console_frame.grid(row=0, column=0, sticky="nsew")
+            self.btn_toggle_studio_log.configure(text="🎮 Игры")
+        else:
+            self.studio_console_frame.grid_forget()
+            self.studio_gallery_frame.grid(row=0, column=0, sticky="nsew")
+            self.btn_toggle_studio_log.configure(text="📟 Журнал")
+            self._refresh_studio_gallery()
+
+    def _refresh_studio_gallery(self):
+        """Перерисовывает обложки готовых игр из workspace/."""
+        if not getattr(self, "scroll_studio_gallery", None):
+            return
+
+        for widget in self.scroll_studio_gallery.winfo_children():
+            widget.destroy()
+        self._gallery_thumbs = {}
+
+        projects = sandbox.list_projects()
+        self.lbl_studio_gallery_count.configure(
+            text=f"· {len(projects)} шт." if projects else ""
+        )
+
+        if not projects:
+            ctk.CTkLabel(
+                self.scroll_studio_gallery,
+                text="Пока ни одной игры. Опишите идею выше и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ» —\n"
+                     "готовые проекты появятся здесь обложками.",
+                font=ctk.CTkFont(size=12), text_color="#64748b", justify="center"
+            ).grid(row=0, column=0, columnspan=self.GALLERY_COLUMNS, pady=40)
+            return
+
+        for index, project in enumerate(projects):
+            data = {}
+            yaml_path = sandbox.docs_dir(project.name) / "GAME_DATA.yaml"
+            if yaml_path.exists():
+                try:
+                    with open(yaml_path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                except Exception:
+                    data = {}
+
+            thumb = self._load_project_thumb(project.name)
+            if thumb is not None:
+                self._gallery_thumbs[project.name] = thumb
+
+            self._build_gallery_card(
+                slug=project.name,
+                thumb=thumb,
+                title=data.get("title", project.name),
+                genre=data.get("genre", "Проект без спецификации"),
+                renderer=str(data.get("renderer", "")).upper() or "—",
+                score=data.get("scores", {}).get("overall_score", "-"),
+                row=index // self.GALLERY_COLUMNS,
+                column=index % self.GALLERY_COLUMNS,
+            )
+
+    def _build_gallery_card(self, *, slug: str, thumb, title: str, genre: str,
+                            renderer: str, score, row: int, column: int):
+        """Обложка одной игры: превью, название, метки и кнопки запуска."""
+        card = ctk.CTkFrame(self.scroll_studio_gallery, fg_color="#131c2e", corner_radius=10)
+        card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
+        card.grid_columnconfigure(0, weight=1)
+
+        if thumb is not None:
+            cover = ctk.CTkLabel(card, text="", image=thumb)
+        else:
+            cover = ctk.CTkLabel(
+                card, text="🖼 превью ещё не создано", height=110,
+                fg_color="#0a0f1a", corner_radius=8,
+                font=ctk.CTkFont(size=11), text_color="#475569"
+            )
+        cover.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+
+        name = ctk.CTkLabel(
+            card, text=f"🎮 {title}", anchor="w", justify="left",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#f0f4fc",
+            wraplength=250
+        )
+        name.grid(row=1, column=0, sticky="ew", padx=10)
+
+        playable = self._project_is_playable(slug)
+        meta = ctk.CTkLabel(
+            card,
+            text=f"{genre} · {renderer} · ⭐ {score}/10 · {'💻 код готов' if playable else '📄 только ТЗ'}",
+            anchor="w", justify="left",
+            font=ctk.CTkFont(size=10), text_color="#8ea3c0", wraplength=250
+        )
+        meta.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 6))
+
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+
+        ctk.CTkButton(
+            buttons,
+            text="▶ Играть" if playable else "▶ Нет кода",
+            height=26,
+            fg_color="#0d3320" if playable else "#1e293b",
+            hover_color="#155c37",
+            text_color="#00ff88" if playable else "#475569",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            state="normal" if playable else "disabled",
+            command=lambda s=slug: self._play_project(s)
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        ctk.CTkButton(
+            buttons,
+            text="📄 Открыть ТЗ",
+            height=26,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            font=ctk.CTkFont(size=11),
+            command=lambda s=slug: self._select_project_by_slug(s)
+        ).pack(side="left", fill="x", expand=True)
+
+        # Клик по обложке открывает проект — как в привычных лаунчерах.
+        for widget in (card, cover, name, meta):
+            widget.bind("<Button-1>", lambda _e, s=slug: self._select_project_by_slug(s))
+
     def _open_brainstorm_window(self):
         BrainstormIdeasWindow(self, on_idea_selected=self._on_idea_picked_from_brainstorm)
 
@@ -949,13 +1186,31 @@ class GamePromptFactoryGUI(ctk.CTk):
 
     def _get_selected_provider_key(self) -> str:
         val = self.combo_provider.get().lower()
-        if "agy" in val: return "agy"
-        if "opencode" in val: return "opencode"
-        if "local" in val: return "local"
-        if "openai" in val: return "openai"
-        if "anthropic" in val: return "anthropic"
-        if "google" in val: return "google"
+        # Порядок важен: подпись API-провайдера не должна перехватывать ключ
+        # одноимённого терминального агента (anthropic ≠ claude CLI).
+        for key in ("agy", "opencode", "codex", "kimi", "anthropic", "claude",
+                    "openai", "google", "local"):
+            if key in val:
+                return key
         return "agy"
+
+    def _agent_provider(self, key: str, model: Optional[str] = None, yolo: bool = True):
+        """
+        Провайдер терминального агента по ключу ('agy' | 'claude' | 'codex' | 'kimi').
+
+        У всех одинаковый интерфейс stream_run / launch_interactive_terminal,
+        поэтому вызывающий код не знает, какой именно CLI сейчас работает.
+        """
+        cli_path = {
+            "agy": config.agy_cli_path,
+            "claude": config.claude_cli_path,
+            "codex": config.codex_cli_path,
+            "kimi": config.kimi_cli_path,
+        }.get(key)
+        return make_cli_agent(
+            key, cli_path=cli_path, model=model,
+            yolo=yolo, effort=config.agy_effort if key == "agy" else None,
+        )
 
     def _get_selected_image_provider_key(self) -> str:
         val = self.combo_img_provider.get().lower()
@@ -979,7 +1234,10 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
 
         provider = self._get_selected_provider_key()
-        selected_model = self._selected_agy_model()
+        # Код пишет терминальный агент. Если для документации выбран API-провайдер
+        # (local/openai/…), кодогенерацию берёт на себя агент из вкладки чатов.
+        coder_key = provider if provider in AGENT_KEYS else self._selected_agent_key()
+        selected_model = self._selected_agy_model() if coder_key == self._selected_agent_key() else None
         renderer_raw = self.combo_renderer.get().split()[0]
         renderer = None if renderer_raw == "✨" or "auto" in renderer_raw else renderer_raw
         mode = self.combo_mode.get().split()[0]
@@ -988,6 +1246,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.generation_running = True
         self.agy_stop_requested = False
         self._start_stopwatch()
+        # На время работы показываем журнал вместо витрины: за ходом сборки
+        # нужно следить, а обложки никуда не денутся.
+        self._show_studio_log(True)
 
         self.btn_create_full_game.configure(state="disabled", text="⏳ РАЗРАБОТКА ИГРЫ...")
         self.btn_generate.configure(state="disabled")
@@ -1078,10 +1339,11 @@ class GamePromptFactoryGUI(ctk.CTk):
                 self._update_progress(95, "13/14 Validator: Проверка целостности пакета...")
                 OutputValidator().run_all(game_dir)
 
-                # 14. STEP 2: LAUNCH AGY CLI DIRECTLY IN PROJECT DIR
+                # 14. STEP 2: LAUNCH CODING CLI AGENT DIRECTLY IN PROJECT DIR
                 if self.agy_stop_requested: return
-                self._update_progress(96, "⚡ ЭТАП 2: Запуск AGY CLI для генерации кода игры...")
-                self._append_studio_log_raw(f"\n{'─'*65}\n⚡ ЗАПУСК AGY CLI: Создание структуры и исходного кода игры в {game_dir.name}\n{'─'*65}\n")
+                coder_title = AGENT_LABELS.get(coder_key, coder_key)
+                self._update_progress(96, f"⚡ ЭТАП 2: Запуск {coder_key.upper()} для генерации кода игры...")
+                self._append_studio_log_raw(f"\n{'─'*65}\n⚡ ЗАПУСК {coder_title}: Создание структуры и исходного кода игры в {game_dir.name}\n{'─'*65}\n")
 
                 sandbox.ensure_project_docs(game_dir, ctx.concept.title)
 
@@ -1104,12 +1366,7 @@ class GamePromptFactoryGUI(ctk.CTk):
                     title=ctx.concept.title,
                 )
 
-                agy_prov = AGYProvider(
-                    cli_path=config.agy_cli_path,
-                    model=selected_model,
-                    effort=config.agy_effort,
-                    yolo=True
-                )
+                agy_prov = self._agent_provider(coder_key, model=selected_model, yolo=True)
 
                 def on_cli_stream(chunk: str):
                     self.after(0, lambda c=chunk: self._append_studio_log_raw(c))
@@ -1130,7 +1387,7 @@ class GamePromptFactoryGUI(ctk.CTk):
                     )
                     sandbox.append_devlog(
                         game_dir,
-                        "Генерация кода агентом AGY",
+                        f"Генерация кода агентом {coder_key.upper()}",
                         f"- **Задача**: сборка игрового каркаса по спецификации.\n"
                         f"- **Сделано**: агент отработал этап кодогенерации (код выхода {code}).\n"
                         f"- **Следующий шаг**: запустить `npm run dev` и проверить игру в браузере.",
@@ -1174,6 +1431,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.generation_running = True
         self.agy_stop_requested = False
         self._start_stopwatch()
+        self._show_studio_log(True)
         self.btn_generate.configure(state="disabled", text="⏳ ГЕНЕРАЦИЯ...")
         self.btn_create_full_game.configure(state="disabled")
         self.btn_analyze.configure(state="disabled")
@@ -1264,6 +1522,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
 
         provider = self._get_selected_provider_key()
+        self._show_studio_log(True)
         self._append_studio_log_raw(f"🔍 Запуск быстрого анализа идеи ({provider})...")
 
         def run():
@@ -1561,6 +1820,10 @@ class GamePromptFactoryGUI(ctk.CTk):
                 subtitle=f"{genre} · {renderer} · ⭐ {score}/10 · {has_code}",
             )
 
+        # Витрина на главной странице показывает те же проекты — держим её в тонусе.
+        if not self.studio_log_visible:
+            self._refresh_studio_gallery()
+
     def _build_project_card(self, *, slug: str, thumb, title: str, subtitle: str):
         """Карточка проекта: крупное превью сверху, название и метки под ним."""
         card = ctk.CTkFrame(self.scroll_projects_list, fg_color="#131c2e", corner_radius=10)
@@ -1754,6 +2017,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._show_tab("agy")
         self._populate_agy_projects_dropdown()
         self.combo_agy_proj.set(self.current_project_slug)
+        # Беседу продолжает тот же CLI, который её начал.
+        if session.agent in AGENT_KEYS:
+            self.combo_agy_agent.set(AGENT_LABELS[session.agent])
         if session.model:
             values = list(self.combo_agy_model.cget("values") or [])
             if session.model not in values:
@@ -1765,7 +2031,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.chat_agy.push({
             "kind": "system", "icon": "💬",
             "text": f"Чат «{session.title}» · проект {self.current_project_slug}"
-                    + (" · беседа AGY будет продолжена" if session.conversation_id else "")
+                    + f" · агент {AGENT_LABELS.get(session.agent or 'agy', session.agent or 'agy')}"
+                    + (" · беседа будет продолжена" if session.conversation_id else "")
         })
         for message in session.messages:
             if message.role == "user":
@@ -2154,7 +2421,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="💬 Чат разработки (Antigravity CLI)",
+            text="💬 Чат разработки (AGY · Claude · Codex · Kimi)",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color="#e2e8f0"
         ).pack(side="left")
@@ -2200,6 +2467,20 @@ class GamePromptFactoryGUI(ctk.CTk):
         )
         self.combo_agy_proj.set("[Без контекста]")
         self.combo_agy_proj.pack(side="left", padx=(0, 15))
+
+        ctk.CTkLabel(
+            opt_row, text="Агент:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#64748b"
+        ).pack(side="left", padx=(0, 6))
+
+        self.combo_agy_agent = ctk.CTkComboBox(
+            opt_row, values=list(AGENT_LABELS.values()), width=200,
+            fg_color="#0e1626", border_color="#1e293b",
+            command=lambda _v: self._on_agent_changed()
+        )
+        self.combo_agy_agent.set(AGENT_LABELS.get(config.default_agent, AGENT_LABELS["agy"]))
+        self.combo_agy_agent.pack(side="left", padx=(0, 15))
 
         ctk.CTkLabel(
             opt_row, text="Модель:",
@@ -2469,9 +2750,38 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.chat_agy.autoscroll = bool(self.chk_agy_autoscroll.get())
 
     def _selected_agy_model(self) -> Optional[str]:
-        """Модель из выпадающего списка вкладки AGY ('' / плейсхолдер = не передавать --model)."""
+        """Модель из выпадающего списка вкладки чатов ('' / плейсхолдер = не передавать --model)."""
         value = (self.combo_agy_model.get() or "").strip()
         return None if not value or value in (MODEL_DEFAULT, "inherit") else value
+
+    def _selected_agent_key(self) -> str:
+        """Терминальный агент, выбранный во вкладке чатов."""
+        combo = getattr(self, "combo_agy_agent", None)
+        if combo is None:
+            return config.default_agent if config.default_agent in AGENT_KEYS else "agy"
+        return _agent_key_from_label(combo.get())
+
+    def _on_agent_changed(self):
+        """Смена агента: у каждого свой список моделей и своя история бесед."""
+        agent = self._selected_agent_key()
+        config.default_agent = agent
+        self._persist_env_value("DEFAULT_AGENT", agent)
+        self.combo_agy_model.set(MODEL_DEFAULT)
+
+        if self.active_chat_session and self.active_chat_slug:
+            # conversation_id принадлежит конкретному CLI — при смене агента
+            # беседа начинается заново, иначе --resume уйдёт в чужую сессию.
+            self.active_chat_session.agent = agent
+            self.active_chat_session.conversation_id = None
+            self.active_chat_session.model = None
+            chat_store.save_session(self.active_chat_slug, self.active_chat_session)
+
+        self.chat_agy.push({
+            "kind": "system", "icon": "🤖",
+            "text": f"Агент этого чата: {AGENT_LABELS.get(agent, agent)}. "
+                    f"Список моделей обновляется…"
+        })
+        self._reload_agy_models(quiet=True)
 
     def _on_agy_model_changed(self):
         model = self._selected_agy_model()
@@ -2488,20 +2798,25 @@ class GamePromptFactoryGUI(ctk.CTk):
         })
 
     def _launch_agy_login(self):
-        """Открывает чистый интерактивный agy — там выполняется /login (в print-режиме вход недоступен)."""
-        AGYProvider(cli_path=config.agy_cli_path).launch_interactive_terminal(bare=True)
+        """Открывает чистый интерактивный CLI выбранного агента — там выполняется вход в аккаунт."""
+        agent = self._selected_agent_key()
+        prov = self._agent_provider(agent)
+        prov.launch_interactive_terminal(bare=True)
+        hint = getattr(prov, "login_hint",
+                       "Выполните в открытом терминале /login, дождитесь входа и вернитесь сюда.")
         self.chat_agy.push({
             "kind": "system", "icon": "🔑",
-            "text": "Открыт терминал AGY. Выполните в нём /login, дождитесь входа и вернитесь сюда — "
-                    "затем нажмите 🔄, чтобы загрузить список моделей."
+            "text": f"Открыт терминал {AGENT_LABELS.get(agent, agent)}. {hint} "
+                    "Затем нажмите 🔄, чтобы загрузить список моделей."
         })
 
     def _reload_agy_models(self, quiet: bool = False):
-        """Тянет список моделей из `agy models` в фоне."""
+        """Тянет список моделей выбранного агента в фоне."""
         self.btn_reload_models.configure(state="disabled", text="⏳")
+        agent = self._selected_agent_key()
 
         def run():
-            prov = AGYProvider(cli_path=config.agy_cli_path)
+            prov = self._agent_provider(agent)
             res = prov.list_models()
             self.after(0, lambda: self._apply_agy_models(res, quiet=quiet))
 
@@ -2525,8 +2840,8 @@ class GamePromptFactoryGUI(ctk.CTk):
             self.chat_agy.push({
                 "kind": "error",
                 "text": (f"Не удалось получить список моделей: {res.get('message')}\n\n"
-                         "Список приходит с сервера Antigravity. Если CLI отвечает таймаутом, "
-                         "войдите заново: запустите `agy` в терминале и выполните /login.")
+                         "Список приходит от самого CLI. Если он отвечает таймаутом или ошибкой, "
+                         "войдите заново: кнопка «🔑 Вход» откроет терминал агента.")
             })
 
     # ── AGY Tab: Helper Methods ──
@@ -3170,10 +3485,12 @@ class GamePromptFactoryGUI(ctk.CTk):
             proj_dir = sandbox.project_dir(selected_proj)
 
         yolo_mode = bool(self.chk_agy_yolo.get())
-        agy_prov = AGYProvider(cli_path=config.agy_cli_path, yolo=yolo_mode)
+        agent = self._selected_agent_key()
+        agy_prov = self._agent_provider(agent, model=self._selected_agy_model(), yolo=yolo_mode)
         agy_prov.launch_interactive_terminal(project_dir=proj_dir, prompt=prompt, yolo=yolo_mode)
         self.chat_agy.push({"kind": "system", "icon": "🚀",
-                            "text": "Интерактивный терминал AGY открыт в отдельном окне."})
+                            "text": f"Интерактивный терминал {AGENT_LABELS.get(agent, agent)} "
+                                    f"открыт в отдельном окне."})
 
     def _populate_agy_projects_dropdown(self):
         slugs = ["[Без контекста]"] + [p.name for p in sandbox.list_projects()]
@@ -3229,9 +3546,12 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
 
         title = (self.current_project_data or {}).get("title", selected_proj)
+        agent_key = self._selected_agent_key()
+        # ID беседы принадлежит конкретному CLI: возобновлять можно только чат,
+        # который вёл тот же агент, иначе --resume/--conversation уйдёт в пустоту.
+        same_agent = (session.agent or "agy") == agent_key
         if bool(self.chk_agy_continue.get()):
-            # Предпочитаем возобновление на стороне CLI: агент помнит всё сам.
-            resume_id = session.conversation_id
+            resume_id = session.conversation_id if same_agent else None
             history = None if resume_id else chat_store.history_digest(session)
         else:
             resume_id, history = None, None
@@ -3249,6 +3569,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         yolo_mode = bool(self.chk_agy_yolo.get())
         selected_model = self._selected_agy_model()
         session.model = selected_model
+        session.agent = agent_key
         chat_store.append_message(selected_proj, session, "user", prompt)
         self._update_agy_session_label()
 
@@ -3256,7 +3577,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         start_events = [
             {"kind": "user", "text": prompt},
             {"kind": "system", "icon": "⚡",
-             "text": f"Запуск AGY · проект {selected_proj} · модель {selected_model or 'по умолчанию'}"
+             "text": f"Запуск {AGENT_LABELS.get(agent_key, agent_key)} · проект {selected_proj}"
+                     f" · модель {selected_model or 'по умолчанию'}"
                      f" · YOLO: {'вкл' if yolo_mode else 'выкл'}"
                      + (" · продолжение беседы 🔗" if resume_id else "")},
         ]
@@ -3289,12 +3611,7 @@ class GamePromptFactoryGUI(ctk.CTk):
                 if self._is_active_chat(session_id):
                     self.chat_agy.push(event)
 
-            agy_prov = AGYProvider(
-                cli_path=config.agy_cli_path,
-                model=selected_model,
-                effort=config.agy_effort,
-                yolo=yolo_mode
-            )
+            agy_prov = self._agent_provider(agent_key, model=selected_model, yolo=yolo_mode)
             code, _out = agy_prov.stream_run(
                 full_prompt,
                 on_event=on_event,
@@ -3453,9 +3770,59 @@ class GamePromptFactoryGUI(ctk.CTk):
         )
         self.btn_test_agy.pack(fill="x", padx=12, pady=(0, 12))
 
-        # 3. Other AI Keys Card
+        # 3. Остальные терминальные агенты: Claude Code, Codex, Kimi
+        card_agents = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
+        card_agents.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=15, pady=8)
+
+        ctk.CTkLabel(
+            card_agents, text="🖥 Терминальные агенты: Claude Code · Codex · Kimi",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff"
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            card_agents,
+            text="Локальные CLI, работающие в каталоге игры так же, как agy. "
+                 "Пустая модель = флаг --model не передаётся.",
+            font=ctk.CTkFont(size=10), text_color="#94a3b8"
+        ).pack(anchor="w", padx=12, pady=(0, 8))
+
+        agents_row = ctk.CTkFrame(card_agents, fg_color="transparent")
+        agents_row.pack(fill="x", padx=6, pady=(0, 10))
+
+        self.ent_agent_path: Dict[str, ctk.CTkEntry] = {}
+        self.ent_agent_model: Dict[str, ctk.CTkEntry] = {}
+        self.btn_agent_test: Dict[str, ctk.CTkButton] = {}
+
+        for key in AGENT_CLASSES:
+            column = ctk.CTkFrame(agents_row, fg_color="#131c2e", corner_radius=8)
+            column.pack(side="left", fill="both", expand=True, padx=6)
+
+            ctk.CTkLabel(
+                column, text=AGENT_LABELS[key],
+                font=ctk.CTkFont(size=12, weight="bold")
+            ).pack(anchor="w", padx=10, pady=(8, 4))
+
+            ctk.CTkLabel(column, text="Путь к CLI:", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=10)
+            entry_path = ctk.CTkEntry(column, placeholder_text=key)
+            entry_path.pack(fill="x", padx=10, pady=(2, 6))
+            self.ent_agent_path[key] = entry_path
+
+            ctk.CTkLabel(column, text="Модель (опционально):", font=ctk.CTkFont(size=10, weight="bold")).pack(anchor="w", padx=10)
+            entry_model = ctk.CTkEntry(column)
+            entry_model.pack(fill="x", padx=10, pady=(2, 8))
+            self.ent_agent_model[key] = entry_model
+
+            btn_test = ctk.CTkButton(
+                column, text=f"🔌 Проверить {key}", height=28,
+                fg_color="#1e293b", hover_color="#334155",
+                font=ctk.CTkFont(size=11),
+                command=lambda k=key: self._test_agent_conn(k)
+            )
+            btn_test.pack(fill="x", padx=10, pady=(0, 10))
+            self.btn_agent_test[key] = btn_test
+
+        # 4. Other AI Keys Card
         card_others = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_others.grid(row=2, column=0, sticky="nsew", padx=(15, 8), pady=8)
+        card_others.grid(row=3, column=0, sticky="nsew", padx=(15, 8), pady=8)
 
         ctk.CTkLabel(card_others, text="🌐 Другие AI Ключи", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 8))
 
@@ -3471,9 +3838,9 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.ent_gemini_key = ctk.CTkEntry(card_others, show="*")
         self.ent_gemini_key.pack(fill="x", padx=12, pady=(2, 12))
 
-        # 4. Save Card
+        # 5. Save Card
         card_save = ctk.CTkFrame(scroll_settings, fg_color="#18233a", corner_radius=10)
-        card_save.grid(row=2, column=1, sticky="nsew", padx=(8, 15), pady=8)
+        card_save.grid(row=3, column=1, sticky="nsew", padx=(8, 15), pady=8)
 
         ctk.CTkLabel(card_save, text="💾 Сохранение и Вывод", font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff").pack(anchor="w", padx=12, pady=(10, 8))
 
@@ -3527,6 +3894,10 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.ent_agy_model.insert(0, config.agy_model or "")
         self.combo_agy_effort.set(config.agy_effort or EFFORT_AUTO)
 
+        for key in AGENT_CLASSES:
+            self.ent_agent_path[key].insert(0, getattr(config, f"{key}_cli_path", key) or key)
+            self.ent_agent_model[key].insert(0, getattr(config, f"{key}_model", "") or "")
+
         self.ent_openai_key.insert(0, os.getenv("OPENAI_API_KEY", ""))
         self.ent_anthropic_key.insert(0, os.getenv("ANTHROPIC_API_KEY", ""))
         self.ent_gemini_key.insert(0, os.getenv("GEMINI_API_KEY", ""))
@@ -3572,6 +3943,15 @@ class GamePromptFactoryGUI(ctk.CTk):
         env_lines["AGY_CLI_PATH"] = self.ent_agy_path.get().strip()
         env_lines["AGY_MODEL"] = self.ent_agy_model.get().strip()
         env_lines["AGY_EFFORT"] = _effort_value(self.combo_agy_effort.get())
+        for key in AGENT_CLASSES:
+            path_value = self.ent_agent_path[key].get().strip() or key
+            model_value = self.ent_agent_model[key].get().strip()
+            env_lines[f"{key.upper()}_CLI_PATH"] = path_value
+            env_lines[f"{key.upper()}_MODEL"] = model_value
+            setattr(config, f"{key}_cli_path", path_value)
+            setattr(config, f"{key}_model", model_value)
+        env_lines["DEFAULT_AGENT"] = self._selected_agent_key()
+
         env_lines["OPENAI_API_KEY"] = self.ent_openai_key.get().strip()
         env_lines["ANTHROPIC_API_KEY"] = self.ent_anthropic_key.get().strip()
         env_lines["GEMINI_API_KEY"] = self.ent_gemini_key.get().strip()
@@ -3631,6 +4011,24 @@ class GamePromptFactoryGUI(ctk.CTk):
             else:
                 self.btn_test_agy.configure(text=f"❌ {res.get('message')[:30]}", state="normal")
             self.after(3000, lambda: self.btn_test_agy.configure(text="🔌 Проверить подключение AGY CLI"))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _test_agent_conn(self, key: str):
+        """Проверка терминального агента (claude/codex/kimi) прямо из настроек."""
+        path = self.ent_agent_path[key].get().strip() or key
+        model = self.ent_agent_model[key].get().strip() or None
+        button = self.btn_agent_test[key]
+        prov = make_cli_agent(key, cli_path=path, model=model)
+
+        button.configure(text="⏳ Проверка...", state="disabled")
+
+        def run():
+            res = prov.test_connection()
+            ok = res.get("status") == "success"
+            text = f"✅ {key} подключен!" if ok else f"❌ {str(res.get('message'))[:30]}"
+            self.after(0, lambda: button.configure(text=text, state="normal"))
+            self.after(3000, lambda: button.configure(text=f"🔌 Проверить {key}"))
 
         threading.Thread(target=run, daemon=True).start()
 

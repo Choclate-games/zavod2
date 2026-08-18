@@ -53,6 +53,16 @@ class AppConfig:
         # Пусто = не передавать --effort: модель по умолчанию его не принимает
         # ("invalid model selection: --effort is not supported for the current model")
         self.agy_effort = os.getenv("AGY_EFFORT", "")
+
+        # Терминальные кодовые агенты кроме AGY: Claude Code, Codex, Kimi.
+        # Пути к CLI и модели читаются провайдерами из этих же переменных.
+        self.default_agent = os.getenv("DEFAULT_AGENT", "agy")
+        self.claude_cli_path = os.getenv("CLAUDE_CLI_PATH", "claude")
+        self.claude_model = os.getenv("CLAUDE_MODEL", "")
+        self.codex_cli_path = os.getenv("CODEX_CLI_PATH", "codex")
+        self.codex_model = os.getenv("CODEX_MODEL", "")
+        self.kimi_cli_path = os.getenv("KIMI_CLI_PATH", "kimi")
+        self.kimi_model = os.getenv("KIMI_MODEL", "")
         self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
         self.gui_port = int(os.getenv("GUI_PORT", "7860"))
 

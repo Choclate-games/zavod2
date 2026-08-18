@@ -9,17 +9,22 @@ from providers.google import GoogleProvider
 from providers.agy import AGYProvider, AGYImageProvider
 from providers.opencode import OpenCodeProvider
 from providers.qwen import QwenImageProvider
+from providers.cli_agents import AGENT_CLASSES, make_cli_agent
 
 class ProviderFactory:
     @staticmethod
     def get_ai_provider(provider_name: Optional[str] = None) -> AIProvider:
         name = (provider_name or os.getenv("DEFAULT_PROVIDER", "local")).lower().strip()
-        
+
         if name in ("agy", "antigravity", "gemini-cli"):
             cli_path = os.getenv("AGY_CLI_PATH", "agy")
             model = os.getenv("AGY_MODEL")
             effort = os.getenv("AGY_EFFORT")
             return AGYProvider(cli_path=cli_path, model=model, effort=effort)
+        elif name in AGENT_CLASSES:
+            # Терминальные агенты: claude (Claude Code), codex, kimi.
+            # Путь к CLI и модель берутся из <PREFIX>_CLI_PATH / <PREFIX>_MODEL.
+            return make_cli_agent(name)
         elif name in ("opencode", "opencode_go", "opencode-zen", "zen"):
             api_key = os.getenv("OPENCODE_API_KEY") or os.getenv("OPENCODE_GO_KEY")
             base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")

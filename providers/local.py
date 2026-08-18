@@ -12,7 +12,7 @@ from app.models import (
     PlaygamaSpec, TechArchitectureSpec, ArtSpec, UIUXSpec, MobileSpec,
     RoadmapPhase, QASpec, RiskItem, SkillDoc
 )
-from agents.idea_brainstormer import BrainstormResult, BrainstormedIdea
+from agents.idea_brainstormer import BrainstormResult, fallback_catalog
 
 class LocalAIProvider(AIProvider):
     """
@@ -50,63 +50,8 @@ class LocalAIProvider(AIProvider):
             return response_model.model_validate({})
 
     def _synthesize_brainstorm(self, user_prompt: str) -> BrainstormResult:
-        ideas = [
-            BrainstormedIdea(
-                title="🏎️ Зомби Дрифт: Стальная Ярость 3D",
-                genre="3D Экшен-Дрифт / Выживание на Арене",
-                hook="Физический дрифт броневика с шипами, таран сотен зомби, нитро-ускорения и слоу-мо финишеры боссов",
-                pitch="Управляйте броневиком в постапокалипсисе, входите в заносы среди орд зомби, накапливайте нитро-ярость и улучшайте турели.",
-                renderer="threejs",
-                platform_fit="Яндекс Игры / Мобильные и ПК",
-                prompt_seed="3D экшен-игра про дрифт на Three.js. Игрок управляет бронированной машиной с шипами, дрифтует среди толп зомби, давит их и прокачивает рогалик-модули."
-            ),
-            BrainstormedIdea(
-                title="⚔️ Гладиаторы Арены: Рэгдолл 3D",
-                genre="3D Roguelike Arena Экшен",
-                hook="Физические бои на разрушаемой арене с отсечением брони и боссами",
-                pitch="Управляйте гладиатором с ragdoll-физикой, комбинируйте оружие и выживайте против 10 волн монстров и титанов.",
-                renderer="threejs",
-                platform_fit="Яндекс Игры / Мобильные и ПК",
-                prompt_seed="3D гладиаторский roguelike арена-экшен с ragdoll физикой, кастомизацией брони, расчленением и волнами боссов на Яндекс Игры"
-            ),
-            BrainstormedIdea(
-                title="🦠 Био-Рой: Эволюция Микробов 3D",
-                genre="3D Horde Survival / Action Roguelite",
-                hook="Софт-боди деформация мембраны, поглощение органелл и эволюция жгутиков-хлыстов",
-                pitch="Управляйте микроорганизмом в микромире: растворяйте бактерии, поглощайте ДНК и отращивайте кислотные железы.",
-                renderer="threejs",
-                platform_fit="Яндекс Игры / WebGL",
-                prompt_seed="3D horde survival игра в микромире на Three.js с желеобразной физикой клетки, поглощением органелл и эволюцией способностей"
-            ),
-            BrainstormedIdea(
-                title="🌌 Звездная Колония: Idle Cyber-Merge",
-                genre="2D Idle / Merge Tycoon",
-                hook="Слияние космических модулей, автоматическая добыча антиматерии и защита от рейдеров",
-                pitch="Стройте орбитальную базу, объединяйте турели и энергогенераторы, сохраняйте прогресс в Playgama Cloud.",
-                renderer="pixijs",
-                platform_fit="Яндекс Игры / Playgama Cloud Save",
-                prompt_seed="2D космический автобатлер и кликер базы с Playgama Cloud Save, лидербордами и Rewarded видео"
-            ),
-            BrainstormedIdea(
-                title="🧟 Некро-Орда: Выживание 10 000",
-                genre="2D Horde Survival / Vampire-like",
-                hook="500+ врагов на экране, синергия стихийной магии и однопальцевое touch-управление",
-                pitch="Уничтожайте бесконечные волны нежити, собирайте сферы опыта и эволюционируйте заклинания в ультимативные штормы.",
-                renderer="pixijs",
-                platform_fit="Мобильный браузер (Touch)",
-                prompt_seed="Vampire Survivors-like орда-выживание с комбо-магией, 500+ врагов на экране и touch управлением для мобилок"
-            ),
-            BrainstormedIdea(
-                title="🃏 Теневой Драфт: Подземелья",
-                genre="2D Карточный Roguelite",
-                hook="Драфт карт прямо в бою, комбо-цепочки стихий и процедурные залы",
-                pitch="Собирайте колоду из 50+ карт реликвий, комбинируйте эффекты заморозки и огня, побеждайте боссов подземелья.",
-                renderer="pixijs",
-                platform_fit="Портретный режим для смартфонов",
-                prompt_seed="2D карточный рогалик с механикой драфта колоды, синергией артефактов и процедурным подземельем"
-            )
-        ]
-        return BrainstormResult(ideas=ideas)
+        """Оффлайн-идеи берём из общего каталога брейнштормера — список один на всю фабрику."""
+        return BrainstormResult(ideas=fallback_catalog(user_prompt))
 
     def _synthesize_concept(self, raw_prompt: str) -> GameConcept:
         lower = raw_prompt.lower()

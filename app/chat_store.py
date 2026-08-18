@@ -36,7 +36,8 @@ class ChatSession:
     title: str
     created_at: str
     updated_at: str
-    conversation_id: Optional[str] = None      # ID беседы на стороне AGY CLI
+    conversation_id: Optional[str] = None      # ID беседы на стороне CLI агента
+    agent: Optional[str] = None                # какой CLI ведёт беседу: agy | claude | codex | kimi
     model: Optional[str] = None                # модель, выбранная для этой беседы
     messages: List[ChatMessage] = field(default_factory=list)
 
@@ -58,6 +59,7 @@ class ChatSession:
             created_at=data.get("created_at") or datetime.now().isoformat(timespec="seconds"),
             updated_at=data.get("updated_at") or data.get("created_at") or datetime.now().isoformat(timespec="seconds"),
             conversation_id=data.get("conversation_id"),
+            agent=data.get("agent"),
             model=data.get("model"),
             messages=messages,
         )

@@ -1,0 +1,72 @@
+export type GameState = 'MENU' | 'GARAGE' | 'PLAYING' | 'LEVEL_UP' | 'PAUSED' | 'GAME_OVER' | 'VICTORY';
+
+export interface VehicleConfig {
+  id: string;
+  name: string;
+  nameRu: string;
+  descriptionRu: string;
+  price: number;
+  unlocked: boolean;
+  baseStats: {
+    maxHealth: number;
+    topSpeed: number;
+    acceleration: number;
+    handling: number;
+    driftGrip: number;
+    ramDamage: number;
+    nitroDuration: number;
+    nitroRefillRate: number;
+  };
+  color: number;
+  accentColor: number;
+}
+
+export interface UpgradeCard {
+  id: string;
+  nameRu: string;
+  descriptionRu: string;
+  icon: string;
+  rarity: 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+  category: 'WEAPON' | 'STAT' | 'UTILITY';
+  maxLevel: number;
+  currentLevel: number;
+  apply: (game: any) => void;
+}
+
+export interface RunStats {
+  zombiesKilled: number;
+  bossesDefeated: number;
+  scrapCollected: number;
+  driftTimeSeconds: number;
+  maxCombo: number;
+  damageDealt: number;
+  survivedTimeSeconds: number;
+  waveReached: number;
+}
+
+export interface GarageUpgrades {
+  hullLevel: number;
+  engineLevel: number;
+  driftLevel: number;
+  ramLevel: number;
+  nitroLevel: number;
+  magnetLevel: number;
+}
+
+export interface SaveData {
+  scrap: number;
+  selectedVehicleId: string;
+  unlockedVehicles: string[];
+  garageUpgrades: GarageUpgrades;
+  highScore: number;
+  maxWave: number;
+  soundEnabled: boolean;
+  musicEnabled: boolean;
+}
+
+export interface GameSettings {
+  soundEnabled: boolean;
+  musicEnabled: boolean;
+  joystickControls: boolean;
+  graphicsQuality: 'LOW' | 'MEDIUM' | 'HIGH';
+}
