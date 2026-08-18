@@ -1,14 +1,19 @@
+from app import knowledge
 from app.context import GenerationContext
 from app.models import SkillDoc
 from app.logging import log_agent
 
 class SkillGeneratorAgent:
-    """Ensures game-specific and specialized skills are prepared and attached to concept."""
+    """Ensures game-specific and specialized skills are prepared and attached to concept.
+
+    Platform and renderer skills point at `knowledge/` rather than restating it:
+    the knowledge base is the single source of truth, and a summary written here
+    drifts from it the moment either changes."""
 
     def run(self, ctx: GenerationContext):
         concept = ctx.concept
         log_agent("SkillGenerator", f"Generating game-specific skill instructions for '{concept.title}'")
-        
+
         # Ensure concept.skills is a list
         if not isinstance(concept.skills, list):
             concept.skills = []
@@ -88,13 +93,17 @@ class SkillGeneratorAgent:
                 implementation_guidance="Initialize renderer with antialias enabled on desktop, powerPreference 'high-performance'.",
                 common_mistakes=[
                     "Do not construct new Geometries, Textures, or Materials in the render loop.",
-                    "Do not leave unused GPU assets without calling .dispose()."
+                    "Do not leave unused GPU assets without calling .dispose().",
+                    "Do not tune quality from raw frame time — under vsync every frame reads as budget-length.",
+                    "Do not launch in reduced quality and climb up; start optimistic and step down."
                 ],
                 checklist=[
                     "Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.",
                     "No WebGL context loss errors on tab switches.",
-                    "Shadow map renders crisp without artifact acne."
-                ]
+                    "Shadow map renders crisp without artifact acne.",
+                    "The quality auto-tuner converges and locks instead of oscillating."
+                ],
+                knowledge_refs=knowledge.topics_for_renderer(concept.renderer)
             ))
 
         if "playgama_skill" not in skill_ids:
@@ -103,25 +112,42 @@ class SkillGeneratorAgent:
                 skill_id="playgama_skill",
                 name="Playgama Bridge SDK Integration",
                 filename="PLAYGAMA_SKILL.md",
-                purpose="Defines implementation patterns for @playgama/bridge (Ads, Cloud Storage, Leaderboards, Lifecycle).",
-                when_to_use="Use when implementing advertising triggers, cloud save/load, and portal lifecycle hooks.",
+                purpose="Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage, Auth, Leaderboards, Lifecycle).",
+                when_to_use="Use when implementing advertising triggers, cloud save/load, authorization, and portal lifecycle hooks.",
                 rules=[
-                    "Always await bridge.initialize() before showing any ads or loading storage.",
-                    "Mute Howler audio master and pause game loop while ads are active.",
-                    "Handle ad errors gracefully without blocking the player's progression.",
-                    "Auto-save player progress on wave complete and game over."
+                    "Always await bridge.initialize() (with a timeout) before any other SDK call.",
+                    "Send game_ready exactly once, only after assets are loaded and the menu is interactive.",
+                    "Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.",
+                    "One save key holding one JSON object; storage.get/set take no storageType argument.",
+                    "Call authorize() only from a player action — except the silent VK/OK path at boot.",
+                    "Build UI on capability flags: an unsupported feature's control is not rendered at all.",
+                    "Take pause and audio state from the platform's own events, not visibilitychange alone.",
+                    "Auto-save on progress milestones and flush on pagehide."
                 ],
-                architecture="Singleton PlaygamaService wrapper exposing strongly-typed promises for Ads, Storage, and Leaderboards.",
-                implementation_guidance="Call bridge.advertisement.showRewardedVideo() with proper reward callbacks and error handling.",
+                architecture="Singleton PlaygamaService wrapper exposing strongly-typed promises for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when window.bridge is absent.",
+                implementation_guidance=(
+                    "Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call "
+                    "bridge.advertisement.showRewarded(placement), remove the listener in cleanup, and "
+                    "resolve true only for the 'rewarded' state. Full implementations for every module "
+                    "are embedded below."
+                ),
                 common_mistakes=[
-                    "Never show Interstitials during active gameplay without user expectation.",
-                    "Never assume internet connection is permanent—support local offline fallback."
+                    "Sending game_ready right after initialize() — the splash lifts over an unloaded game.",
+                    "Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.",
+                    "Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.",
+                    "Showing an interstitial in the first seconds of a session or during gameplay.",
+                    "Consuming a purchase before granting it — paid goods are destroyed.",
+                    "Keeping settings in localStorage — it is partitioned inside the platform iframe.",
+                    "Never assume internet connection is permanent — support local offline fallback."
                 ],
                 checklist=[
-                    "Rewarded video grants exact promised reward upon completion.",
+                    "Rewarded grants exactly one reward per view, even on a double click.",
+                    "Progress survives a reload as guest and as an authorized player.",
+                    "A corrupted save boots on defaults instead of crashing.",
                     "Leaderboard score submits and displays correctly.",
-                    "Game auto-pauses when browser tab loses visibility."
-                ]
+                    "Game auto-pauses on the platform's pause event, including during ads."
+                ],
+                knowledge_refs=knowledge.CORE_TOPICS
             ))
 
         log_agent("SkillGenerator", f"Compiled {len(concept.skills)} reusable skill documents.")

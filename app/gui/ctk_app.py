@@ -18,6 +18,7 @@ from app.models import GameConcept
 from app.pipeline import Pipeline
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
+from app.gui.chat_terminal import ChatTerminal
 from providers.opencode import OpenCodeProvider
 from providers.base import NoneImageProvider
 from validators.output_validator import OutputValidator
@@ -40,6 +41,17 @@ from generators.output_generator import OutputGenerator
 # Configure CustomTkinter Theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+# Значение «не передавать --effort в agy» (модель по умолчанию флаг не принимает)
+EFFORT_AUTO = "auto (не передавать)"
+# Значение «не передавать --model в agy»
+MODEL_DEFAULT = "по умолчанию"
+
+
+def _effort_value(raw: str) -> str:
+    """Приводит выбор из выпадающего списка к значению для CLI ('' = не передавать)."""
+    value = (raw or "").strip()
+    return value if value in ("low", "medium", "high") else ""
 
 
 class CTkMarkdownViewer(ctk.CTkFrame):
@@ -880,6 +892,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
 
         provider = self._get_selected_provider_key()
+        selected_model = self._selected_agy_model()
         renderer_raw = self.combo_renderer.get().split()[0]
         renderer = None if renderer_raw == "✨" or "auto" in renderer_raw else renderer_raw
         mode = self.combo_mode.get().split()[0]
@@ -998,7 +1011,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
                 agy_prov = AGYProvider(
                     cli_path=config.agy_cli_path,
-                    model=config.agy_model if config.agy_model else None,
+                    model=selected_model,
                     effort=config.agy_effort,
                     yolo=True
                 )
@@ -1566,7 +1579,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         agy_box = ctk.CTkFrame(self.tab_agy_frame, fg_color="#121a2b", corner_radius=12)
         agy_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=0)
-        agy_box.grid_rowconfigure(3, weight=1)
+        agy_box.grid_rowconfigure(3, weight=1)   # лента чата растягивается
         agy_box.grid_columnconfigure(0, weight=1)
 
         # ── Header ──
@@ -1651,6 +1664,35 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.combo_agy_proj.set("[Без контекста]")
         self.combo_agy_proj.pack(side="left", padx=(0, 15))
 
+        ctk.CTkLabel(
+            opt_row, text="Модель:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#64748b"
+        ).pack(side="left", padx=(0, 6))
+
+        self.combo_agy_model = ctk.CTkComboBox(
+            opt_row, values=[MODEL_DEFAULT], width=200,
+            fg_color="#0e1626", border_color="#1e293b",
+            command=lambda _v: self._on_agy_model_changed()
+        )
+        self.combo_agy_model.set(config.agy_model or MODEL_DEFAULT)
+        self.combo_agy_model.pack(side="left", padx=(0, 4))
+
+        self.btn_reload_models = ctk.CTkButton(
+            opt_row, text="🔄", width=28, height=28,
+            fg_color="#1e293b", hover_color="#334155",
+            font=ctk.CTkFont(size=12),
+            command=self._reload_agy_models
+        )
+        self.btn_reload_models.pack(side="left", padx=(0, 4))
+
+        ctk.CTkButton(
+            opt_row, text="🔑 Вход", width=70, height=28,
+            fg_color="#1e293b", hover_color="#334155",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._launch_agy_login
+        ).pack(side="left", padx=(0, 15))
+
         self.chk_agy_yolo = ctk.CTkCheckBox(
             opt_row,
             text="🔥 YOLO (без подтверждений)",
@@ -1667,7 +1709,8 @@ class GamePromptFactoryGUI(ctk.CTk):
             opt_row,
             text="⚡ Автоскролл",
             font=ctk.CTkFont(size=11),
-            text_color="#94a3b8"
+            text_color="#94a3b8",
+            command=self._toggle_agy_autoscroll
         )
         self.chk_agy_autoscroll.select()
         self.chk_agy_autoscroll.pack(side="left")
@@ -1696,53 +1739,14 @@ class GamePromptFactoryGUI(ctk.CTk):
             )
             btn_t.pack(side="left", padx=(0, 5))
 
-        # ── Prompt + Buttons ──
-        prompt_row = ctk.CTkFrame(opt_container, fg_color="transparent")
-        prompt_row.grid(row=2, column=0, sticky="ew")
-        prompt_row.grid_columnconfigure(0, weight=1)
-
-        self.txt_agy_prompt = ctk.CTkTextbox(
-            prompt_row, height=65,
-            font=ctk.CTkFont(size=12),
-            fg_color="#0e1626", border_color="#1e293b"
-        )
-        self.txt_agy_prompt.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        self.txt_agy_prompt.insert("1.0", "Прочитай AI_DEVELOPER_PROMPT.md и файлы в папке skills/ (GAME_SKILL.md, GAMEPLAY_SKILL.md, RENDERER_SKILL.md, PLAYGAMA_SKILL.md). Создай полную рабочую структуру HTML5 игры: package.json, vite.config.ts, index.html, src/main.ts, все модули рендерера, физику, управление, аудио и Playgama Bridge. Напиши весь готовый код.")
-
-        btns_col = ctk.CTkFrame(prompt_row, fg_color="transparent")
-        btns_col.grid(row=0, column=1, sticky="ns")
-
-        self.btn_run_agy = ctk.CTkButton(
-            btns_col,
-            text="⚡ Запустить",
-            width=160, height=34,
-            fg_color="#00f0ff",
-            hover_color="#00c8d6",
-            text_color="#050b14",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._run_agy_cli_task
-        )
-        self.btn_run_agy.pack(fill="x", pady=(0, 4))
-
-        self.btn_launch_agy_win = ctk.CTkButton(
-            btns_col,
-            text="🚀 Открыть терминал",
-            width=160, height=30,
-            fg_color="#1e293b",
-            hover_color="#334155",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._launch_agy_interactive_window
-        )
-        self.btn_launch_agy_win.pack(fill="x")
-
-        # ── Terminal Output ──
-        term_frame = ctk.CTkFrame(agy_box, fg_color="#0a0f1a", corner_radius=8)
-        term_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        # ── Чат-лента (вывод AGY) ──
+        term_frame = ctk.CTkFrame(agy_box, fg_color="#0a0f1a", corner_radius=10)
+        term_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(0, 8))
         term_frame.grid_rowconfigure(1, weight=1)
         term_frame.grid_columnconfigure(0, weight=1)
 
-        # Terminal toolbar
-        term_bar = ctk.CTkFrame(term_frame, fg_color="#0e1626", height=28, corner_radius=0)
+        # Панель статуса чата
+        term_bar = ctk.CTkFrame(term_frame, fg_color="#0e1626", height=30, corner_radius=0)
         term_bar.grid(row=0, column=0, sticky="ew")
 
         self.lbl_agy_term_status = ctk.CTkLabel(
@@ -1782,20 +1786,129 @@ class GamePromptFactoryGUI(ctk.CTk):
             fg_color="transparent",
             hover_color="#1a263e",
             font=ctk.CTkFont(size=10),
-            command=lambda: self.txt_agy_output.delete("1.0", "end")
+            command=self._clear_agy_chat
         ).pack(side="right", padx=(0, 4), pady=2)
 
-        # Terminal text output
-        self.txt_agy_output = ctk.CTkTextbox(
+        self.chat_agy = ChatTerminal(
             term_frame,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="#0a0f1a",
-            text_color="#a5f3fc"
+            placeholder="AGY CLI готов. Опишите задачу внизу и нажмите Enter — ход разработки появится здесь."
         )
-        self.txt_agy_output.grid(row=1, column=0, sticky="nsew", padx=8, pady=(6, 8))
-        self.txt_agy_output.insert("1.0", "AGY CLI готов. Введите задачу и нажмите «Запустить».\n")
+        self.chat_agy.grid(row=1, column=0, sticky="nsew", padx=6, pady=(6, 6))
+
+        # ── Композер (поле ввода в стиле мессенджера) ──
+        composer = ctk.CTkFrame(agy_box, fg_color="#101a2c", corner_radius=18)
+        composer.grid(row=4, column=0, sticky="ew", padx=15, pady=(0, 12))
+        composer.grid_columnconfigure(0, weight=1)
+
+        self.txt_agy_prompt = ctk.CTkTextbox(
+            composer, height=64,
+            font=ctk.CTkFont(size=12),
+            fg_color="#101a2c", border_width=0,
+            text_color="#e2e8f0", wrap="word"
+        )
+        self.txt_agy_prompt.grid(row=0, column=0, sticky="ew", padx=(14, 8), pady=10)
+        self.txt_agy_prompt.insert("1.0", "Прочитай AI_DEVELOPER_PROMPT.md и файлы в папке skills/ (GAME_SKILL.md, GAMEPLAY_SKILL.md, RENDERER_SKILL.md, PLAYGAMA_SKILL.md). Создай полную рабочую структуру HTML5 игры: package.json, vite.config.ts, index.html, src/main.ts, все модули рендерера, физику, управление, аудио и Playgama Bridge. Напиши весь готовый код.")
+        self.txt_agy_prompt.bind("<Return>", self._on_composer_return)
+        self.txt_agy_prompt.bind("<Shift-Return>", lambda e: None)
+
+        btns_col = ctk.CTkFrame(composer, fg_color="transparent")
+        btns_col.grid(row=0, column=1, sticky="ns", padx=(0, 10), pady=8)
+
+        self.btn_run_agy = ctk.CTkButton(
+            btns_col,
+            text="⚡ Отправить",
+            width=150, height=32,
+            fg_color="#00f0ff",
+            hover_color="#00c8d6",
+            text_color="#050b14",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._run_agy_cli_task
+        )
+        self.btn_run_agy.pack(fill="x", pady=(0, 4))
+
+        self.btn_launch_agy_win = ctk.CTkButton(
+            btns_col,
+            text="🚀 Внешний терминал",
+            width=150, height=26,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._launch_agy_interactive_window
+        )
+        self.btn_launch_agy_win.pack(fill="x")
+
+        ctk.CTkLabel(
+            agy_box,
+            text="Enter — отправить · Shift+Enter — новая строка",
+            font=ctk.CTkFont(size=9), text_color="#475569"
+        ).grid(row=5, column=0, sticky="w", padx=22, pady=(0, 8))
 
         self._refresh_agy_quota_display()
+
+    def _on_composer_return(self, event):
+        """Enter отправляет задачу, Shift+Enter — перенос строки."""
+        if event.state & 0x0001:  # Shift
+            return None
+        self._run_agy_cli_task()
+        return "break"
+
+    def _clear_agy_chat(self):
+        self.chat_agy.clear()
+
+    def _toggle_agy_autoscroll(self):
+        self.chat_agy.autoscroll = bool(self.chk_agy_autoscroll.get())
+
+    def _selected_agy_model(self) -> Optional[str]:
+        """Модель из выпадающего списка вкладки AGY ('' / плейсхолдер = не передавать --model)."""
+        value = (self.combo_agy_model.get() or "").strip()
+        return None if not value or value in (MODEL_DEFAULT, "inherit") else value
+
+    def _on_agy_model_changed(self):
+        model = self._selected_agy_model()
+        config.agy_model = model or ""
+        self.chat_agy.push({
+            "kind": "system", "icon": "🧠",
+            "text": f"Модель: {model}" if model else "Модель: по умолчанию (флаг --model не передаётся)"
+        })
+
+    def _launch_agy_login(self):
+        """Открывает чистый интерактивный agy — там выполняется /login (в print-режиме вход недоступен)."""
+        AGYProvider(cli_path=config.agy_cli_path).launch_interactive_terminal(bare=True)
+        self.chat_agy.push({
+            "kind": "system", "icon": "🔑",
+            "text": "Открыт терминал AGY. Выполните в нём /login, дождитесь входа и вернитесь сюда — "
+                    "затем нажмите 🔄, чтобы загрузить список моделей."
+        })
+
+    def _reload_agy_models(self):
+        """Тянет список моделей из `agy models` в фоне."""
+        self.btn_reload_models.configure(state="disabled", text="⏳")
+
+        def run():
+            prov = AGYProvider(cli_path=config.agy_cli_path)
+            res = prov.list_models()
+            self.after(0, lambda: self._apply_agy_models(res))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _apply_agy_models(self, res: Dict[str, Any]):
+        self.btn_reload_models.configure(state="normal", text="🔄")
+        models = res.get("models") or []
+        current = self.combo_agy_model.get()
+
+        if models:
+            self.combo_agy_model.configure(values=[MODEL_DEFAULT] + models)
+            if current not in models:
+                self.combo_agy_model.set(MODEL_DEFAULT)
+            self.chat_agy.push({"kind": "system", "icon": "🧠",
+                                "text": f"Список моделей обновлён: {', '.join(models)}"})
+        else:
+            self.chat_agy.push({
+                "kind": "error",
+                "text": (f"Не удалось получить список моделей: {res.get('message')}\n\n"
+                         "Список приходит с сервера Antigravity. Если CLI отвечает таймаутом, "
+                         "войдите заново: запустите `agy` в терминале и выполните /login.")
+            })
 
     # ── AGY Tab: Helper Methods ──
 
@@ -1834,39 +1947,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.txt_agy_prompt.delete("1.0", "end")
         self.txt_agy_prompt.insert("1.0", text)
 
-    def _refresh_agy_quota_display(self):
-        status = self.agy_quota_tracker.get_quota_status()
-
-        u5 = status["used_5h"]
-        l5 = status["limit_5h"]
-        r5 = status["remaining_5h"]
-        p5 = status["pct_5h"] / 100.0
-
-        self.lbl_quota_5h.configure(
-            text=f"⏱ 5ч: {u5}/{l5} • осталось {r5} • сброс {status['reset_5h_str']}",
-            text_color="#ff4d79" if r5 <= 5 else ("#fbbf24" if r5 <= 15 else "#00f0ff")
-        )
-        self.pb_quota_5h.set(p5)
-        self.pb_quota_5h.configure(
-            progress_color="#ff4d79" if p5 >= 0.9 else ("#fbbf24" if p5 >= 0.7 else "#00ff88")
-        )
-
-        uw = status["used_weekly"]
-        lw = status["limit_weekly"]
-        rw = status["remaining_weekly"]
-        pw = status["pct_weekly"] / 100.0
-
-        self.lbl_quota_weekly.configure(
-            text=f"📅 Неделя: {uw}/{lw} • осталось {rw} • сброс {status['reset_weekly_str']}",
-            text_color="#ff4d79" if rw <= 20 else ("#fbbf24" if rw <= 50 else "#38bdf8")
-        )
-        self.pb_quota_weekly.set(pw)
-        self.pb_quota_weekly.configure(
-            progress_color="#ff4d79" if pw >= 0.9 else ("#fbbf24" if pw >= 0.7 else "#38bdf8")
-        )
-
     def _copy_agy_output(self):
-        content = self.txt_agy_output.get("1.0", "end").strip()
+        content = self.chat_agy.get_plain_text().strip()
         if content:
             self.clipboard_clear()
             self.clipboard_append(content)
@@ -1890,8 +1972,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         yolo_mode = bool(self.chk_agy_yolo.get())
         agy_prov = AGYProvider(cli_path=config.agy_cli_path, yolo=yolo_mode)
         agy_prov.launch_interactive_terminal(project_dir=proj_dir, prompt=prompt, yolo=yolo_mode)
-        self.txt_agy_output.insert("end", f"\n🚀 Интерактивный терминал AGY открыт в отдельном окне.\n")
-        self.txt_agy_output.see("end")
+        self.chat_agy.push({"kind": "system", "icon": "🚀",
+                            "text": "Интерактивный терминал AGY открыт в отдельном окне."})
 
     def _populate_agy_projects_dropdown(self):
         output_base = config.output_dir
@@ -1922,54 +2004,64 @@ class GamePromptFactoryGUI(ctk.CTk):
                 full_prompt = f"[CONTEXT FROM {selected_proj} AI_DEVELOPER_PROMPT.md]\n{context_snippet}\n\n[USER TASK]\n{prompt}"
 
         yolo_mode = bool(self.chk_agy_yolo.get())
+        selected_model = self._selected_agy_model()
         self.agy_running = True
         self.agy_stop_requested = False
         self.btn_run_agy.configure(state="disabled", text="⏳ Выполнение...")
         self.lbl_agy_term_status.configure(text="● Выполнение...", text_color="#00f0ff")
 
-        now_str = datetime.now().strftime("%H:%M:%S")
-        self.txt_agy_output.insert("end", f"\n{'═'*50}\n⚡ Запуск AGY [{now_str}] | YOLO: {yolo_mode}\n{'═'*50}\n")
-        self.txt_agy_output.see("end")
+        self.chat_agy.autoscroll = bool(self.chk_agy_autoscroll.get())
+        self.chat_agy.push({"kind": "user", "text": prompt})
+        ctx_note = f"проект {selected_proj}" if proj_dir else "без контекста проекта"
+        self.chat_agy.push({
+            "kind": "system", "icon": "⚡",
+            "text": f"Запуск AGY · {ctx_note} · YOLO: {'вкл' if yolo_mode else 'выкл'}"
+        })
+        self.chat_agy.show_typing()
 
-        def append_chunk(chunk: str):
-            self.after(0, lambda c=chunk: self._append_agy_terminal_line(c))
+        self.txt_agy_prompt.delete("1.0", "end")
+
+        def on_event(event: Dict[str, Any]):
+            self.chat_agy.push(event)
 
         def run():
-            agy_prov = AGYProvider(
-                cli_path=config.agy_cli_path,
-                model=config.agy_model if config.agy_model else None,
-                effort=config.agy_effort,
-                yolo=yolo_mode
-            )
             try:
+                agy_prov = AGYProvider(
+                    cli_path=config.agy_cli_path,
+                    model=selected_model,
+                    effort=config.agy_effort,
+                    yolo=yolo_mode
+                )
                 code, out = agy_prov.stream_run(
                     full_prompt,
-                    on_line=append_chunk,
+                    on_event=on_event,
                     yolo=yolo_mode,
                     cwd=proj_dir,
                     stop_check_fn=lambda: self.agy_stop_requested
                 )
                 self.after(0, lambda: self._on_agy_task_finished(code))
             except Exception as e:
-                append_chunk(f"\n❌ ОШИБКА: {str(e)}\n")
+                msg = str(e)
+                self.chat_agy.push({"kind": "error", "text": msg})
                 self.after(0, lambda: self._on_agy_task_finished(-1))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _append_agy_terminal_line(self, chunk: str):
-        self.txt_agy_output.insert("end", chunk)
-        if getattr(self, "chk_agy_autoscroll", None) and self.chk_agy_autoscroll.get():
-            self.txt_agy_output.see("end")
+        """Совместимость: добавляет «сырую» строку в чат-ленту."""
+        self.chat_agy.push({"kind": "raw", "text": chunk})
 
     def _on_agy_task_finished(self, exit_code: int):
         self.agy_running = False
-        self.btn_run_agy.configure(state="normal", text="⚡ Запустить")
+        self.chat_agy.hide_typing()
+        self.btn_run_agy.configure(state="normal", text="⚡ Отправить")
         if exit_code == 0:
             self.lbl_agy_term_status.configure(text="● Задача успешно завершена", text_color="#00ff88")
-            self.txt_agy_output.insert("end", f"\n✅ Задача успешно завершена ({datetime.now().strftime('%H:%M:%S')})\n")
+            self.chat_agy.push({"kind": "system", "icon": "✅", "text": "Задача завершена"})
+        elif self.agy_stop_requested:
+            self.lbl_agy_term_status.configure(text="● Остановлено пользователем", text_color="#fbbf24")
         else:
             self.lbl_agy_term_status.configure(text=f"● Завершено с кодом {exit_code}", text_color="#fbbf24")
-        self.txt_agy_output.see("end")
         self._refresh_agy_quota_display()
 
     # =================================================================
@@ -2036,8 +2128,13 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.ent_agy_model.pack(fill="x", padx=12, pady=(2, 6))
 
         ctk.CTkLabel(card_agy, text="Reasoning Effort:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=12)
-        self.combo_agy_effort = ctk.CTkComboBox(card_agy, values=["high", "medium", "low"])
-        self.combo_agy_effort.pack(fill="x", padx=12, pady=(2, 10))
+        self.combo_agy_effort = ctk.CTkComboBox(card_agy, values=[EFFORT_AUTO, "high", "medium", "low"])
+        self.combo_agy_effort.pack(fill="x", padx=12, pady=(2, 2))
+        ctk.CTkLabel(
+            card_agy,
+            text="Работает только с явно указанной моделью — иначе AGY отвечает\n«--effort is not supported for the current model».",
+            font=ctk.CTkFont(size=9), text_color="#64748b", justify="left"
+        ).pack(anchor="w", padx=12, pady=(0, 10))
 
         self.btn_test_agy = ctk.CTkButton(
             card_agy,
@@ -2099,7 +2196,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         self.ent_agy_path.insert(0, config.agy_cli_path or "agy")
         self.ent_agy_model.insert(0, config.agy_model or "")
-        self.combo_agy_effort.set(config.agy_effort or "high")
+        self.combo_agy_effort.set(config.agy_effort or EFFORT_AUTO)
 
         self.ent_openai_key.insert(0, os.getenv("OPENAI_API_KEY", ""))
         self.ent_anthropic_key.insert(0, os.getenv("ANTHROPIC_API_KEY", ""))
@@ -2122,7 +2219,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         env_lines["OPENCODE_MODEL"] = self.ent_opencode_model.get().strip()
         env_lines["AGY_CLI_PATH"] = self.ent_agy_path.get().strip()
         env_lines["AGY_MODEL"] = self.ent_agy_model.get().strip()
-        env_lines["AGY_EFFORT"] = self.combo_agy_effort.get().strip()
+        env_lines["AGY_EFFORT"] = _effort_value(self.combo_agy_effort.get())
         env_lines["OPENAI_API_KEY"] = self.ent_openai_key.get().strip()
         env_lines["ANTHROPIC_API_KEY"] = self.ent_anthropic_key.get().strip()
         env_lines["GEMINI_API_KEY"] = self.ent_gemini_key.get().strip()
@@ -2164,7 +2261,7 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _test_agy_conn(self):
         path = self.ent_agy_path.get().strip()
         model = self.ent_agy_model.get().strip() or None
-        effort = self.combo_agy_effort.get().strip()
+        effort = _effort_value(self.combo_agy_effort.get())
         prov = AGYProvider(cli_path=path, model=model, effort=effort)
         
         self.btn_test_agy.configure(text="⏳ Проверка...", state="disabled")

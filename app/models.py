@@ -71,8 +71,8 @@ class MonetizationSpec(BaseSafeModel):
     fairness_rules: List[str] = Field(default_factory=list)
 
 class PlaygamaSpec(BaseSafeModel):
-    sdk_version: str = Field(default="@playgama/bridge 1.x")
-    supported_platforms: List[str] = Field(default_factory=lambda: ["yandex", "crazy_games", "vk", "game_distribution"])
+    sdk_version: str = Field(default="@playgama/bridge 2.x")
+    supported_platforms: List[str] = Field(default_factory=lambda: ["yandex", "vk", "ok", "crazy_games", "playgama"])
     initialization_flow: List[str] = Field(default_factory=list)
     cloud_save_keys: List[str] = Field(default_factory=list)
     leaderboards: List[str] = Field(default_factory=list)
@@ -86,7 +86,9 @@ class TechArchitectureSpec(BaseSafeModel):
     renderer_version: str = Field(default="^0.170.0")
     physics_engine: str = Field(default="Rapier3D (@dimforge/rapier3d-compat)")
     state_manager: str = Field(default="Reactive EventBus / State Store")
-    audio_engine: str = Field(default="Howler.js / WebAudio API")
+    # Web Audio only: an <audio>/HTML5 Audio element registers a media session and
+    # trips Yandex requirements 1.6.1.6 / 1.6.2.5 (player in the notification panel).
+    audio_engine: str = Field(default="Web Audio API (Howler.js with html5: false)")
     target_fps: int = Field(default=60)
     max_draw_calls: int = Field(default=80)
     max_triangles_or_sprites: int = Field(default=45000)
@@ -150,6 +152,10 @@ class SkillDoc(BaseSafeModel):
     implementation_guidance: str = Field(default="")
     common_mistakes: List[str] = Field(default_factory=list)
     checklist: List[str] = Field(default_factory=list)
+    # Relative paths under knowledge/ whose full text is embedded into the
+    # generated skill file, so the coding agent gets the worked-out detail
+    # instead of a summary that drifts from the knowledge base.
+    knowledge_refs: List[str] = Field(default_factory=list)
 
 class GameConcept(BaseSafeModel):
     raw_prompt: str = Field(default="")

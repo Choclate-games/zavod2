@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 from PIL import Image, ImageDraw
 
 from providers.base import AIProvider, ImageProvider, T
+from app import knowledge
 from app.models import (
     GameConcept, GameScores, ReferenceSpec, MechanicSpec, SystemSpec,
     MonetizationSpec, RewardedAdPlacement, InterstitialAdPlacement, InAppPurchaseItem,
@@ -497,24 +498,37 @@ class LocalAIProvider(AIProvider):
         )
 
         # Playgama
+        # Порядок и формулировки — из knowledge/playgama/game_ready_and_loading.md.
+        # Ни один шаг загрузки не ждёт решения игрока: `await authorize()` в boot
+        # вешает игру у 100% гостей.
         playgama = PlaygamaSpec(
-            sdk_version="@playgama/bridge 1.x",
-            supported_platforms=["yandex", "crazy_games", "vk", "game_distribution", "mock"],
+            sdk_version="@playgama/bridge 2.x",
+            supported_platforms=["yandex", "vk", "ok", "crazy_games", "playgama", "mock"],
             initialization_flow=[
-                "1. Вызов `await bridge.initialize()` в src/main.ts.",
-                "2. Определение языка платформы (`bridge.platform.language`).",
-                "3. Загрузка данных игрока через `bridge.storage.get()`.",
-                "4. Предзагрузка текстур, мешей и звуков.",
-                "5. Отправка `bridge.platform.sendMessage(PlatformMessage.GAME_READY)`."
+                "1. installViewportGuards() — блокировка страницы до первой отрисовки.",
+                "2. `await bridge.initialize()` (с таймаутом 10 с) + `in_game_loading_started`.",
+                "3. Язык платформы (`bridge.platform.language`) до первого перевода DOM.",
+                "4. Тихая авторизация на vk/ok — до чтения сейвов, с таймаутом 5 с.",
+                "5. Загрузка сейва через `bridge.storage.get(key)` (без storageType).",
+                "6. Выдача необработанных покупок: `getPurchases()` → выдать → потребить.",
+                "7. Предзагрузка текстур, мешей и звуков, сборка сцены и UI.",
+                "8. Прогресс до 100% и пауза на затухание сплэша (~700 мс).",
+                "9. `bridge.platform.sendMessage('game_ready')` — ровно один раз.",
+                "10. Поднятие баннеров и старт обучения — только после game_ready."
             ],
-            cloud_save_keys=["player_save_v1", "sound_settings", "control_prefs"],
-            leaderboards=["global_high_score", "highest_wave_reached"],
+            # Один ключ, один JSON-объект: настройки и прогресс лежат внутри него.
+            cloud_save_keys=["player_save_v1"],
+            leaderboards=["globalhighscore", "highestwave"],  # без подчёркиваний — требование Яндекса
             ads_integration={
-                "interstitial": "bridge.advertisement.showInterstitial() с обработчиками",
-                "rewarded": "bridge.advertisement.showRewarded() с начислением награды"
+                "interstitial": "Взводится при завершении забега, показывается по клику на выход с экрана результатов; floor >= платформенного минимума",
+                "rewarded": "Награда только по событию state === 'rewarded'; off() слушателя и защита от повторного вызова",
+                "banner": "Поднят в меню и магазине, скрыт во время игры; на vk/ok — один запрос за сессию"
             },
             lifecycle_hooks=[
-                "Пауза игры и глушение звука при событии `visibility_state_changed: 'hidden'`."
+                "Пауза и звук — через `bridge.platform.on(EVENT_NAME.PAUSE_STATE_CHANGED / AUDIO_STATE_CHANGED)`.",
+                "Колбэк вызывается сразу с текущим значением: игра могла стартовать в скрытой вкладке.",
+                "На возобновлении сбрасывается аккумулятор дельты, dt клампится до 0.1 с.",
+                "Сейв сбрасывается на `pagehide` и `visibilitychange`."
             ]
         )
 
@@ -744,30 +758,50 @@ class LocalAIProvider(AIProvider):
                 ],
                 checklist=[
                     "Стабильные 60 FPS на целевых устройствах.",
-                    "Отсутствие утечек видеопамяти при перезапуске раунда."
-                ]
+                    "Отсутствие утечек видеопамяти при перезапуске раунда.",
+                    "Авто-тюнер качества сходится и фиксируется, а не колеблется."
+                ],
+                knowledge_refs=knowledge.topics_for_renderer(renderer)
             ),
             SkillDoc(
                 skill_id="playgama_skill",
                 name="Интеграция Playgama Bridge SDK",
                 filename="PLAYGAMA_SKILL.md",
-                purpose="Стандарты работы с SDK @playgama/bridge (реклама, облачные сейвы, лидерборды).",
-                when_to_use="При реализации показа видеорекламы, сохранения прогресса и хуков паузы.",
+                purpose="Стандарты работы с SDK @playgama/bridge v2 (реклама, облачные сейвы, лидерборды, авторизация).",
+                when_to_use="При реализации показа видеорекламы, сохранения прогресса, авторизации и хуков паузы.",
                 rules=[
-                    "Всегда дожидаться bridge.initialize() перед обращением к методам рекламы.",
-                    "Глушить мастер-звук и ставить игру на паузу во время показа рекламы.",
-                    "Корректно обрабатывать ошибки показа рекламы без блокировки геймплея."
+                    "Дожидаться bridge.initialize() (с таймаутом) перед любыми вызовами SDK.",
+                    "game_ready отправляется ровно один раз и только после загрузки ассетов и готовности меню.",
+                    "Награда за rewarded начисляется только по событию state === 'rewarded', не по резолву промиса.",
+                    "Сейв — один ключ, один JSON-объект; storage.get/set вызываются без аргумента storageType.",
+                    "authorize() вызывается только по действию игрока (кроме тихой авторизации на vk/ok).",
+                    "UI строится на capability-флагах: кнопка неподдерживаемой функции не рисуется вовсе.",
+                    "Пауза и звук берутся из событий платформы, а не только из visibilitychange."
                 ],
-                architecture="Сервисный синглтон PlaygamaService с поддержкой локального оффлайн-мока.",
-                implementation_guidance="Вызывать bridge.advertisement.showRewardedVideo() с безопасным коллбэком награды.",
+                architecture="Сервисный синглтон PlaygamaService с поддержкой локального оффлайн-мока (platform.id === 'mock').",
+                implementation_guidance=(
+                    "Подписаться на EVENT_NAME.REWARDED_STATE_CHANGED, вызвать "
+                    "bridge.advertisement.showRewarded(placement), снять слушателя в off() и "
+                    "вернуть true только для состояния 'rewarded'. Полный код — "
+                    "knowledge/playgama/ads_integration.md."
+                ),
                 common_mistakes=[
-                    "Никогда не показывать полноэкранную рекламу во время активного боя без предупреждения.",
-                    "Не рассчитывать на постоянное подключение к сети — поддерживать локальное сохранение."
+                    "Отправлять game_ready сразу после initialize() — сплэш снимается над незагруженной игрой.",
+                    "Ждать `await authorize()` внутри загрузки — игра виснет у всех гостей.",
+                    "Определять гостя по player.id/name: у гостя они заполнены, нужен player.isGuest.",
+                    "Начислять награду по резолву showRewarded() — платит за скип и закрытие.",
+                    "Показывать межстраничную рекламу в первые секунды сессии или во время боя.",
+                    "Потреблять покупку до её выдачи — оплаченный товар уничтожается.",
+                    "Хранить настройки в localStorage — в iframe платформы это partitioned-хранилище."
                 ],
                 checklist=[
-                    "Rewarded реклама начисляет обещанную награду.",
-                    "Рекорды сохраняются и отправляются в таблицу лидеров."
-                ]
+                    "Rewarded начисляет ровно одну награду за один ролик даже при двойном клике.",
+                    "Прогресс переживает перезагрузку у гостя и у авторизованного игрока.",
+                    "Битый сейв не роняет игру — старт на дефолтах.",
+                    "Рекорды сохраняются и отправляются в таблицу лидеров.",
+                    "game_ready уходит один раз, после него поднимаются баннеры."
+                ],
+                knowledge_refs=knowledge.CORE_TOPICS
             )
         ]
 

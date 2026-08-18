@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from app import knowledge
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 
@@ -36,7 +37,25 @@ class SkillGenerator:
             when_to_use = getattr(skill, "when_to_use", "During game systems implementation.")
             architecture = getattr(skill, "architecture", "Decoupled modular architecture.")
             guidance = getattr(skill, "implementation_guidance", "Follow standard project practices.")
-            
+
+            # Embed the referenced knowledge verbatim. A skill that only summarises
+            # the knowledge base drifts from it; the coding agent needs the worked-out
+            # detail (and the traps) in the file it is actually reading.
+            refs = getattr(skill, "knowledge_refs", None) or []
+            reference_md = ""
+            if refs:
+                body = knowledge.bundle(refs, heading_level=2)
+                if body:
+                    sources = "\n".join(f"- `knowledge/{r}`" for r in refs)
+                    reference_md = (
+                        "\n\n## Reference Knowledge (verbatim, authoritative)\n"
+                        "Sourced from the factory knowledge base — these rules override any "
+                        "conflicting example, including snippets from the platform docs that "
+                        "describe the deprecated Bridge v1 contract.\n\n"
+                        f"{sources}\n\n{body}\n"
+                    )
+                    log_agent("SkillGenerator", f"Embedded {len(refs)} knowledge file(s) into {safe_filename}")
+
             content = f"""# Skill: {name}
 
 ## Purpose
@@ -59,7 +78,7 @@ class SkillGenerator:
 
 ## Validation Checklist
 {checklist_md}
-"""
+{reference_md}"""
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content.strip() + "\n")
             ctx.generated_files.append(file_path)

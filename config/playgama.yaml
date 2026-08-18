@@ -1,72 +1,106 @@
-# Playgama Bridge Configuration & SDK Best Practices
+# Playgama Bridge — factory defaults (DATA ONLY)
+#
+# This file deliberately contains NO API signatures, method names or code.
+# The API contract lives in exactly one place:
+#
+#     knowledge/playgama/*.md   (see knowledge/README.md)
+#     knowledge/CRITICAL_RULES.md
+#
+# Rationale: this file used to carry its own copy of the SDK surface, drifted to
+# the deprecated Bridge v1 contract (storageType arguments, singular
+# `bridge.leaderboard`, GAME_READY straight after initialize) and then taught
+# those mistakes to every generated package. Duplicating the API is what caused
+# that, so it is not duplicated any more. Add facts to knowledge/, not here.
 
 playgama:
   sdk_name: "Playgama Bridge"
-  cdn_script: "https://cdn.jsdelivr.net/npm/@playgama/bridge@1.x/dist/bridge.min.js"
   npm_package: "@playgama/bridge"
-  version: "1.x"
+  version: "2.x"
+  knowledge_entrypoint: "knowledge/playgama/bridge_api_reference.md"
 
-  modules:
-    advertisement:
-      interstitial:
-        method: "bridge.advertisement.showInterstitial()"
-        state_property: "bridge.advertisement.interstitialState"
-        cooldown_seconds: 90
-        allowed_states: ["loading", "opened", "closed", "failed"]
-        rules:
-          - "Never trigger mid-action or during high-intensity combat"
-          - "Only show between completed waves, run game over, or main menu transitions"
-          - "Check cooldown timer before invoking"
-          - "Mute audio and pause game simulation on 'opened', resume on 'closed'"
-      rewarded:
-        method: "bridge.advertisement.showRewarded()"
-        state_property: "bridge.advertisement.rewardedState"
-        reward_triggers:
-          - id: "revive_run"
-            name: "Second Chance Revive"
-            benefit: "Restore 50% HP + 3s invulnerability once per run"
-          - id: "double_end_gold"
-            name: "Double Run Spoils"
-            benefit: "2x gold earned in current session"
-          - id: "free_upgrade_reroll"
-            name: "Reroll Upgrade Choices"
-            benefit: "Reroll current 3 cards for a guaranteed Rare+"
-          - id: "daily_chest_bonus"
-            name: "Claim Extra Daily Chest"
-            benefit: "Unlock premium gear crate"
+  supported_platforms:
+    - yandex
+    - vk
+    - ok
+    - crazy_games
+    - playgama
+    - msn
+    - android
 
-    storage:
-      methods:
-        get: "bridge.storage.get(keys, storageType)"
-        set: "bridge.storage.set(keys, values, storageType)"
-        delete: "bridge.storage.delete(keys, storageType)"
-      storage_types:
-        local: "StorageType.LOCAL_STORAGE"
-        platform_internal: "StorageType.PLATFORM_INTERNAL"
-      sync_strategy: "Debounced save (2s) on meta state changes, immediate save on run finish/exit"
-      saved_state_keys:
-        - "meta_save_v1"
-        - "audio_settings"
-        - "control_settings"
+  # --- Advertising policy (design decisions, not API) ---------------------
+  advertising:
+    interstitial:
+      # Game-side floor. Must be >= the platform's configured minimum, otherwise
+      # requests are refused and each refusal restarts the clock.
+      min_gap_seconds: 90
+      allowed_moments:
+        - "run/match finished, when the player taps to leave the result screen"
+        - "level complete"
+        - "returning to the main menu"
+        - "closing a shop or inventory overlay"
+      forbidden_moments:
+        - "the first seconds of a session"
+        - "during active gameplay"
+        - "over a screen the player is still reading"
+        - "immediately after a purchase"
+      pattern: "arm on the earning event, flush on the leave click"
 
-    platform:
-      properties:
-        id: "bridge.platform.id" # 'yandex', 'crazy_games', 'vk', 'game_distribution', etc.
-        language: "bridge.platform.language" # 'ru', 'en', 'tr', etc.
-        payload: "bridge.platform.payload"
-      messages:
-        game_ready: "bridge.platform.sendMessage(PlatformMessage.GAME_READY)"
+    rewarded:
+      # Reward is granted by the 'rewarded' state event only — see
+      # knowledge/playgama/ads_integration.md
+      default_placements:
+        - id: "revive_run"
+          name: "Second Chance Revive"
+          benefit: "Restore 50% HP + 3s invulnerability, once per run"
+        - id: "double_end_gold"
+          name: "Double Run Spoils"
+          benefit: "2x gold earned in the current session"
+        - id: "free_upgrade_reroll"
+          name: "Reroll Upgrade Choices"
+          benefit: "Reroll the current 3 cards with a guaranteed Rare+"
+        - id: "daily_chest_bonus"
+          name: "Claim Extra Daily Chest"
+          benefit: "Unlock a premium gear crate"
 
-    device:
-      properties:
-        type: "bridge.device.type" # 'mobile', 'tablet', 'desktop'
+    banner:
+      shown_on: ["main menu", "shop", "result screens"]
+      hidden_on: ["active gameplay"]
+      single_request_platforms: ["vk", "ok"]   # one request per session, never refresh
 
-    leaderboard:
-      methods:
-        set_score: "bridge.leaderboard.setScore(options)"
-        get_entries: "bridge.leaderboard.getEntries(options)"
+  # --- Save policy -------------------------------------------------------
+  storage:
+    # ONE key holding ONE JSON object. Multiple top-level keys break atomicity
+    # and are the split-brain bug this factory keeps re-fixing.
+    save_key_template: "{slug}_save_v1"
+    contains:
+      - "progression (currency, unlocks, records)"
+      - "premium/purchase ownership"
+      - "settings (music, sfx, mute, language)"
+    write_policy: "debounce 1.5s, flush immediately on pagehide/visibilitychange"
+    local_storage_role: "mirror only — it is partitioned third-party storage in the platform iframe"
 
-    social:
-      methods:
-        share: "bridge.social.share(options)"
-        invite: "bridge.social.invite(options)"
+  # --- Leaderboards ------------------------------------------------------
+  leaderboards:
+    id_rules:
+      - "letters and digits only — Yandex rejects underscores"
+      - "must be registered in the platform console before publishing; the bridge fails silently otherwise"
+      - "always add an explicit per-platform override, even when identical"
+    default_boards:
+      - "globalhighscore"
+      - "highestwave"
+
+  # --- Payments ----------------------------------------------------------
+  payments:
+    rules:
+      - "consume by product id, never by purchase token"
+      - "check unprocessed purchases every launch: grant first, consume second"
+      - "prices always come from the platform catalog, never hardcoded"
+      - "VK requires numeric item ids as config overrides"
+      - "when payments are unsupported, paid items render as free — no locks, no prices"
+
+  # --- Compliance --------------------------------------------------------
+  compliance:
+    audio_api: "Web Audio API only — an <audio> element trips Yandex 1.6.1.6 / 1.6.2.5"
+    page_lock_required: true
+    safe_area_required: true
+    reference: "knowledge/compliance/yandex_moderation.md"

@@ -27,29 +27,57 @@ Rewarded ads must always be **opt-in**, **high-value**, and **respect player age
 - **Offer**: Instant unlock of gear chest containing weapons or cosmetics.
 - **Cooldown**: 4 hours or once per calendar day.
 
-## Technical Implementation with Playgama Bridge
+## Technical Implementation
+
+The promise from `showRewarded()` resolves on skip and close too — granting the
+reward there pays out for free. Grant it from the `rewarded` **event** only, and
+always unsubscribe. Full implementation with the double-click guard:
+`../playgama/ads_integration.md`.
+
 ```typescript
 async function showRewardedPlacement(placementId: string, onReward: () => void) {
-    if (!bridge.advertisement.isRewardedSupported) {
-        console.warn('Rewarded ads not supported on this platform');
-        return;
-    }
-    
-    // Pause audio and game loop
-    AudioManager.pauseAll();
-    GameLoop.pause();
-    
-    try {
-        await bridge.advertisement.showRewarded();
-        // Give reward upon successful completion
+    if (!AdsService.isRewardedSupported()) return;   // button should not exist at all — see below
+
+    const granted = await AdsService.showRewardedOnce(placementId);  // event-based, single-flight
+    if (granted) {
         onReward();
         SaveService.saveDebounced();
-    } catch (error) {
-        console.warn('Rewarded ad failed or closed prematurely', error);
-    } finally {
-        // Resume audio and game loop
-        AudioManager.resumeAll();
-        GameLoop.resume();
+    } else {
+        showToast(t('rewardNotGranted'));
     }
 }
 ```
+
+Pausing the game loop and audio around the ad is handled by the platform's own
+`PAUSE_STATE_CHANGED` / `AUDIO_STATE_CHANGED` events, not by wrapping the call —
+see `../playgama/lifecycle_and_orientation.md`. Doing both double-pauses the
+game and leaves it paused when the ad fails to open.
+
+## Button UX is a requirement, not polish
+
+A button that triggers a rewarded ad must **visually say so** before the player
+presses it. A bare "Hint" or "Extra Life" label is not enough.
+
+- Two-line button: main label + a small "watch ad" sub-label, plus a distinct
+  border/accent colour and a 📺 marker.
+- If the same button is reused in a free context (tutorial, premium owner),
+  switch it back to the plain label.
+- If `isRewardedSupported` is false, **remove the button** — do not disable it.
+
+## Never a random gate
+
+If a feature can be sped up with a rewarded ad, show the option whenever the
+action is eligible (`timeLeft >= threshold`), never behind `Math.random() < 0.3`.
+A random gate means most sessions never see the offer at all.
+
+## Cap ad-assist
+
+"Short by a few coins? Watch an ad" is strong — but cap it (≤10 % of a typical
+session's income) so one ad can never cover a purchase meant to take real
+playtime. Never offer ad-assist on the expensive tier.
+
+## Premium players keep rewarded ads
+
+Removing ads means removing *interruptions* — interstitials and banners.
+Rewarded ads stay: they are opt-in and beneficial. Only strip them if the premium
+tier is explicitly sold as "no ads at all".

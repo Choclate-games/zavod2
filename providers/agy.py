@@ -149,144 +149,262 @@ class AGYProvider(AIProvider):
         self.fallback = LocalAIProvider()
         self.quota_tracker = AGYQuotaTracker()
 
+    def resolve_cli(self) -> Optional[str]:
+        """Возвращает абсолютный путь к исполняемому файлу agy или None."""
+        cli = shutil.which(self.cli_path)
+        if cli:
+            return cli
+        candidate = Path(self.cli_path).expanduser()
+        if candidate.exists() and candidate.is_file():
+            return str(candidate)
+        # Стандартное расположение установщика Antigravity на Windows
+        if sys.platform == "win32":
+            default = Path(os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe"))
+            if default.exists():
+                return str(default)
+        return None
+
     def is_available(self) -> bool:
         """Проверка доступности исполняемого файла agy."""
-        cli = shutil.which(self.cli_path)
-        if not cli and self.cli_path != "agy":
-            cli = self.cli_path if Path(self.cli_path).exists() else None
-        return cli is not None
+        return self.resolve_cli() is not None
 
     def _build_command(
         self,
         prompt: str,
         output_format: str = "text",
         yolo: Optional[bool] = None,
-        print_timeout: Optional[str] = "20m0s"
+        print_timeout: Optional[str] = "20m0s",
+        with_effort: bool = True
     ) -> list[str]:
         use_yolo = self.yolo if yolo is None else yolo
-        cmd = [self.cli_path, "-p", prompt, "--output-format", output_format]
+        cmd = [self.resolve_cli() or self.cli_path, "-p", prompt, "--output-format", output_format]
         if print_timeout:
             cmd.extend(["--print-timeout", print_timeout])
         if use_yolo:
             cmd.append("--dangerously-skip-permissions")
-        if self.model and self.model != "inherit":
+        has_model = bool(self.model and self.model != "inherit")
+        if has_model:
             cmd.extend(["--model", self.model])
-        if self.effort and self.effort in ("low", "medium", "high"):
+        # `--effort` принимается не всеми моделями: без явно выбранной модели AGY
+        # отвечает «invalid model selection ... --effort is not supported for the
+        # current model», поэтому по умолчанию флаг не передаём.
+        if with_effort and has_model and self.effort in ("low", "medium", "high"):
             cmd.extend(["--effort", self.effort])
         return cmd
 
-    def _format_stream_event(self, line: str) -> Optional[str]:
-        """Парсит stream-json событие от AGY и форматирует его в читаемый лог для GUI."""
+    @staticmethod
+    def _is_effort_rejection(text: str) -> bool:
+        low = (text or "").lower()
+        return "effort" in low and ("not supported" in low or "invalid model selection" in low)
+
+    _TOOL_TITLES = {
+        "write_to_file": ("Создание файла", "TargetFile"),
+        "replace_file_content": ("Правка файла", "TargetFile"),
+        "multi_replace_file_content": ("Правка файла", "TargetFile"),
+        "run_command": ("Выполнение команды", "CommandLine"),
+        "view_file": ("Чтение файла", "AbsolutePath"),
+        "list_dir": ("Просмотр каталога", "DirectoryPath"),
+        "grep_search": ("Поиск в файлах", "Query"),
+        "codebase_search": ("Семантический поиск", "Query"),
+        "search_web": ("Поиск в интернете", "query"),
+    }
+
+    @staticmethod
+    def _as_float(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def parse_stream_event(self, line: str) -> Optional[Dict[str, Any]]:
+        """
+        Разбирает одну строку stream-json от AGY в структурированное событие.
+
+        Возвращает dict с ключом `kind`: assistant | tool | tool_result |
+        meta | system | result | raw — либо None, если строку показывать не нужно.
+        """
         line = line.strip()
         if not line:
             return None
         if not line.startswith("{"):
-            return line + "\n"
+            return {"kind": "raw", "text": line}
 
         try:
             data = json.loads(line)
+        except Exception:
+            return {"kind": "raw", "text": line}
+
+        try:
             event = data.get("event")
 
             if event == "init":
-                init_data = data.get("init", {})
-                cwd = init_data.get("cwd", "")
-                return f"⚡ [AGY Init] Сессия AGY запущена в: {cwd}\n"
+                cwd = data.get("init", {}).get("cwd", "")
+                return {"kind": "system", "icon": "⚡", "text": f"Сессия AGY запущена в: {cwd}"}
 
-            elif event == "step_update":
+            if event == "step_update":
                 su = data.get("step_update", {})
                 stype = su.get("step_type")
                 state = su.get("state")
                 tool_name = su.get("tool_name")
-                tool_info = su.get("tool_info", {})
+                tool_info = su.get("tool_info") or {}
                 text_delta = su.get("text_delta")
 
                 if text_delta:
-                    return text_delta
+                    return {"kind": "assistant", "text": text_delta}
 
                 if stype == "tool" or tool_name:
-                    params = tool_info.get("parameters", {})
+                    params = tool_info.get("parameters") or {}
                     if state == "ACTIVE":
-                        if tool_name == "write_to_file":
-                            target = params.get("TargetFile", "")
-                            desc = params.get("Description", "")
-                            return f"📝 [AGY] Создание файла: {target} ({desc})\n" if desc else f"📝 [AGY] Создание файла: {target}\n"
-                        elif tool_name in ("replace_file_content", "multi_replace_file_content"):
-                            target = params.get("TargetFile", "")
-                            desc = params.get("Description", "")
-                            return f"✏️ [AGY] Правка файла: {target} ({desc})\n" if desc else f"✏️ [AGY] Правка файла: {target}\n"
-                        elif tool_name == "run_command":
-                            cmd = params.get("CommandLine", "")
-                            return f"💻 [AGY] Выполнение команды: {cmd}\n"
-                        elif tool_name == "view_file":
-                            target = params.get("AbsolutePath", "")
-                            return f"🔍 [AGY] Чтение файла: {target}\n"
-                        elif tool_name == "list_dir":
-                            target = params.get("DirectoryPath", "")
-                            return f"📂 [AGY] Просмотр каталога: {target}\n"
-                        elif tool_name == "grep_search":
-                            q = params.get("Query", "")
-                            return f"🔎 [AGY] Поиск в файлах: '{q}'\n"
+                        title, key = self._TOOL_TITLES.get(tool_name, (None, None))
+                        if title:
+                            detail = str(params.get(key, "") or "")
+                            desc = str(params.get("Description", "") or "")
+                            if desc and desc != detail:
+                                detail = f"{detail}\n{desc}" if detail else desc
                         else:
-                            param_str = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
-                            return f"🔧 [AGY] Инструмент: {tool_name}({param_str})\n"
-                    elif state == "DONE":
-                        duration = su.get("duration_seconds", 0)
-                        output = tool_info.get("output", "")
-                        if output and len(str(output).strip()) > 0:
-                            out_clean = str(output).strip().replace("\r", "")
-                            if len(out_clean) > 250:
-                                out_clean = out_clean[:250] + "..."
-                            return f"   ↪ Результат: {out_clean} ({duration:.2f}s)\n"
-                        return f"   ↪ Завершено ({duration:.2f}s)\n"
+                            title = f"Инструмент: {tool_name}"
+                            detail = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
+                        return {"kind": "tool", "tool": tool_name, "title": title, "detail": detail}
 
-                elif stype == "agent_response":
-                    usage = su.get("usage", {})
-                    out_tok = usage.get("output_tokens", 0)
-                    dur = su.get("duration_seconds", 0)
-                    if state == "DONE" and out_tok > 0:
-                        return f"💭 [AGY Model] Ответ сгенерирован ({out_tok} токенов, {dur:.2f}s)\n"
+                    if state == "DONE":
+                        duration = self._as_float(su.get("duration_seconds"))
+                        output = str(tool_info.get("output", "") or "").strip().replace("\r", "")
+                        if len(output) > 400:
+                            output = output[:400] + "…"
+                        return {
+                            "kind": "tool_result",
+                            "text": output,
+                            "meta": f"{duration:.2f}s",
+                        }
 
-            elif event == "result":
+                if stype == "error_message":
+                    if state not in (None, "DONE"):
+                        return None
+                    message = ""
+                    for key in ("error_message", "message", "error", "text", "content", "text_delta"):
+                        value = su.get(key)
+                        if isinstance(value, str) and value.strip():
+                            message = value.strip()
+                            break
+                        if isinstance(value, dict):
+                            nested = value.get("message") or value.get("text")
+                            if isinstance(nested, str) and nested.strip():
+                                message = nested.strip()
+                                break
+                    if not message:
+                        # Форма шага неизвестна — показываем всё полезное, что в нём есть
+                        noise = {"conversation_id", "step_index", "state", "step_type"}
+                        payload = {k: v for k, v in su.items() if k not in noise and v not in (None, "", {}, [])}
+                        message = json.dumps(payload, ensure_ascii=False)[:1200] or "AGY сообщил об ошибке без описания."
+                    return {"kind": "error", "text": message}
+
+                if stype == "agent_response" and state == "DONE":
+                    usage = su.get("usage") or {}
+                    out_tok = usage.get("output_tokens", 0) or 0
+                    dur = self._as_float(su.get("duration_seconds"))
+                    if out_tok:
+                        return {"kind": "meta", "text": f"💭 Ответ сгенерирован · {out_tok} токенов · {dur:.2f}s"}
+                return None
+
+            if event == "result":
                 res = data.get("result", {})
-                status = res.get("status", "SUCCESS")
-                response = res.get("response", "")
-                usage = res.get("usage", {})
-                dur = res.get("duration_seconds", 0)
-                total_tok = usage.get("total_tokens", 0)
+                usage = res.get("usage") or {}
+                status = str(res.get("status", "SUCCESS"))
+                error = (res.get("error") or "").strip()
+                if status.upper() == "ERROR" or error:
+                    return {"kind": "error", "text": error or "AGY вернул статус ERROR без описания."}
+                return {
+                    "kind": "result",
+                    "status": status,
+                    "text": (res.get("response") or "").strip(),
+                    "tokens": usage.get("total_tokens", 0) or 0,
+                    "duration": f"{self._as_float(res.get('duration_seconds')):.2f}s",
+                }
 
-                msg = f"\n{'═'*50}\n✅ [AGY Result] Статус: {status} | Всего токенов: {total_tok} | Время: {dur:.2f}s\n{'═'*50}\n"
-                if response and response.strip():
-                    msg += f"\n{response.strip()}\n"
-                return msg
+            if event == "error":
+                err = data.get("error") or {}
+                message = err.get("message") if isinstance(err, dict) else str(err)
+                return {"kind": "error", "text": message or line}
 
-        except Exception:
-            return line + "\n"
+        except Exception as exc:
+            return {"kind": "raw", "text": f"{line}  [parse: {exc}]"}
 
         return None
+
+    @staticmethod
+    def event_to_text(event: Dict[str, Any]) -> Optional[str]:
+        """Плоское текстовое представление события (для обычного лога)."""
+        kind = event.get("kind")
+        if kind == "assistant":
+            return event.get("text", "")
+        if kind == "system":
+            return f"{event.get('icon', '⚙')} [AGY] {event.get('text', '')}\n"
+        if kind == "tool":
+            detail = (event.get("detail") or "").replace("\n", " · ")
+            return f"🔧 [AGY] {event.get('title', '')}: {detail}\n"
+        if kind == "tool_result":
+            text = event.get("text") or "готово"
+            return f"   ↪ {text} ({event.get('meta', '')})\n"
+        if kind == "meta":
+            return f"{event.get('text', '')}\n"
+        if kind == "result":
+            head = (
+                f"\n{'═'*50}\n✅ [AGY Result] Статус: {event.get('status')} | "
+                f"Токенов: {event.get('tokens')} | Время: {event.get('duration')}\n{'═'*50}\n"
+            )
+            body = event.get("text") or ""
+            return head + (f"\n{body}\n" if body else "")
+        if kind == "error":
+            return f"❌ [AGY] {event.get('text', '')}\n"
+        text = event.get("text") or ""
+        return (text + "\n") if text else None
+
+    def _format_stream_event(self, line: str) -> Optional[str]:
+        """Парсит stream-json событие от AGY и форматирует его в читаемый лог для GUI."""
+        event = self.parse_stream_event(line)
+        if event is None:
+            return None
+        return self.event_to_text(event)
 
     def _run_agy(self, prompt: str, output_format: str = "text", yolo: Optional[bool] = None, cwd: Optional[Path] = None) -> str:
         if not self.is_available():
             raise RuntimeError(f"Исполняемый файл Antigravity CLI '{self.cli_path}' не найден в PATH.")
 
-        cmd = self._build_command(prompt, output_format=output_format, yolo=yolo, print_timeout="10m0s")
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=self.timeout_seconds,
-            cwd=str(cwd) if cwd else None,
-            env=env
-        )
+        work_dir = str(Path(cwd).resolve()) if cwd and Path(cwd).is_dir() else None
+
+        def attempt(with_effort: bool):
+            cmd = self._build_command(
+                prompt, output_format=output_format, yolo=yolo,
+                print_timeout="10m0s", with_effort=with_effort
+            )
+            try:
+                return subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=self.timeout_seconds,
+                    cwd=work_dir,
+                    env=env
+                )
+            except OSError as exc:
+                raise RuntimeError(f"Не удалось запустить AGY CLI '{cmd[0]}': {exc}") from exc
+
+        result = attempt(with_effort=True)
+
+        # AGY отклоняет --effort для моделей, которые его не поддерживают — повторяем без него
+        if result.returncode != 0 and self._is_effort_rejection(f"{result.stdout}\n{result.stderr}"):
+            result = attempt(with_effort=False)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
 
         if result.returncode != 0:
-            err_msg = result.stderr.strip() or f"Процесс завершился с кодом {result.returncode}"
+            err_msg = (result.stderr or "").strip() or (result.stdout or "").strip()[-500:] \
+                or f"Процесс завершился с кодом {result.returncode}"
             raise RuntimeError(f"AGY CLI ошибка выполнения: {err_msg}")
 
         return result.stdout.strip()
@@ -294,79 +412,224 @@ class AGYProvider(AIProvider):
     def stream_run(
         self,
         prompt: str,
-        on_line: Callable[[str], None],
+        on_line: Optional[Callable[[str], None]] = None,
         yolo: Optional[bool] = None,
         cwd: Optional[Path] = None,
-        stop_check_fn: Optional[Callable[[], bool]] = None
+        stop_check_fn: Optional[Callable[[], bool]] = None,
+        on_event: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> tuple[int, str]:
-        """Запускает задачу в agy с потоковым stream-json выводом всех действий и ответов в реальном времени."""
+        """
+        Запускает задачу в agy с потоковым stream-json выводом.
+
+        `on_line`  — получает готовые строки лога (старый API).
+        `on_event` — получает структурированные события для чат-терминала.
+        """
         import io
         import time
 
-        if not self.is_available():
-            raise RuntimeError(f"Antigravity CLI '{self.cli_path}' не найден.")
+        cli = self.resolve_cli()
+        if not cli:
+            raise RuntimeError(
+                f"Antigravity CLI не найден: '{self.cli_path}'.\n"
+                f"Проверьте, что agy установлен и доступен в PATH "
+                f"(или задайте полный путь в переменной AGY_CLI_PATH)."
+            )
 
-        # Используем stream-json для получения всех промежуточных событий и действий
-        cmd = self._build_command(prompt, output_format="stream-json", yolo=yolo, print_timeout="25m0s")
+        def emit(event: Dict[str, Any]) -> None:
+            if on_event:
+                on_event(event)
+            if on_line:
+                text = self.event_to_text(event)
+                if text:
+                    on_line(text)
+
+        # Рабочий каталог: если проекта ещё нет — запускаемся из текущего,
+        # иначе Popen падает с NotADirectoryError ещё до старта CLI.
+        work_dir = None
+        if cwd:
+            cwd_path = Path(cwd)
+            if cwd_path.is_dir():
+                work_dir = str(cwd_path.resolve())
+            else:
+                emit({"kind": "system", "icon": "⚠️",
+                      "text": f"Каталог проекта не найден: {cwd_path} — запуск из {os.getcwd()}"})
+
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            bufsize=0,
-            creationflags=creationflags
-        )
+        def attempt(with_effort: bool) -> tuple[int, str, bool, bool]:
+            """Один прогон CLI. Возвращает (код, вывод, остановлен, отклонён_effort)."""
+            cmd = self._build_command(
+                prompt, output_format="stream-json", yolo=yolo,
+                print_timeout="25m0s", with_effort=with_effort
+            )
+            cmd[0] = cli
+            shown_cmd = " ".join(
+                ["agy", "-p", f"<промпт {len(prompt)} симв.>"] + [str(a) for a in cmd[3:]]
+            )
+            emit({"kind": "system", "icon": "▶", "text": shown_cmd})
 
-        collected = []
-        reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    cwd=work_dir,
+                    env=env,
+                    bufsize=0,
+                    creationflags=creationflags
+                )
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Не удалось запустить AGY CLI ({cli}): {exc}\nКоманда: {shown_cmd}"
+                ) from exc
 
-        try:
-            while True:
-                if stop_check_fn and stop_check_fn():
-                    proc.kill()
-                    on_line("\n⏹️ Процесс принудительно остановлен.\n")
-                    break
+            collected: List[str] = []
+            reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
+            stopped = False
+            effort_rejected = False
+            reported_error = False
 
-                line = reader.readline()
-                if not line:
-                    if proc.poll() is not None:
+            try:
+                while True:
+                    if stop_check_fn and stop_check_fn():
+                        stopped = True
+                        proc.kill()
+                        emit({"kind": "system", "icon": "⏹️", "text": "Процесс принудительно остановлен."})
                         break
-                    time.sleep(0.02)
-                    continue
 
-                collected.append(line)
-                formatted = self._format_stream_event(line)
-                if formatted:
-                    on_line(formatted)
+                    line = reader.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(0.02)
+                        continue
 
-        finally:
-            if proc.stdout and not proc.stdout.closed:
-                try:
-                    proc.stdout.close()
-                except Exception:
-                    pass
-            proc.wait()
+                    collected.append(line)
+                    event = self.parse_stream_event(line)
+                    if not event:
+                        continue
+                    # Отказ из-за --effort гасим: сейчас будет автоматический ретрай
+                    if event.get("kind") == "error":
+                        if with_effort and self._is_effort_rejection(event.get("text", "")):
+                            effort_rejected = True
+                            continue
+                        reported_error = True
+                    emit(event)
+            finally:
+                if proc.stdout and not proc.stdout.closed:
+                    try:
+                        proc.stdout.close()
+                    except Exception:
+                        pass
+                proc.wait()
+
+            raw = "".join(collected)
+            if effort_rejected:
+                return proc.returncode, raw, stopped, True
+
+            if proc.returncode not in (0, None) and not stopped:
+                if reported_error:
+                    # Причина уже показана отдельной карточкой — не дублируем её сырым JSON
+                    emit({"kind": "system", "icon": "⚠️",
+                          "text": f"AGY CLI завершился с кодом {proc.returncode}."})
+                else:
+                    tail = raw.strip()
+                    tail = tail[-800:] if tail else "(CLI не вернул ни одной строки вывода)"
+                    emit({
+                        "kind": "error",
+                        "text": f"AGY CLI завершился с кодом {proc.returncode}.\nКоманда: {shown_cmd}\n\n{tail}",
+                    })
+
+            return proc.returncode, raw, stopped, False
+
+        code, raw, stopped, effort_rejected = attempt(with_effort=True)
+
+        if effort_rejected and not stopped:
+            emit({"kind": "system", "icon": "♻️",
+                  "text": f"Модель не поддерживает --effort «{self.effort}» — повторяю запуск без него."})
+            code, raw, stopped, _ = attempt(with_effort=False)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
-        return proc.returncode, "".join(collected)
+        return code, raw
 
-    def launch_interactive_terminal(self, project_dir: Optional[Path] = None, prompt: Optional[str] = None, yolo: bool = True):
-        """Открывает отдельное интерактивное окно терминала Windows с запущенным agy в режиме YOLO."""
-        cwd = str(project_dir.resolve()) if project_dir and project_dir.exists() else os.getcwd()
+    def list_models(self, timeout_seconds: int = 60) -> Dict[str, Any]:
+        """
+        Запрашивает у CLI список доступных моделей (`agy models`).
+
+        Возвращает {"status": "success"|"error", "models": [...], "message": str}.
+        Список моделей приходит с сервера Antigravity, поэтому при проблемах
+        с авторизацией CLI отвечает таймаутом — это отражается в message.
+        """
+        cli = self.resolve_cli()
+        if not cli:
+            return {"status": "error", "models": [], "message": f"CLI '{self.cli_path}' не найден."}
+
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+        try:
+            result = subprocess.run(
+                [cli, "models"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=timeout_seconds, env=env, creationflags=creationflags
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "models": [],
+                    "message": "CLI не ответил за отведённое время."}
+        except OSError as exc:
+            return {"status": "error", "models": [], "message": str(exc)}
+
+        raw = f"{result.stdout}\n{result.stderr}"
+        models: List[str] = []
+        for line in raw.splitlines():
+            text = line.strip().lstrip("*-•> ").strip()
+            if not text or text.lower().startswith(("fetching", "error", "usage", "flags", "available models")):
+                continue
+            token = text.split()[0].strip(",:")
+            # Идентификатор модели: буквы/цифры/.-_ и хотя бы один дефис или точка
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{2,60}", token) and re.search(r"[.-]", token):
+                if token not in models:
+                    models.append(token)
+
+        if models:
+            return {"status": "success", "models": models, "message": f"Найдено моделей: {len(models)}"}
+
+        message = raw.strip().splitlines()
+        return {
+            "status": "error",
+            "models": [],
+            "message": (message[-1] if message else "CLI не вернул список моделей."),
+        }
+
+    def launch_interactive_terminal(
+        self,
+        project_dir: Optional[Path] = None,
+        prompt: Optional[str] = None,
+        yolo: bool = True,
+        bare: bool = False
+    ):
+        """
+        Открывает отдельное интерактивное окно терминала Windows с запущенным agy.
+
+        `bare=True` — запуск без стартового промпта: нужен, чтобы выполнить /login,
+        так как в print-режиме (`-p`) вход в аккаунт сделать нельзя.
+        """
+        cwd = str(project_dir.resolve()) if project_dir and project_dir.is_dir() else os.getcwd()
         yolo_flag = "--dangerously-skip-permissions" if yolo else ""
-        
-        if prompt:
+        exe = self.resolve_cli() or self.cli_path
+        exe_part = f'"{exe}"' if " " in exe else exe
+
+        if bare:
+            cmd_part = exe_part
+        elif prompt:
             clean_prompt = prompt.replace('"', '""').replace('\n', ' ').replace('\r', '')[:1200]
-            cmd_part = f'agy {yolo_flag} -i "{clean_prompt}"'
+            cmd_part = f'{exe_part} {yolo_flag} -i "{clean_prompt}"'
         else:
-            cmd_part = f'agy {yolo_flag} -i "Привет! Начни разработку игры по спецификации."'
+            cmd_part = f'{exe_part} {yolo_flag} -i "Привет! Начни разработку игры по спецификации."'
             
         if sys.platform == "win32":
             script = f'chcp 65001 > nul & cd /d "{cwd}" & {cmd_part}'

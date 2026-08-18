@@ -43,7 +43,9 @@ class AppConfig:
         self.opencode_model = os.getenv("OPENCODE_MODEL", "opencode-zen")
         self.agy_cli_path = os.getenv("AGY_CLI_PATH", "agy")
         self.agy_model = os.getenv("AGY_MODEL", "")
-        self.agy_effort = os.getenv("AGY_EFFORT", "high")
+        # Пусто = не передавать --effort: модель по умолчанию его не принимает
+        # ("invalid model selection: --effort is not supported for the current model")
+        self.agy_effort = os.getenv("AGY_EFFORT", "")
         self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
         self.gui_port = int(os.getenv("GUI_PORT", "7860"))
 

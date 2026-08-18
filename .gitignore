@@ -1,6 +1,7 @@
 # Generated outputs and artifacts
 output/
 outputs/
+workspace/
 out/
 
 # Python
