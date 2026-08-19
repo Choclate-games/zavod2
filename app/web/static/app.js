@@ -386,7 +386,12 @@ async function selectProject(slug) {
 function docTabButtons() {
   const box = $("doc-tabs");
   box.innerHTML = "";
-  const tabs = [...state.boot.doc_tabs, { key: "__preview", label: "🎨 Превью" }, { key: "__rebuild", label: "🔄 Ребилд" }];
+  const tabs = [
+    { key: "__designos", label: "🧠 Design OS" },
+    ...state.boot.doc_tabs,
+    { key: "__preview", label: "🎨 Превью" },
+    { key: "__rebuild", label: "🔄 Ребилд" },
+  ];
   tabs.forEach((tab) => {
     const btn = el("button", `tab ${tab.key === state.doc ? "active" : ""}`, esc(tab.label));
     btn.onclick = () => openDoc(tab.key);
@@ -400,6 +405,7 @@ async function openDoc(key) {
   const view = $("doc-view");
   if (!state.project) { view.innerHTML = '<div class="muted">Выберите проект.</div>'; return; }
 
+  if (key === "__designos") { renderDesignOsPane(); return; }
   if (key === "__preview") { renderPreviewPane(); return; }
   if (key === "__rebuild") { renderRebuildPane(); return; }
 
@@ -420,6 +426,161 @@ function renderDoc() {
     view.innerHTML = renderMarkdown(state.docContent);
   }
   $("btn-doc-raw").textContent = state.docRaw ? "🎨 Форматированный вид" : "📝 Исходный Markdown";
+}
+
+/* ── Design OS: обещание, допущения, плотность, ворота ────────────────── */
+
+const GATE_LABELS = { pending: "⏳ Ожидают человека", accepted: "✅ Приняты", rejected: "⛔ Отклонены" };
+
+function dosSection(title, subtitle) {
+  const box = el("div", "dos-block");
+  box.appendChild(el("h3", "", esc(title)));
+  if (subtitle) box.appendChild(el("div", "small dim", esc(subtitle)));
+  return box;
+}
+
+function dosTable(headers, rows) {
+  const table = el("table", "dos-table");
+  const head = el("tr");
+  headers.forEach((h) => head.appendChild(el("th", "", esc(h))));
+  table.appendChild(head);
+  rows.forEach((cells) => {
+    const tr = el("tr");
+    cells.forEach((c) => tr.appendChild(el("td", "", c)));
+    table.appendChild(tr);
+  });
+  return table;
+}
+
+async function renderDesignOsPane() {
+  $("doc-actions").classList.add("hidden");
+  const view = $("doc-view");
+  view.className = "doc-view grow";
+  view.innerHTML = '<div class="muted">Загружаю слой Design OS...</div>';
+
+  const data = await api(`/api/projects/${encodeURIComponent(state.project)}/design-os`);
+  view.innerHTML = "";
+  if (!data.available) {
+    view.appendChild(el("div", "muted", esc(data.message || "Слой Design OS недоступен для этого проекта.")));
+    return;
+  }
+
+  // Здоровье проекта
+  const health = data.health || { stats: {}, issues: [], warnings: [] };
+  const healthBox = dosSection("🩺 Здоровье проекта", `Дизайн-ядро: ${data.nucleus || "не выбрано"}`);
+  const stats = el("div", "dos-stats");
+  const s = health.stats || {};
+  [["Допущений", s.assumptions], ["Экспериментов", s.experiments], ["Событий телеметрии", s.telemetry_events],
+   ["Решений", s.decisions], ["Ворот ожидают", s.gates_pending], ["Контракты", s.contracts_ok ? "валидны" : "ошибки"]]
+    .forEach(([label, value]) => {
+      const card = el("div", "dos-stat");
+      card.appendChild(el("div", "dos-stat-value", esc(value ?? "—")));
+      card.appendChild(el("div", "small dim", esc(label)));
+      stats.appendChild(card);
+    });
+  healthBox.appendChild(stats);
+  (health.issues || []).forEach((issue) =>
+    healthBox.appendChild(el("div", "dos-issue", "⛔ " + esc(issue))));
+  (health.warnings || []).forEach((warning) =>
+    healthBox.appendChild(el("div", "dos-warn", "⚠ " + esc(warning))));
+  if (!(health.issues || []).length) healthBox.appendChild(el("div", "dos-ok", "✅ Все допущения покрыты экспериментами, контракты валидны"));
+  view.appendChild(healthBox);
+
+  // Человеческие ворота
+  const gatesBox = dosSection("🚦 Человеческие ворота",
+    "Фабрика проектирует, но необратимые обязательства принимает человек.");
+  (data.gates || []).forEach((gate) => {
+    const row = el("div", `dos-gate ${gate.status}`);
+    row.appendChild(el("div", "dos-gate-title", `${esc(gate.id)} — ${esc(gate.name)}`));
+    row.appendChild(el("div", "small", esc(gate.question)));
+    row.appendChild(el("div", "small dim", `Блокирует: ${esc(gate.blocks)}`));
+    const criteria = el("ul", "dos-criteria");
+    (gate.criteria || []).forEach((c) => criteria.appendChild(el("li", "", esc(c))));
+    row.appendChild(criteria);
+
+    const actions = el("div", "row");
+    actions.appendChild(el("span", "dos-status", esc(GATE_LABELS[gate.status] || gate.status)));
+    const setStatus = async (status) => {
+      const res = await api(`/api/projects/${encodeURIComponent(state.project)}/gates/${encodeURIComponent(gate.id)}`,
+        { body: { status } });
+      toast("Ворота", res.message || "Готово", res.status === "success" ? "ok" : "err");
+      renderDesignOsPane();
+    };
+    if (gate.status !== "accepted") {
+      const accept = el("button", "btn ok small", "✅ Принять");
+      accept.onclick = () => setStatus("accepted");
+      actions.appendChild(accept);
+    }
+    if (gate.status !== "rejected") {
+      const reject = el("button", "btn small", "⛔ Отклонить");
+      reject.onclick = () => setStatus("rejected");
+      actions.appendChild(reject);
+    }
+    if (gate.status !== "pending") {
+      const reset = el("button", "btn small", "↩ Вернуть в ожидание");
+      reset.onclick = () => setStatus("pending");
+      actions.appendChild(reset);
+    }
+    row.appendChild(actions);
+    gatesBox.appendChild(row);
+  });
+  view.appendChild(gatesBox);
+
+  // Обещание игроку
+  const promise = data.promise || {};
+  const promiseBox = dosSection("🤝 Обещание игроку", "Приёмочный критерий, а не маркетинг.");
+  [["Витрина платформы", promise.store_promise], ["Первые 60 секунд", promise.first_session_promise],
+   ["Долгая игра", promise.long_term_promise]].forEach(([title, layer]) => {
+    if (!layer || !layer.claim) return;
+    const card = el("div", "dos-card");
+    card.appendChild(el("div", "dos-gate-title", esc(title)));
+    card.appendChild(el("div", "", esc(layer.claim)));
+    const fails = el("div", "small dim", "Сигналы провала: " + esc((layer.failure_signals || []).join(" · ")));
+    card.appendChild(fails);
+    promiseBox.appendChild(card);
+  });
+  view.appendChild(promiseBox);
+
+  // Плотность впечатлений
+  const density = data.density || {};
+  const densityBox = dosSection("🔥 Плотность первой сессии", density.formula || "");
+  densityBox.appendChild(dosTable(
+    ["Показатель", "Цель"],
+    [["Главный рычаг", esc(density.primary_lever)],
+     ["Тип скуки", esc(density.boredom_type)],
+     ["Значимых решений в минуту", esc(density.md_per_min_target)],
+     ["Время до первого действия", `≤ ${esc(density.time_to_first_action_sec)} с`],
+     ["Время до первой награды", `≤ ${esc(density.time_to_first_reward_sec)} с`]]));
+  if ((density.beats || []).length) {
+    densityBox.appendChild(dosTable(
+      ["Окно", "Что обязано произойти", "Сигнал провала"],
+      density.beats.map((b) => [esc(b.window), esc(b.required_event), esc(b.failure_signal)])));
+  }
+  if ((density.telemetry || []).length) {
+    densityBox.appendChild(el("div", "small dim", "События телеметрии: " +
+      esc(density.telemetry.map((t) => t.name).join(", "))));
+  }
+  view.appendChild(densityBox);
+
+  // Допущения
+  const assumptions = data.assumptions || [];
+  if (assumptions.length) {
+    const box = dosSection("❓ Допущения", "Всё, что не проверено, названо гипотезой, а не фактом.");
+    box.appendChild(dosTable(
+      ["ID", "Допущение", "Уровень", "Влияние", "Что опровергнет"],
+      assumptions.map((a) => [esc(a.id), esc(a.statement), esc(a.ul_level), esc(a.impact), esc(a.falsifier)])));
+    view.appendChild(box);
+  }
+
+  // Решения
+  const decisions = data.decisions || [];
+  if (decisions.length) {
+    const box = dosSection("🧭 Решения и откаты", "Решение без пути отката не принимается.");
+    box.appendChild(dosTable(
+      ["ID", "Решение", "Обратимость", "Откат"],
+      decisions.map((d) => [esc(d.id), esc(d.title), esc(d.reversibility), esc(d.rollback)])));
+    view.appendChild(box);
+  }
 }
 
 async function renderPreviewPane() {

@@ -7,6 +7,7 @@ from app.context import GenerationContext
 from app.logging import console, log_info, log_success, log_error
 from providers.factory import ProviderFactory
 from agents.idea_analyzer import IdeaAnalyzerAgent
+from agents.concept_architect import ConceptArchitectAgent
 from agents.game_designer import GameDesignerAgent
 from agents.reference_analyst import ReferenceAnalystAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
@@ -18,12 +19,17 @@ from agents.art_director import ArtDirectorAgent
 from agents.ux_designer import UXDesignerAgent
 from agents.preview_designer import PreviewDesignerAgent
 from agents.skill_generator import SkillGeneratorAgent
+from agents.experience_density import ExperienceDensityAgent
+from agents.validation_planner import ValidationPlannerAgent
+from agents.decision_recorder import DecisionRecorderAgent
 from agents.critic import SelfCritiqueAgent
 from agents.prompt_compiler import PromptCompilerAgent
 from generators.output_generator import OutputGenerator
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator as SkillGenModule
 from generators.preview_generator import PreviewGenerator
+from generators.contract_generator import ContractGenerator
+from generators.design_os_docs import DESIGN_OS_DOCS
 from validators.output_validator import OutputValidator
 from app.models import GameConcept
 
@@ -67,6 +73,13 @@ class Pipeline:
             t1 = progress.add_task("[magenta]Idea Analyzer: Deconstructing concept and pillars...", total=1)
             IdeaAnalyzerAgent().run(ctx)
             progress.update(t1, completed=1)
+
+            # 1b. Concept Architect: дизайн-ядро и обещание игроку.
+            # Стоит сразу после разбора идеи: всё, что проектируется дальше,
+            # обязано обслуживать выбранное ядро.
+            t1b = progress.add_task("[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...", total=1)
+            ConceptArchitectAgent().run(ctx)
+            progress.update(t1b, completed=1)
 
             # 2. Game Designer
             t2 = progress.add_task("[magenta]Game Designer: Shaping vision, core loop, and session rules...", total=1)
@@ -113,6 +126,12 @@ class Pipeline:
             UXDesignerAgent().run(ctx)
             progress.update(t10, completed=1)
 
+            # 10b. Experience Density: плотность первой сессии и телеметрия.
+            # Запускается после UX, потому что считает нагрузку по реальному HUD.
+            t10b = progress.add_task("[magenta]Experience Density: Плотность первой сессии и телеметрия...", total=1)
+            ExperienceDensityAgent().run(ctx)
+            progress.update(t10b, completed=1)
+
             # 11. Preview Designer
             t11 = progress.add_task("[magenta]Preview Designer: Framing concept screenshot prompt...", total=1)
             PreviewDesignerAgent().run(ctx)
@@ -122,6 +141,16 @@ class Pipeline:
             t12 = progress.add_task("[magenta]Skill Generator: Preparing reusable game-specific skills...", total=1)
             SkillGeneratorAgent().run(ctx)
             progress.update(t12, completed=1)
+
+            # 12b. Validation Planner и журнал решений: что проверяем до продакшена
+            # и где фабрика останавливается и спрашивает человека.
+            t12b = progress.add_task("[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...", total=1)
+            ValidationPlannerAgent().run(ctx)
+            progress.update(t12b, completed=1)
+
+            t12c = progress.add_task("[magenta]Decision Recorder: Решения, откаты и человеческие ворота...", total=1)
+            DecisionRecorderAgent().run(ctx)
+            progress.update(t12c, completed=1)
 
             # 13. Self-Critique Agent
             t13 = progress.add_task("[magenta]Self-Critique Agent: Verifying coherence & Definition of Done...", total=1)
@@ -206,8 +235,23 @@ class Pipeline:
             with open(game_dir / "PLAYGAMA_INTEGRATION.md", "w", encoding="utf-8") as f:
                 f.write(self.doc_gen._gen_playgama(ctx).strip())
             log_success("Updated PLAYGAMA_INTEGRATION.md")
+        elif sec in ["design-os", "design_os", "designos", "validation", "density"]:
+            # Пересборка проверяемого слоя целиком: ядро, плотность, допущения,
+            # решения и ворота считаются вместе — они ссылаются друг на друга.
+            ConceptArchitectAgent().run(ctx)
+            ExperienceDensityAgent().run(ctx)
+            ValidationPlannerAgent().run(ctx)
+            DecisionRecorderAgent().run(ctx)
+            for filename, gen_fn in DESIGN_OS_DOCS.items():
+                with open(game_dir / filename, "w", encoding="utf-8") as f:
+                    f.write(gen_fn(ctx).strip() + "\n")
+            ContractGenerator().generate(ctx)
+            log_success(f"Обновлён слой Design OS: {', '.join(DESIGN_OS_DOCS)}")
         else:
-            log_error(f"Unknown section '{section}'. Available: monetization, architecture, preview, skills, gameplay, playgama")
+            log_error(
+                f"Unknown section '{section}'. Available: monetization, architecture, preview, "
+                "skills, gameplay, playgama, design-os"
+            )
             return
 
         # Recompile prompt and update yaml

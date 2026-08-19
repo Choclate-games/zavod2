@@ -3,6 +3,7 @@ from typing import Dict, Callable
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
+from generators.design_os_docs import DESIGN_OS_DOCS
 
 class DocumentGenerator:
     """Generates the full suite of specialized Game Development Documents in Markdown."""
@@ -33,6 +34,9 @@ class DocumentGenerator:
             "REFERENCE_ANALYSIS.md": self._gen_references,
             "RISKS.md": self._gen_risks,
         }
+        # Слой Design OS: обещание игроку, допущения, плотность впечатлений,
+        # телеметрия, план валидации, решения и человеческие ворота.
+        generators.update(DESIGN_OS_DOCS)
 
         for filename, gen_fn in generators.items():
             content = gen_fn(ctx)

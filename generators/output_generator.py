@@ -9,6 +9,7 @@ from app.logging import log_agent, log_success, log_info
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator
 from generators.preview_generator import PreviewGenerator
+from generators.contract_generator import ContractGenerator
 from agents.prompt_compiler import PromptCompilerAgent
 from app.models import GenerationMetadata
 
@@ -19,6 +20,7 @@ class OutputGenerator:
         self.doc_gen = DocumentGenerator()
         self.skill_gen = SkillGenerator()
         self.preview_gen = PreviewGenerator()
+        self.contract_gen = ContractGenerator()
         self.compiler = PromptCompilerAgent()
 
     def generate_package(self, ctx: GenerationContext) -> Path:
@@ -49,6 +51,11 @@ class OutputGenerator:
 
         # 4. Generate preview prompt and concept screenshot
         self.preview_gen.generate(ctx)
+
+        # 4b. Машинные контракты Design OS (.factory/contracts/*.json).
+        # Пишутся до компиляции промпта: компилятор ссылается на уже принятые
+        # человеком статусы ворот.
+        self.contract_gen.generate(ctx)
 
         # 5. Compile and write AI_DEVELOPER_PROMPT.md
         prompt_content = self.compiler.compile(ctx)
