@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-game-prompt-factory/contracts/validation-plan.schema.json",
+  "title": "Validation Plan",
+  "description": "Минимальные эксперименты, закрывающие самые опасные допущения, и ворота объёма.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "slug",
+    "riskiest_assumption",
+    "smallest_playable_prototype",
+    "experiments",
+    "stop_rule",
+    "scope_gate"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "slug": {
+      "type": "string"
+    },
+    "riskiest_assumption": {
+      "type": "string"
+    },
+    "smallest_playable_prototype": {
+      "type": "string"
+    },
+    "voi_note": {
+      "type": "string"
+    },
+    "stop_rule": {
+      "type": "string"
+    },
+    "experiments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "targets_assumption",
+          "question",
+          "method",
+          "pass_criteria",
+          "fail_criteria"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^EXP-[0-9]{2,}$"
+          },
+          "targets_assumption": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "prototype_scope": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "pass_criteria": {
+            "type": "string"
+          },
+          "fail_criteria": {
+            "type": "string"
+          },
+          "next_step_if_pass": {
+            "type": "string"
+          },
+          "next_step_if_fail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "scope_gate": {
+      "type": "object",
+      "required": [
+        "mvp_must",
+        "cut"
+      ],
+      "properties": {
+        "mvp_must": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "vertical_slice_should": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "after_launch": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "marketing_only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cut": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

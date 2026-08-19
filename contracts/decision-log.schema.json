@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-game-prompt-factory/contracts/decision-log.schema.json",
+  "title": "Decision Log",
+  "description": "Проектные решения с альтернативами, последствиями и путём отката.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "slug",
+    "decisions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "slug": {
+      "type": "string"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "decision",
+          "reversibility",
+          "rollback",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^DEC-[0-9]{2,}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "consequences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reversibility": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "evidence_level": {
+            "type": "string",
+            "enum": [
+              "UL-L0",
+              "UL-L1",
+              "UL-L2",
+              "UL-L3",
+              "UL-L4",
+              "UL-L5"
+            ]
+          },
+          "rollback": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "accepted",
+              "superseded"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

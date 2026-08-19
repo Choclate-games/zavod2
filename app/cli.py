@@ -23,6 +23,7 @@ from app.pipeline import Pipeline
 from app.context import GenerationContext
 from providers.factory import ProviderFactory
 from agents.idea_analyzer import IdeaAnalyzerAgent
+from app import design_os
 
 app = typer.Typer(
     help="AI Game Prompt Factory: Automated Game Design Specification & AI Developer Prompt Generation Pipeline",
@@ -198,6 +199,109 @@ def test_provider(
     else:
         text = prov.generate_text("System", "Ping test. Respond with OK.", max_tokens=10)
         log_success(f"Provider '{provider}' responded: {text[:80]}")
+
+# ---------------------------------------------------------------------------
+# Design OS: проверяемый слой поверх спецификации.
+# ---------------------------------------------------------------------------
+
+def _project_dir(game_id: str, output_dir: Path) -> Path:
+    """Находит каталог проекта по имени папки или части слага."""
+    candidate = output_dir / game_id
+    if candidate.exists():
+        return candidate
+    matches = [p for p in output_dir.glob(f"*{game_id}*") if p.is_dir()]
+    if matches:
+        return matches[0]
+    log_error(f"Проект '{game_id}' не найден в {output_dir}")
+    raise typer.Exit(code=1)
+
+
+@app.command(name="gates", help="Показать человеческие ворота проекта и их статус.")
+def gates(
+    game_id: str = typer.Argument(..., help="Папка проекта или слаг"),
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o")
+):
+    game_dir = _project_dir(game_id, output_dir)
+    items = design_os.gates_summary(game_dir)
+    if not items:
+        console.print("[dim]В проекте нет человеческих ворот (проект сгенерирован старой версией фабрики).[/dim]")
+        return
+
+    table = Table(title=f"Человеческие ворота: {game_dir.name}", header_style="bold magenta")
+    table.add_column("ID", style="cyan")
+    table.add_column("Ворота", style="white")
+    table.add_column("Статус", style="bold")
+    table.add_column("Блокирует", style="yellow")
+    colors = {"pending": "[yellow]ожидают[/yellow]", "accepted": "[green]приняты[/green]", "rejected": "[red]отклонены[/red]"}
+    for gate in items:
+        table.add_row(gate.get("id", ""), gate.get("name", ""), colors.get(gate.get("status", ""), gate.get("status", "")), gate.get("blocks", ""))
+    console.print(table)
+
+
+@app.command(name="gate", help="Принять или отклонить человеческие ворота: gate <проект> <GATE-ID> --status accepted")
+def gate(
+    game_id: str = typer.Argument(..., help="Папка проекта или слаг"),
+    gate_id: str = typer.Argument(..., help="Идентификатор ворот, например GATE-01"),
+    status: str = typer.Option("accepted", "--status", "-s", help="accepted | rejected | pending"),
+    note: str = typer.Option("", "--note", "-n", help="Комментарий решения"),
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o")
+):
+    game_dir = _project_dir(game_id, output_dir)
+    try:
+        result = design_os.set_gate_status(game_dir, gate_id.upper(), status, note)
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        log_error(str(exc))
+        raise typer.Exit(code=1)
+    log_success(f"{gate_id.upper()}: статус '{status}'. Осталось ожидающих ворот: {result['pending']}")
+
+
+@app.command(name="health", help="Скан здоровья проекта: непроверенные допущения, ворота, откаты, контракты.")
+def health(
+    game_id: str = typer.Argument(..., help="Папка проекта или слаг"),
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o")
+):
+    game_dir = _project_dir(game_id, output_dir)
+    report = design_os.health(game_dir)
+
+    table = Table(title=f"Здоровье проекта: {report['slug']}", header_style="bold magenta")
+    table.add_column("Показатель", style="cyan")
+    table.add_column("Значение", style="white")
+    for key, value in report["stats"].items():
+        table.add_row(key, str(value))
+    console.print(table)
+
+    for issue in report["issues"]:
+        log_error(issue)
+    for warning in report["warnings"]:
+        console.print(f"[yellow]⚠ {warning}[/yellow]")
+    if report["ok"]:
+        log_success("Слой Design OS в порядке: все допущения покрыты, контракты валидны.")
+    else:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="contracts", help="Проверить машинные контракты проекта (.factory/contracts) по схемам.")
+def contracts(
+    game_id: str = typer.Argument(..., help="Папка проекта или слаг"),
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o")
+):
+    from validators.contract_validator import validate_project_contracts
+
+    game_dir = _project_dir(game_id, output_dir)
+    report = validate_project_contracts(game_dir)
+
+    table = Table(title=f"Контракты: {game_dir.name}", header_style="bold magenta")
+    table.add_column("Файл", style="cyan")
+    table.add_column("Статус", style="bold")
+    table.add_column("Ошибки", style="yellow")
+    for item in report["results"]:
+        mark = "[green]OK[/green]" if item["status"] == "ok" else f"[red]{item['status']}[/red]"
+        table.add_row(item["file"], mark, "; ".join(item["errors"][:2]))
+    console.print(table)
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+    log_success(f"Все контракты валидны ({report['checked']} файлов).")
+
 
 @app.command(name="gui", help="Launch the native CustomTkinter Desktop GUI.")
 def launch_gui():

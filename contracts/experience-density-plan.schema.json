@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-game-prompt-factory/contracts/experience-density-plan.schema.json",
+  "title": "Experience Density Plan",
+  "description": "План плотности впечатлений первой сессии: ED = MD/min × (SF + EB + AR) / CLP.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "slug",
+    "formula",
+    "theory_status",
+    "primary_lever",
+    "md_per_min_target",
+    "variants",
+    "telemetry",
+    "decision_rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "slug": {
+      "type": "string"
+    },
+    "formula": {
+      "type": "string"
+    },
+    "theory_status": {
+      "type": "string",
+      "enum": [
+        "design_hypothesis",
+        "validated"
+      ]
+    },
+    "metric_model": {
+      "type": "string",
+      "enum": [
+        "web_session",
+        "mobile_liveops",
+        "premium_single_player"
+      ]
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "UL-L0",
+        "UL-L1",
+        "UL-L2",
+        "UL-L3",
+        "UL-L4",
+        "UL-L5"
+      ]
+    },
+    "primary_lever": {
+      "type": "string",
+      "enum": [
+        "MD/min",
+        "SF",
+        "EB",
+        "AR",
+        "CLP",
+        "—"
+      ]
+    },
+    "md_per_min_target": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "time_to_first_action_sec": {
+      "type": "number"
+    },
+    "time_to_first_reward_sec": {
+      "type": "number"
+    },
+    "first_session_beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "window",
+          "required_event",
+          "failure_signal"
+        ],
+        "properties": {
+          "window": {
+            "type": "string"
+          },
+          "player_state": {
+            "type": "string"
+          },
+          "required_event": {
+            "type": "string"
+          },
+          "failure_signal": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "primary_lever",
+          "change",
+          "hypothesis",
+          "success_metric",
+          "rollback_rule"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "primary_lever": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "success_metric": {
+            "type": "string"
+          },
+          "guardrail_metric": {
+            "type": "string"
+          },
+          "rollback_rule": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "trigger",
+          "purpose"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "ties_to": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "dashboard_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decision_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

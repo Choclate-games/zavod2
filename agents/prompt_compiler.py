@@ -79,6 +79,131 @@ class PromptCompilerAgent:
                 return profile
         return "default"
 
+    # ------------------------------------------------------------------
+    # Блоки слоя Design OS для мастер-промпта.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _promise_block(concept) -> str:
+        p = concept.player_promise
+        layers = [
+            ("Витрина платформы", p.store_promise),
+            ("Первые 60 секунд", p.first_session_promise),
+            ("Долгая игра", p.long_term_promise),
+        ]
+        parts = []
+        for title, layer in layers:
+            if not layer.claim:
+                continue
+            evidence = "\n".join(f"  - {item}" for item in layer.expected_evidence)
+            failures = "\n".join(f"  - {item}" for item in layer.failure_signals)
+            parts.append(
+                f"**{title}**: {layer.claim}\n"
+                f"- Должно подтверждаться в билде:\n{evidence}\n"
+                f"- Считается нарушением:\n{failures}"
+            )
+        promise = "\n\n".join(parts) or "_Контракт обещания не задан._"
+        nucleus = concept.selected_nucleus or concept.hook
+        return (
+            f"**Дизайн-ядро проекта**: {nucleus}\n"
+            "Любая система, не обслуживающая это ядро, требует отдельного решения в `DECISIONS.md`.\n\n"
+            f"{promise}"
+        )
+
+    @staticmethod
+    def _density_block(concept) -> str:
+        ed = concept.experience_density
+        beats = "\n".join(
+            f"| {b.window} | {b.required_event} | {b.failure_signal} |" for b in ed.first_session_beats
+        ) or "| — | — | — |"
+        clp = "\n".join(f"- {item}" for item in ed.clp_reducers)
+        feel = "\n".join(f"- {item}" for item in (ed.sf_boosters + ed.eb_boosters))
+        return f"""Модель: `{ed.formula}` (статус: `{ed.theory_status}`).
+
+**Жёсткие показатели первой сессии** — проверяются телеметрией, не на глаз:
+- Первое осмысленное действие доступно не позже **{ed.time_to_first_action_sec} с** после загрузки.
+- Первая награда или явный прогресс — не позже **{ed.time_to_first_reward_sec} с**.
+- Значимых решений игрока — около **{ed.md_per_min_target} в минуту** (решений, а не нажатий).
+
+| Окно | Что обязано произойти | Сигнал провала |
+| --- | --- | --- |
+{beats}
+
+**Снижение когнитивной нагрузки (обязательно):**
+{clp}
+
+**Качество отклика (обязательно):**
+{feel}"""
+
+    @staticmethod
+    def _telemetry_block(concept) -> str:
+        events = concept.experience_density.telemetry
+        rows = "\n".join(
+            f"| `{e.name}` | {e.trigger} | {', '.join(f'`{p}`' for p in e.params) or '—'} |"
+            for e in events
+        ) or "| — | — | — |"
+        return f"""Без этих событий план плотности впечатлений непроверяем, а спецификация
+превращается в мнение. Реализуй модуль `src/telemetry/Telemetry.ts` по контракту из
+[`TELEMETRY_SPEC.md`](./TELEMETRY_SPEC.md).
+
+| Событие | Когда | Параметры |
+| --- | --- | --- |
+{rows}
+
+Правила: `first_action` и `first_reward` — ровно один раз за сессию; отправка не
+блокирует игровой цикл; отсутствие сети не приводит к исключению в геймплее;
+персональные данные не отправляются."""
+
+    @staticmethod
+    def _scope_block(concept) -> str:
+        gate = concept.validation.scope_gate
+        mvp = "\n".join(f"- {item}" for item in gate.mvp_must) or "- (не задано)"
+        cut = "\n".join(f"- {item}" for item in gate.cut) or "- (не задано)"
+        later = "\n".join(f"- {item}" for item in gate.vertical_slice_should) or "- (не задано)"
+        risky = [a for a in concept.assumptions if a.impact == "high" and a.status == "open"]
+        risky_lines = "\n".join(
+            f"- `{a.id}` [{a.ul_level}] {a.statement} — опровергается: {a.falsifier}" for a in risky
+        ) or "- (нет открытых высокорисковых допущений)"
+        return f"""**Обязательно в MVP** (делать в первую очередь):
+{mvp}
+
+**Только после MVP** (не начинать раньше):
+{later}
+
+**Вырезано — не реализовывать без нового решения в `DECISIONS.md`:**
+{cut}
+
+**Открытые высокорисковые допущения** — это гипотезы, а не факты. Если реализация
+показывает обратное, пиши об этом в `DEVLOG.md`, а не подгоняй игру под документ:
+{risky_lines}"""
+
+    @staticmethod
+    def _gates_block(concept) -> str:
+        pending = [g for g in concept.gates if g.status == "pending"]
+        if not pending:
+            return "Все ворота пройдены человеком — блокирующих ограничений нет."
+        lines = "\n".join(
+            f"- **{g.id} — {g.name}**: блокирует {g.blocks.lower()}" for g in pending
+        )
+        return f"""Следующие ворота ещё не подтверждены человеком. Пока статус `pending`,
+работу, которую они блокируют, начинать нельзя: опиши в `DEVLOG.md`, что упёрся в
+ворота, и переходи к незаблокированной задаче. Менять статус ворот самостоятельно
+запрещено — это делает человек в фабрике.
+
+{lines}"""
+
+    @staticmethod
+    def _design_os_dod(concept) -> str:
+        ed = concept.experience_density
+        names = ", ".join(f"`{e.name}`" for e in ed.telemetry[:4])
+        return "\n".join([
+            f"- [ ] Первое осмысленное действие доступно за {ed.time_to_first_action_sec} с, первая награда — за {ed.time_to_first_reward_sec} с (замерено телеметрией)",
+            f"- [ ] Реализованы события телеметрии из TELEMETRY_SPEC.md ({names} и остальные)",
+            "- [ ] Каждое обещание из PLAYER_PROMISE.md подтверждается в билде, ни один сигнал провала не воспроизводится",
+            "- [ ] Реализовано только то, что входит в MVP из VALIDATION_PLAN.md; вырезанное не добавлено",
+            "- [ ] Ни одна задача не пересекла ворота со статусом `pending` из HUMAN_GATES.md",
+        ])
+
     def compile(self, ctx: GenerationContext) -> str:
         concept = ctx.concept
         log_agent("PromptCompiler", f"Compiling definitive AI Developer Prompt for '{concept.title}'")
@@ -121,6 +246,15 @@ class PromptCompilerAgent:
             for phase in concept.roadmap
         ])
 
+        # Слой Design OS. Кодовый агент получает не только «что построить»,
+        # но и «что здесь гипотеза», «чем это измеряется» и «где остановиться».
+        promise_block = self._promise_block(concept)
+        density_block = self._density_block(concept)
+        telemetry_block = self._telemetry_block(concept)
+        scope_block = self._scope_block(concept)
+        gates_block = self._gates_block(concept)
+        dod_items = dod_items + "\n" + self._design_os_dod(concept)
+
         prompt_content = f"""# FINAL AI DEVELOPER PROMPT: {concept.title.upper()} 🎮⚡
 
 > **INSTRUCTION FOR AI CODING AGENT**:
@@ -140,6 +274,14 @@ class PromptCompilerAgent:
 - **Player Fantasy**: {concept.player_fantasy}
 - **Core Hook**: {concept.hook}
 - **Session Model**: {concept.session_model}
+
+---
+
+## 1a. ОБЕЩАНИЕ ИГРОКУ (ПРОВЕРЯЕМЫЙ КОНТРАКТ)
+Это не маркетинг, а приёмочный критерий. Любая реализация, нарушающая обещание
+первых 60 секунд, считается невыполненной задачей, даже если код работает.
+
+{promise_block}
 
 ---
 
@@ -168,6 +310,11 @@ class PromptCompilerAgent:
 ```
 
 {mechanics_items}
+
+---
+
+## 3a. ПЛОТНОСТЬ ПЕРВОЙ СЕССИИ (EXPERIENCE DENSITY)
+{density_block}
 
 ---
 
@@ -335,6 +482,21 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 
 ---
 
+## 8a. ТЕЛЕМЕТРИЯ (ЧАСТЬ DEFINITION OF DONE)
+{telemetry_block}
+
+---
+
+## 8b. ГРАНИЦЫ ОБЪЁМА И ОТКРЫТЫЕ ДОПУЩЕНИЯ
+{scope_block}
+
+---
+
+## 8c. ЧЕЛОВЕЧЕСКИЕ ВОРОТА (ГДЕ ОСТАНОВИТЬСЯ И СПРОСИТЬ)
+{gates_block}
+
+---
+
 ## 9. NON-NEGOTIABLE PLATFORM RULES
 Every rule below corresponds to a bug that reached production or a moderation rejection in a shipped game. They override any conflicting habit, tutorial or example — including snippets found in the Playgama/Yandex docs, many of which describe the deprecated Bridge v1 contract.
 
@@ -369,6 +531,14 @@ For extended deep specifications, refer to the accompanying project documentatio
 - [Monetization Specification](./MONETIZATION.md)
 - [Mobile Controls](./MOBILE_CONTROLS.md)
 - [QA Plan](./QA_PLAN.md)
+- [Обещание игроку (PLAYER_PROMISE.md)](./PLAYER_PROMISE.md)
+- [Дизайн-ядро (DESIGN_NUCLEUS.md)](./DESIGN_NUCLEUS.md)
+- [Плотность впечатлений (EXPERIENCE_DENSITY.md)](./EXPERIENCE_DENSITY.md)
+- [Спецификация телеметрии (TELEMETRY_SPEC.md)](./TELEMETRY_SPEC.md)
+- [Реестр допущений (ASSUMPTIONS.md)](./ASSUMPTIONS.md)
+- [План валидации (VALIDATION_PLAN.md)](./VALIDATION_PLAN.md)
+- [Журнал решений (DECISIONS.md)](./DECISIONS.md)
+- [Человеческие ворота (HUMAN_GATES.md)](./HUMAN_GATES.md)
 - [Game Skill Guidelines](./skills/GAME_SKILL.md)
 - [Renderer Skill](./skills/RENDERER_SKILL.md)
 """
