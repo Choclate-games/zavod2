@@ -432,7 +432,7 @@ Stage (PIXI.Container)
 - **Character Proportions**: {art.character_proportions}
 
 ## 2. Color Palette & Lighting
-{palette_md if palette_md else "Cyber-neon high-contrast game palette"}
+{palette_md if palette_md else "Палитра под сеттинг игры: высокий контраст игрока к фону, спокойный фон, один акцентный цвет на важные события"}
 
 **Lighting Setup**: {art.lighting_setup}
 

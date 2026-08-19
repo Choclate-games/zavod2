@@ -302,6 +302,7 @@ function renderIdeas() {
     head.appendChild(el("span", "badge renderer", esc((idea.renderer || "").toUpperCase())));
     card.appendChild(head);
     card.appendChild(el("div", "hook", `🎯 Hook: ${esc(idea.hook)}`));
+    if (idea.art_style) card.appendChild(el("div", "seed", `🎨 Стиль: ${esc(idea.art_style)}`));
     card.appendChild(el("div", "seed", esc(idea.prompt_seed)));
 
     const take = el("button", "btn small primary", "👉 ВЗЯТЬ В СТУДИЮ");
