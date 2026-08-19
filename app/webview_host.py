@@ -2,7 +2,7 @@
 Хост-процесс для внутреннего браузера на pywebview.
 
 pywebview умеет стартовать только из главного потока, поэтому окно предпросмотра
-запускается отдельным процессом:  python -m app.gui.webview_host <url> [title]
+запускается отдельным процессом:  python -m app.webview_host <url> [title]
 """
 
 import sys

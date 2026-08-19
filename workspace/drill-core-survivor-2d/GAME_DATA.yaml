@@ -1,0 +1,753 @@
+raw_prompt: 'Разработай бесконечный вертикальный 2D рогалик на PixiJS. Игрок непрерывно
+  бурит породу вниз сквозь разрушаемые блоки минералов и взрывчатки. С боков и снизу
+  атакуют монстры. Сбор ресурсов заполняет шкалу крафта для выбора перков: ледяные
+  охладители бура, ядерный таран, автоматические турели. Обильные искры, тряска экрана
+  и сочные звуки разрушения пород.'
+title: 'Бур Судного Дня: Шахтерский Рогалик'
+slug: drill-core-survivor-2d
+genre: Вертикальный 2D экшен-рогалик
+subgenre: Шахтерский выживач / Reverse Tower Defense
+renderer: pixijs
+renderer_reason: User explicitly specified 'pixijs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Mobile Web)
+orientation: portrait
+target_audience: Игроки 16-35 лет, фанаты Dome Keeper, Vampire Survivors, Motherload
+  и мобильных таймкиллеров с сочной физикой разрушений.
+core_loop: Бурение вниз -> Разрушение блоков и сбор кристаллов -> Отбивание волн подземных
+  тварей -> Заполнение шкалы крафта -> Выбор синергетических перков -> Смерть или
+  достижение рекордной глубины -> Мета-прокачка буровой машины.
+hook: Безостановочный адреналиновый спуск в недра планеты, где каждый пробуренный
+  метр создает лавину искр и взрывов, а ресурсы нужно добывать прямо под натиском
+  орд монстров.
+player_fantasy: Пилот несокрушимой высокотехнологичной буровой мехи, превращающей
+  километры монолитного камня, взрывоопасных жил и чудовищных инсектоидов в пыль и
+  ценные ресурсы.
+session_model: Короткие, сверхплотные 4-8 минутные сессии с нарастающей интенсивностью
+  и мгновенным перезапуском.
+unique_value_proposition: Смесь разрушаемого процедурного террейна Motherload и авто-шутерной
+  динамики Vampire Survivors с акцентом на максимальный тактильный 'juice' (screen-shake,
+  искры, сочный звук).
+vision: Создать главный мобильный веб-хит в жанре вертикального шахтерского экшена
+  с непревзойденным ощущением разрушения и глубоким билдостроением.
+elevator_pitch: Управляйте гигантским буром, прогрызающим недра чужой планеты! Взрывайте
+  динамитные пласты, замораживайте перегревающийся бур, устанавливайте турели против
+  роя монстров и прокачивайте свой ядерный таран прямо на лету.
+win_conditions: Преодоление максимальных рубежей глубины (1000м, 2500м, 5000м) и победа
+  над глубинными титанами-боссами каждого биома.
+lose_conditions: Полное истощение очков прочности (HP) бура от атак монстров или детонации
+  взрывоопасных блоков.
+progression_summary: 'Внутри раунда: сбор ресурсов прокачивает уровень и дает выбор
+  из 3 случайных перков. Мета-прогрессия: покупка постоянных модулей в ангаре (базовая
+  броня, радиус магнита, стартовый урон турелей, крит-шанс бурения).'
+difficulty_curve: Экспоненциальный рост плотности пород и агрессии врагов каждые 250
+  метров глубины с появлением мутировавших видов монстров и нестабильных пластов магмы.
+scores:
+  fun: 9
+  originality: 8
+  replayability: 9
+  development_cost: 8
+  visual_appeal: 9
+  mobile_fit: 10
+  monetization: 9
+  platform_fit: 10
+  overall_score: 8.9
+  justification: Портретный формат и интуитивное управление одним пальцем идеально
+    подходят для мобильного веб-трафика. Мощный геймлуп и высокая реиграбельность
+    обеспечивают топовое удержание и монетизацию через рекламу и IAP.
+references:
+- name: Dome Keeper
+  genre: Шахтерский рогалик / Оборона базы
+  mechanics:
+  - Бурение сетки блоков
+  - Сбор руды
+  - Оборона от волн волн
+  - Выбор веток апгрейдов
+  lessons: Удовлетворение от разрушения блоков и звукового оформления добычи ресурсов.
+  what_to_avoid: Медленный темп возврата на базу (в нашем проекте движение только
+    вперед/вниз).
+- name: Vampire Survivors
+  genre: Авто-батлер / Рогалик
+  mechanics:
+  - Автоматическая стрельба
+  - Драфт 3-х карточек при повышении уровня
+  - Экспоненциальные толпы врагов
+  lessons: Мгновенная дофаминовая отдача от синергии перков и уничтожения сотен врагов.
+  what_to_avoid: Визуальный хаос, полностью скрывающий окружение и препятствия.
+- name: Motherload / I Dig It
+  genre: Вертикальная добыча ископаемых
+  mechanics:
+  - Спуск вглубь
+  - Взрывчатка
+  - Перегрев и прочность бура
+  lessons: Увлекательность поиска ценных минералов и рискованных ходов сквозь взрывчатку.
+  what_to_avoid: Рутинный медленный подъем обратно на поверхность.
+mechanics:
+- name: Непрерывное вертикальное бурение
+  category: movement
+  priority: core
+  description: Бур непрерывно движется вниз. Игрок свайпом, джойстиком или клавишами
+    A/D смещает бур влево и вправо, выбирая траекторию сквозь блоки разной твердости.
+  player_interaction: Горизонтальное руление (A/D, стрелки, свайп/тач влево-вправо).
+    Зажатие вниз активирует форсаж тарана.
+  feedback: Импульсная тряска камеры (screen shake), фонтан искр и обломков породы,
+    плотный виброотклик (haptics) и хруст крошащегося камня.
+  technical_complexity: Medium
+  strengths:
+  - Бешеный темп
+  - Легко освоить за 3 секунды
+  - Высокая тактильность
+  weaknesses:
+  - Требует точной настройки скорости камеры, чтобы не укачивало игрока
+- name: Сбор минералов и крафт-драфт
+  category: progression
+  priority: core
+  description: Уничтоженные блоки выбрасывают руду и энерго-кристаллы. Магнит бура
+    притягивает их, заполняя шкалу крафта. При заполнении шкалы игра входит в слоу-мо
+    и предлагает 3 перка на выбор.
+  player_interaction: Притяжение ресурсов корпусом и выбор 1 из 3 карточек перков
+    нажатием пальца/кликом.
+  feedback: Звонкий металлический звук подбора, яркие трассеры частиц в корпус бура,
+    сочная анимация появления карточек с эффектом остановки времени.
+  technical_complexity: Medium
+  strengths:
+  - Непрерывное чувство прогресса
+  - Разнообразие билдов в каждом забеге
+  weaknesses:
+  - Слишком частые паузы могут сбивать динамику (решается замедлением времени вместо
+    полной паузы)
+- name: Оборона от подземных роев
+  category: combat
+  priority: core
+  description: С боковых стен и снизу из недр на бур нападают подземные черви, скальные
+    жуки и летающие споровики. Защита осуществляется авто-турелями, шипами корпуса
+    и активными стихийными эффектами.
+  player_interaction: Позиционирование бура так, чтобы турели имели линию огня, а
+    нападающие снизу монстры попадали прямо под вращающиеся лезвия бура.
+  feedback: Вспышки лазеров, разлетающиеся хитиновые панцири, индикаторы урона и нарастающий
+    тревожный гул приближения роя.
+  technical_complexity: High
+  strengths:
+  - Создает сильное напряжение и выбор между сбором руды и уклонением от врагов
+  weaknesses:
+  - Необходимо оптимизировать логику поиска пути для сотен мобов
+- name: Взрывоопасные и стихийные блоки
+  category: environment
+  priority: secondary
+  description: Порода содержит динамитные жилы, резервуары с лавой, газовые карманы
+    и крио-линзы. Попадание буром или выстрелом вызывает цепные реакции разрушения.
+  player_interaction: Игрок может целиться во взрывчатку, чтобы расчистить путь и
+    уничтожить монстров, но рискует получить урон при близком контакте.
+  feedback: Масштабная вспышка на весь экран, взрывная волна, разрушающая соседние
+    блоки в радиусе, гулкий взрыв с саб-басом.
+  technical_complexity: Medium
+  strengths:
+  - Создает зрелищные моменты риска и награды (risk-reward)
+  - Быстрая очистка экрана
+  weaknesses:
+  - Возможные просадки FPS при взрыве 50+ блоков одновременно (нужен particle pool)
+gameplay_systems:
+- name: Система процедурной генерации пластов породы
+  purpose: Создание бесконечной сбалансированной вертикальной шахты с блоками 5 уровней
+    прочности, минералами, ловушками и пустотами.
+  input: Текущая глубина бурения, сид уровня, коэффициент сложности биома.
+  rules:
+  - Генерация чанками по 16x16 блоков по мере спуска
+  - Шанс появления ценных руд растет с глубиной
+  - Взрывчатка спавнится кластерами от 2 до 6 блоков
+  - Каждые 500 метров генерируется открытая арена с боссом биома
+  state:
+  - active_chunks
+  - destroyed_blocks_mask
+  - current_biome_id
+  - ore_density_modifier
+  interactions: Коллизия с буром отнимает прочность блока; при 0 HP блок спавнит ресурсы
+    и частицы.
+  feedback: Треснувшие текстуры блоков перед полным разрушением, звуковой тон повышается
+    при твердой породе.
+  edge_cases:
+  - 'Непроходимый монолит: всегда гарантирован хотя бы 1 проходимый коридор шириной
+    в бур'
+  - Удаление верхних чанков из памяти для предотвращения утечек RAM
+- name: Система перков и модификаций бура
+  purpose: Предоставление игроку синергетических улучшений в стиле Roguelite во время
+    раунда.
+  input: Накопленный опыт/ресурсы, пул разблокированных перков.
+  rules:
+  - 3 случайных перка на драфт с шансом выпадения Редких и Легендарных
+  - 'Ветви развития: Охлаждение/Лед (замедление врагов, защита от перегрева), Ядерная
+    мощь (урон по площади, разрушение камня), Технологии дронов (авто-турели, сборщики)'
+  - Эволюция перков при достижении 5 уровня слиянием двух базовых умений
+  state:
+  - equipped_perks_map
+  - current_craft_xp
+  - xp_to_next_perk
+  - active_synergies
+  interactions: Влияет на скорость бурения, количество стволов турелей, радиус крио-ауры
+    и урон тарана.
+  feedback: Визуальное изменение внешнего вида буровой мехи (добавление пушек, ледяной
+    покров, неоновое свечение).
+  edge_cases:
+  - 'Исчерпание пула перков: выдавать универсальный бонус к ремонту корпуса или золоту'
+- name: Система тактильного отклика и сочности (Game Feel & Juice)
+  purpose: Обеспечение максимального аудиовизуального удовлетворения от каждого действия
+    игрока.
+  input: События коллизии бура, разрушения блоков, убийства врагов, взрывов.
+  rules:
+  - Screen Shake пропорционален твердости разрушенного блока и силе взрыва
+  - Hitstop (микро-фриз на 1-2 кадра) при ударе по элитным врагам и крепким породам
+  - Динамический зум камеры при активации ускорения/тарана
+  - Пул частиц переиспользует спрайты без создания garbage collection (GC)
+  state:
+  - shake_intensity
+  - camera_zoom_offset
+  - active_particle_count
+  - hitstop_timer
+  interactions: Модулирует положение камеры PixiJS Container и воспроизводит аудио-сэмплы
+    через Web Audio.
+  feedback: Плавный и одновременно взрывной отклик экрана на кончиках пальцев.
+  edge_cases:
+  - Снижение интенсивности тряски на слабых устройствах через настройки
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite
+  renderer: pixijs
+  renderer_version: ^8.0.0
+  physics_engine: Matter.js (^0.19.0)
+  state_manager: Легковесный реактивный EventEmitter + Store на базе сигналов
+  audio_engine: Howler.js с пулом Web Audio API каналов
+  target_fps: 60
+  max_draw_calls: 25
+  max_triangles_or_sprites: 3500
+  bundle_size_budget_mb: 2.8
+  layers:
+  - name: BackgroundLayer
+    zIndex: 0
+    description: Параллакс темных пластов подземных пещер и магматических жил
+  - name: TerrainLayer
+    zIndex: 10
+    description: Блоки породы, руда, взрывчатка, отрисовываемые через ParticleContainer
+      / Tilemap
+  - name: DropLayer
+    zIndex: 20
+    description: Выпавшие кристаллы, шестеренки и подбираемые бонусы с магнитной физикой
+  - name: EnemiesLayer
+    zIndex: 30
+    description: Спрайты подземных жуков, червей и боссов с анимацией атаки
+  - name: PlayerLayer
+    zIndex: 40
+    description: Меха бура, анимированные фрезы, турели и лазерные лучи
+  - name: VFXLayer
+    zIndex: 50
+    description: Искры, дым, вспышки взрывов, следы льда и ударные волны
+  - name: UILayer
+    zIndex: 100
+    description: 'HUD: шкала глубины, HP, шкала крафта, карточки перков, оверлеи'
+  modules:
+  - name: GameEngine
+    description: Управление главным циклом (Ticker), переключение состояний (State
+      Machine)
+  - name: ChunkManager
+    description: Бесшовный спавн, переиспользование и очистка 2D тайловых чанков породы
+  - name: DrillController
+    description: Физика движения бура, расчет урона по блокам, перегрев и управление
+  - name: EnemySpawner
+    description: Контроль волн врагов в зависимости от пройденной глубины и событий
+  - name: PerkManager
+    description: Логика синергий, драфта карточек и модификаторов характеристик бура
+  - name: JuiceSystem
+    description: Управление Screen Shake, Hitstop, Particle Emitters и звуковыми триггерами
+  - name: BridgeIntegration
+    description: 'Обвязка Playgama SDK: реклама, облачные сохранения, лидерборды,
+      локализация'
+monetization:
+  strategy_summary: 'Гибридная гипер-казуальная/мидкорная модель: мягкая ненавязчивая
+    межстраничная реклама с таймером, ценные Rewarded видео (второй шанс, удвоение
+    добычи) и IAP на покупку постоянных скинов и премиум-буров.'
+  rewarded_placements:
+  - id: revive_run
+    name: Аварийный перезапуск реактора (Revive)
+    benefit: Воскрешение бура с 100% HP, взрывной волной, очищающей экран от врагов
+      и блоков, и 3 секундами неуязвимости.
+    cooldown_or_limit: 1 раз за забег
+    trigger_moment: Экран смерти при достижении глубины более 150 метров.
+  - id: double_gold
+    name: Удвоитель кристаллов экспедиции
+    benefit: Умножение собранных за спуск мета-кристаллов на 2.
+    cooldown_or_limit: После каждого успешного забега
+    trigger_moment: Экран результатов забега.
+  - id: starter_perk
+    name: Орбитальный контейнер
+    benefit: Выбор 1 бесплатного редкого перка перед началом спуска.
+    cooldown_or_limit: 1 раз в 10 минут
+    trigger_moment: Главное меню перед стартом забега.
+  interstitial_placements:
+  - trigger_event: Возврат в главное меню после гибели
+    cooldown_seconds: 90
+    conditions: Показывается только если игрок не воспользовался Rewarded Revive и
+      забег длился более 45 секунд.
+  - trigger_event: Переход между крупными биомами (после победы над боссом)
+    cooldown_seconds: 120
+    conditions: Только при паузе между фазами с предварительным предупреждением 'Чекпоинт
+      пройден'.
+  in_app_purchases:
+  - sku: no_ads_pack
+    name: Набор 'Комфортное бурение' (No Ads)
+    description: Полное отключение межстраничной рекламы + постоянный бонус +15% к
+      сбору ресурсов.
+    price_tier: tier_2_usd
+    reward: Отключение Interstitials, 1500 темных кристаллов, эксклюзивный золотой
+      скин бура.
+  - sku: titan_drill_pack
+    name: Меха 'Титан Недр'
+    description: Разблокировка мощного бура с предустановленными тяжелыми спаренными
+      пулеметами.
+    price_tier: tier_3_usd
+    reward: Уникальный корпус бура, +20% к базовой скорости разрушения камней.
+  - sku: crystals_chest
+    name: Сундук Темной Материи
+    description: Большой запас валюты для мгновенной прокачки всех модулей в ангаре.
+    price_tier: tier_1_usd
+    reward: 10 000 кристаллов мета-прогрессии.
+  fairness_rules:
+  - Любой апгрейд и скин можно открыть упорным геймплеем без доната
+  - Реклама никогда не прерывает активное управление посреди геймплея
+  - Смерть игрока никогда не навязывается искусственными пейволами
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - ok
+  - crazygames
+  - gamepix
+  - telegram
+  initialization_flow:
+  - Инициализация PlaygamaBridge.init() при старте страницы
+  - Загрузка сохраненного JSON прогресса игрока через bridge.storage.get()
+  - Проверка языка интерфейса через bridge.platform.language и автоподстановка Ru/En
+  - Предзагрузка рекламных баннеров и проверка готовности Rewarded видео
+  - Скрытие загрузочного экрана (Loader) и запуск стартового экрана
+  cloud_save_keys:
+  - player_meta_upgrades
+  - unlocked_drill_skins
+  - max_depth_record
+  - total_crystals_balance
+  - audio_settings
+  - onboarding_completed
+  leaderboards:
+  - max_depth_leaderboard
+  - bosses_slain_leaderboard
+  ads_integration:
+    banner_supported: true
+    banner_position: bottom
+    rewarded_auto_reload: true
+    interstitial_cooldown_sync: true
+  lifecycle_hooks:
+  - window.onblur / bridge.gameplay.pause -> автопауза физического мира и приглушение
+    звука
+  - window.onfocus / bridge.gameplay.resume -> возобновление тикера PixiJS
+  - bridge.advertisement.onOpen -> глушение Master Audio Volume
+  - bridge.advertisement.onClose -> восстановление звука и плавный возврат
+art:
+  style_name: Неоновый дизельпанк / Сочный сай-фай пиксель-арт высокого разрешения
+  camera_perspective: 2D Top-Down / Скроллер сверху вниз с динамическим слежением
+    за носом бура
+  camera_fov: 50
+  camera_pitch_angle: 0
+  environment_theme: 'Мрачные подземные слои планеты: от базальтовых плит до светящихся
+    кристаллических пещер, магматических разломов и древних био-гнезд.'
+  character_proportions: Массивная, агрессивная бронированная буровая машина с крупными
+    вращающимися роторными зубьями и видимыми модулями вооружения.
+  lighting_setup: 'Динамические 2D источники света: яркие конусы передних фар бура,
+    раскаленное оранжевое свечение трещин породы и неоновые вспышки кристаллов.'
+  color_palette:
+    background_dark: '#0d0e15'
+    rock_dirt: '#2c221e'
+    iron_ore: '#5a6988'
+    energy_crystal: '#00f0ff'
+    magma_lava: '#ff4200'
+    explosive_tnt: '#ff1a40'
+    player_metal: '#f0c430'
+    alien_blood: '#39ff14'
+  vfx_list:
+  - Веер ярких желто-оранжевых искр от трения бура о твердую породу
+  - Разлетающиеся гравитационные осколки разрушенных блоков (Debris)
+  - Сгустки дыма и огненные круги взрывных волн с искажением (Shockwave)
+  - Крио-морозная аура с ледяными кристаллами вокруг корпуса
+  - Импульсные вспышки лазерных выстрелов и трассеры пулеметов
+  - Светящиеся шлейфы кристаллов опыта, притягивающихся магнитом
+  ui_theme: Индустриальный сай-фай интерфейс с металлическими панелями, голографическими
+    неоновыми датчиками и сочной казуальной типографикой.
+ui_ux:
+  hud_elements:
+  - Вертикальная шкала глубины (справа с отметками рекорда)
+  - Индикатор прочности бура (HP Bar) и датчик температуры реактора (сверху слева)
+  - Шкала наполнения крафт-энергии (по центру сверху)
+  - Счетчик собранных за забег кристаллов (сверху справа)
+  - Индикаторы активных перков и уровней их прокачки (иконки под HP баром)
+  screens:
+  - name: StartScreen
+    description: Ангар с кастомизацией бура, кнопка 'В забой!', магазин мета-прокачки,
+      топ игроков и настройки.
+  - name: GameScreen
+    description: Активный экран бурения с чистым обзором, HUD элементами и зоной управления.
+  - name: DraftPerkModal
+    description: Всплывающее окно выбора из 3 перков с замедлением времени, подробным
+      описанием бонусов и кнопкой реролла.
+  - name: GameOverModal
+    description: Статистика спуска (глубина, убито врагов, добыто руды), кнопка воскрешения
+      за рекламу и возврат в ангар.
+  mobile_controls_layout: Плавающий виртуальный джойстик в нижней половине экрана
+    или прямое управление горизонтальным движением перетаскиванием (Drag to Move)
+    + кнопка активации супер-тарана.
+  keyboard_controls:
+    KeyA / ArrowLeft: Смещение бура влево
+    KeyD / ArrowRight: Смещение бура вправо
+    KeyS / ArrowDown / Space: Активация ускоренного тарана вниз
+    KeyP / Escape: Пауза
+  touch_controls:
+    touch_drag: Горизонтальное перемещение пальцем влево-вправо
+    swipe_down: Импульс тарана вниз сквозь породу
+    tap_perk: Выбор карточки улучшения
+  wireframes_ascii: '+---------------------------------------+
+
+    | [HP: ======]  [CRAFT XP: =====] ($940)|
+
+    | (Lv.3 Ice / Lv.2 Turret)   [Depth:450m]|
+
+    |                                       |
+
+    |       [==== ROCK ====] [TNT!]         |
+
+    |       [ORE]  [ROCK]   [ROCK]          |
+
+    |                 \|/                   |
+
+    |             [###DRILL###]             |
+
+    |            <=== [o_o] ===>            |
+
+    |                 / | \                 |
+
+    |             *SPARKS* *FX*             |
+
+    |      (Alien)   [ROCK]    (Alien)      |
+
+    |       /\         ||        /\         |
+
+    |                                       |
+
+    |                                       |
+
+    |       [--- TOUCH / SWIPE ZONE ---]    |
+
+    +---------------------------------------+'
+mobile:
+  orientation: portrait
+  touch_implementation: Отзывчивый Drag-to-Steer с интерполяцией положения бура и
+    нулевой задержкой отклика для максимальной точности маневрирования между динамитом.
+  safe_area_handling: Автоматический CSS padding-top / padding-bottom через env(safe-area-inset)
+    для вырезов экранов iPhone и Android.
+  performance_throttling:
+  - Автоматическое снижение количества частиц искр с 120 до 40 при падении FPS ниже
+    50
+  - Отключение вторичных пост-эффектов свечения (bloom) на бюджетных мобильных устройствах
+  - Ограничение частоты обновления сетки физики фиксированным шагом (Fixed Timestep
+    60Hz)
+audio:
+  music_tracks:
+  - cyber_miner_main_theme.mp3 - ритмичный бодрый synthwave/industrial бит
+  - deep_core_boss_theme.mp3 - тяжелые индустриальные риффы с нарастающим темпом
+  sound_effects:
+    drill_loop: Низкий монотонный рев мощного электрического двигателя бура с модуляцией
+      питча
+    rock_crumble: Хрустящий сочный звук раскалывающегося камня и гранита
+    crystal_pickup: Мелодичный стеклянно-металлический перезвон с вариациями тональности
+      (+pitch)
+    tnt_explosion: Оглушительный бас взрыва с эхом в замкнутом пространстве
+    monster_hit: Чавкающий звук пробития хитина и био-визги при попадании под бур
+    perk_draft_appear: Энергетический 'вуш' с остановкой времени
+    turret_shot: Сухой скорострельный треск плазменных орудий
+  audio_manager_features:
+  - Автоматическое выравнивание громкости и защита от клиппинга при одновременных
+    20+ звуках
+  - Динамический Low-Pass фильтр во время паузы и драфта карточек перков
+qa:
+  functional_tests:
+  - Корректность генерации и разрушения блоков без дыр в сетке коллизий
+  - 'Безотказный драфт перков: применение эффектов модификаторов (лед, урон, радиус)'
+  - Работа Revive за рекламу с сохранением текущей глубины и счета
+  - Корректность синхронизации рекорда глубины с лидербордом Playgama
+  performance_benchmarks:
+  - Стабильные 60 FPS на смартфонах уровня Redmi Note 8 / iPhone 8
+  - Время начальной загрузки игры менее 2.5 секунд при 3G соединении
+  - Потребление оперативной памяти вкладки браузера не более 95 МБ
+  cross_browser_matrix:
+  - Chrome Mobile (Android 10+)
+  - Safari iOS (iOS 14+)
+  - Yandex Browser Desktop & Mobile
+  - VK In-App WebView (Android/iOS)
+  common_bug_checklist:
+  - Залипание звука бурения при потере фокуса окна
+  - Проваливание бура сквозь неразрушенные блоки при резком скачке лага
+  - Утечка спрайтов частиц в памяти при частых взрывах
+  - Блокировка интерфейса при недоступности рекламного SDK
+roadmap:
+- phase_number: 1
+  title: Прототип бурения и воксельного разрушения
+  duration_days: 2
+  tasks:
+  - Инициализация Vite + PixiJS v8 проекта
+  - Создание генератора вертикального пласта блоков и системы AABB коллизий
+  - Базовое управление буром (влево/вправо/таран) и расчет урона по блокам
+  - Интеграция базового Particle Emitter для искр и осколков
+  milestone_deliverable: Играбельный прототип спуска бура с разрушением пород и тряской
+    экрана.
+- phase_number: 2
+  title: Боевая система и рогалик-драфт перков
+  duration_days: 3
+  tasks:
+  - Спавн врагов, преследование и атака бура с боков и снизу
+  - Система выпадения кристаллов, магнит ресурсов и заполнение шкалы крафта
+  - Интерфейс драфта перков (Заморозка, Турели, Ядерный таран)
+  - Реализация активных эффектов оружия и синергий
+  milestone_deliverable: Полноценный геймплейный цикл выживания с прокачкой билда
+    на лету.
+- phase_number: 3
+  title: Интеграция Playgama Bridge, Мета и Полировка
+  duration_days: 2
+  tasks:
+  - Подключение @playgama/bridge (Реклама, Облако, Лидерборды)
+  - Главное меню, ангар мета-прокачки и магазин буров
+  - Финальный саунд-дизайн, сочные шейдерные эффекты и мобильная оптимизация
+  - Тестирование на реальных мобильных устройствах в Яндекс Играх
+  milestone_deliverable: Готовая к релизу игра, соответствующая всем требованиям платформы.
+risks:
+- risk: Просадка производительности на слабых мобилках при одновременном взрыве десятков
+    блоков и спавне частиц.
+  category: technical
+  severity: Medium
+  mitigation: Использование ParticleContainer в PixiJS, фиксированный пул объектов
+    (Object Pool) для спрайтов и лимит одновременных частиц.
+- risk: Быстрое надоедание однообразного вертикального спуска.
+  category: design
+  severity: High
+  mitigation: Введение 4 уникальных биомов с разными механиками (лед скользит, лава
+    греет бур, споры травят), мини-боссов и редких секретных тайников.
+- risk: Отказ или задержка ответа рекламного SDK при вызове Revive.
+  category: integration
+  severity: Low
+  mitigation: Fallback таймаут на 2 секунды с сохранением возможности закрыть окно
+    без зависания игры.
+skills:
+- skill_id: pixijs_performance_tuning
+  name: Оптимизация рендеринга и пулинга в PixiJS
+  filename: pixijs-tuning.md
+  purpose: Обеспечение стабильных 60 FPS при интенсивном разрушении блоков и потоке
+    частиц.
+  when_to_use: При разработке систем частиц, тайловых карт и спавна врагов.
+  rules:
+  - Никогда не создавать объекты через new PIXI.Sprite() в update-цикле
+  - Использовать единый Texture Atlas для всех блоков и элементов HUD
+  - Отсекать невидимые чанки за пределами экрана (Frustum Culling)
+  architecture: Статический ObjectPoolManager с предсозданными 200 частицами и 100
+    блоками породы.
+  implementation_guidance: Группировать разрушаемые тайлы в единый ParticleContainer
+    или использовать кастомную сетку вершин Mesh.
+  common_mistakes:
+  - Утечка текстур при динамической генерации
+  - Использование тяжелых фильтров PIXI на мобильных устройствах
+  checklist:
+  - Draw calls не превышают 25
+  - GC не срабатывает во время активного бурения
+  - Текстурный атлас сжат в WebP
+  knowledge_refs:
+  - https://pixijs.com/guides
+  - https://github.com/pixijs/pixijs
+- skill_id: game_skill
+  name: 'Бур Судного Дня: Шахтерский Рогалик Domain Architecture'
+  filename: GAME_SKILL.md
+  purpose: 'Defines domain rules, state machine, and core gameplay loop for Бур Судного
+    Дня: Шахтерский Рогалик.'
+  when_to_use: Use when writing or modifying core game state, loop coordination, and
+    progression.
+  rules:
+  - Strict TypeScript strict mode without any 'any' types.
+  - Fixed 60Hz delta accumulator with delta clamping.
+  - Decoupled state management via typed EventBus.
+  - Zero runtime object allocations inside the 60Hz game loop.
+  architecture: 'Decoupled 3-layer architecture: Application/Platform -> Engine/Systems
+    -> Rendering/UI.'
+  implementation_guidance: Instantiate Game instance from main.ts, bootstrap PlaygamaService,
+    and start GameLoop.
+  common_mistakes:
+  - Do not instantiate Three.js meshes or heavy objects inside tick loops.
+  - Do not bypass the EventBus for cross-system communications.
+  checklist:
+  - Game initializes cleanly and loads within 3 seconds.
+  - EventBus routes inputs and system events without memory leaks.
+  - Audio auto-pauses and unpauses cleanly with browser focus changes.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Combat, Physics & Movement Systems
+  filename: GAMEPLAY_SKILL.md
+  purpose: Defines standards for physics simulation, combat mechanics, and tactile
+    player feedback.
+  when_to_use: Use when writing character controllers, weapon systems, collision listeners,
+    and juice/VFX.
+  rules:
+  - Clamp delta time to maximum 100ms to prevent physics tunneling.
+  - Use continuous collision detection (CCD) for fast projectiles.
+  - Apply hitstop (40ms time dilation) on impactful strikes.
+  - Always synchronize physics rigid body transforms to mesh representations.
+  architecture: Physics engine (Rapier3D/Matter.js) stepped on fixed 60Hz timestep,
+    meshes interpolated.
+  implementation_guidance: Use EventBus to emit 'entity:hit', 'combat:parry', 'wave:cleared'
+    events for sound and VFX triggers.
+  common_mistakes:
+  - Never modify transform matrices directly on physics-controlled entities.
+  - Do not hardcode magic numbers for damage or velocities without centralized configuration.
+  checklist:
+  - Player movement is responsive with no input lag.
+  - Hits produce satisfying sensory feedback (VFX spark, screen shake, audio impact).
+  - Ragdoll or death animations trigger smoothly without physics jitter.
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: PIXIJS WebGL Performance Guide
+  filename: RENDERER_SKILL.md
+  purpose: Optimization and visual standards for PIXIJS WebGL pipeline.
+  when_to_use: Use when configuring scenes, cameras, lighting, materials, instanced
+    meshes, and particle systems.
+  rules:
+  - Keep active draw calls strictly under 80.
+  - Use InstancedMesh for debris, bullets, and crowd mobs.
+  - Clamp pixel ratio to Math.min(window.devicePixelRatio, 1.5) on mobile.
+  - Share material instances across identical geometry.
+  architecture: Scene graph with pre-allocated sprite and mesh pools, dynamic shadow
+    frustum optimization.
+  implementation_guidance: Initialize renderer with antialias enabled on desktop,
+    powerPreference 'high-performance'.
+  common_mistakes:
+  - Do not construct new Geometries, Textures, or Materials in the render loop.
+  - Do not leave unused GPU assets without calling .dispose().
+  - Do not tune quality from raw frame time — under vsync every frame reads as budget-length.
+  - Do not launch in reduced quality and climb up; start optimistic and step down.
+  checklist:
+  - Maintains solid 60 FPS on desktop and >= 50 FPS on mobile.
+  - No WebGL context loss errors on tab switches.
+  - Shadow map renders crisp without artifact acne.
+  - The quality auto-tuner converges and locks instead of oscillating.
+  knowledge_refs:
+  - pixijs/particle_systems.md
+  - pixijs/sprite_batching.md
+- skill_id: playgama_skill
+  name: Playgama Bridge SDK Integration
+  filename: PLAYGAMA_SKILL.md
+  purpose: Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage,
+    Auth, Leaderboards, Lifecycle).
+  when_to_use: Use when implementing advertising triggers, cloud save/load, authorization,
+    and portal lifecycle hooks.
+  rules:
+  - Always await bridge.initialize() (with a timeout) before any other SDK call.
+  - Send game_ready exactly once, only after assets are loaded and the menu is interactive.
+  - Grant a rewarded reward only on state === 'rewarded'; never when the promise resolves.
+  - One save key holding one JSON object; storage.get/set take no storageType argument.
+  - Call authorize() only from a player action — except the silent VK/OK path at boot.
+  - 'Build UI on capability flags: an unsupported feature''s control is not rendered
+    at all.'
+  - Take pause and audio state from the platform's own events, not visibilitychange
+    alone.
+  - Auto-save on progress milestones and flush on pagehide.
+  architecture: Singleton PlaygamaService wrapper exposing strongly-typed promises
+    for Ads, Storage, Auth, Payments and Leaderboards, degrading to a local mock when
+    window.bridge is absent.
+  implementation_guidance: Subscribe to EVENT_NAME.REWARDED_STATE_CHANGED, call bridge.advertisement.showRewarded(placement),
+    remove the listener in cleanup, and resolve true only for the 'rewarded' state.
+    Full implementations for every module are embedded below.
+  common_mistakes:
+  - Sending game_ready right after initialize() — the splash lifts over an unloaded
+    game.
+  - Awaiting a dialog-showing authorize() inside boot — the game hangs for every guest.
+  - Detecting a guest via player.id/name; they are populated for guests, use player.isGuest.
+  - Showing an interstitial in the first seconds of a session or during gameplay.
+  - Consuming a purchase before granting it — paid goods are destroyed.
+  - Keeping settings in localStorage — it is partitioned inside the platform iframe.
+  - Never assume internet connection is permanent — support local offline fallback.
+  checklist:
+  - Rewarded grants exactly one reward per view, even on a double click.
+  - Progress survives a reload as guest and as an authorized player.
+  - A corrupted save boots on defaults instead of crashing.
+  - Leaderboard score submits and displays correctly.
+  - Game auto-pauses on the platform's pause event, including during ads.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Бур Судного Дня: Шахтерский
+  Рогалик'', a Вертикальный 2D экшен-рогалик game. Visual style: Неоновый дизельпанк
+  / Сочный сай-фай пиксель-арт высокого разрешения. Camera perspective: 2D Top-Down
+  / Скроллер сверху вниз с динамическим слежением за носом бура. Environment: Мрачные
+  подземные слои планеты: от базальтовых плит до светящихся кристаллических пещер,
+  магматических разломов и древних био-гнезд.. Central Action: The player character
+  (Пилот несокрушимой высокотехнологичной буровой мехи, превращ...) is actively engaging
+  enemies in combat, striking with visible weapon trail arcs and dynamic particle
+  sparks at the impact point. An enemy is reeling with physics momentum. Visible in-game
+  HUD overlay: health bar at top-left, wave and enemies remaining at top-center, gold
+  counter at top-right, crowd hype gauge at bottom-center, and touch action controls
+  at bottom corners. Crisp lighting: Динамические 2D источники света: яркие конусы
+  передних фар бура, раскаленное оранжевое свечение трещин породы и неоновые вспышки
+  кристаллов., high visual clarity, immersive WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Вертикальное бесконечное бурение работает плавно на 60 FPS на мобильных и десктопных
+  браузерах
+- Система разрушения блоков генерирует искры, обломки и звук сочного разрушения
+- Шкала крафта корректно открывает драфт из 3 перков с заморозкой, тараном и турелями
+- Враги спавнятся волнами и получают урон от оружия и самого бура
+- Интеграция Playgama Bridge обеспечивает показ рекламы, сохранение рекордов и поддержку
+  локализации
+- Полный цикл мета-прогрессии сохраняется в облачном хранилище

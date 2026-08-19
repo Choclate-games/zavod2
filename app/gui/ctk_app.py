@@ -17,7 +17,7 @@ from app.context import GenerationContext
 from app.models import GameConcept
 from app.pipeline import Pipeline
 from app import sandbox, chat_store, notify
-from app.gui.game_runner import DevServer, detect_start_command, open_internal_browser
+from app.game_runner import DevServer, detect_start_command, open_internal_browser
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
 from providers.cli_agents import AGENT_CLASSES, make_cli_agent
