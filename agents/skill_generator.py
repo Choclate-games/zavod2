@@ -204,4 +204,92 @@ class SkillGeneratorAgent:
                 knowledge_refs=["ux/touch_controls.md"]
             ))
 
+        if "vehicle_skill" not in skill_ids and self._is_driving_game(ctx):
+            # Машину агент раньше писал «по мотивам» общего физического скилла и
+            # стабильно получал бокс с приклеенными колёсами: setLinvel каждый
+            # кадр, колёса вне иерархии кузова, груз в спавне внутри коллайдера.
+            # Отдельный скилл с встроенной базой знаний закрывает этот пробел.
+            log_agent("SkillGenerator", "Injecting core skill: vehicle_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="vehicle_skill",
+                name="Physics Vehicle & Cargo Controller",
+                filename="VEHICLE_SKILL.md",
+                purpose=(
+                    "Задаёт обязательную архитектуру машины на физике: raycast-подвеска, "
+                    "риг колёс внутри кузова, составной коллайдер с бортами и груз, "
+                    "который остаётся в кузове."
+                ),
+                when_to_use=(
+                    "Use for any drivable vehicle: truck, car, buggy, tank, mech. "
+                    "Read before writing the first line of the vehicle controller."
+                ),
+                rules=[
+                    "Кузов — один RigidBody + DynamicRayCastVehicleController; колёса это лучи подвески, а не тела.",
+                    "Никогда не назначать скорость кузову каждый кадр (setLinvel) — это затирает солвер.",
+                    "updateVehicle(dt) вызывается ДО world.step(), лучи колёс фильтруются на группу грунта.",
+                    "Визуальные колёса — дети группы кузова; ход подвески, руль и качение читаются у контроллера.",
+                    "Одна группа — одна степень свободы: steer-группа рулит, вложенная spin-группа катится.",
+                    "Борта кузова — часть составного коллайдера; груз спавнится в локальных осях кузова без пересечений.",
+                    "Рестарт заезда телепортирует существующие тела, а не пересобирает сцену.",
+                    "Габариты, массы и тюнинг лежат в одном модуле без импорта рендера — по нему гоняется хедлесс-проверка.",
+                ],
+                architecture=(
+                    "TruckController владеет chassis RigidBody, составным коллайдером (рама, кабина, "
+                    "борта) и vehicle controller'ом. Группа кузова синхронизируется с телом целиком "
+                    "(позиция И кватернион), риги колёс висят на ней. CargoManager спавнит груз по "
+                    "слотам в локальных осях кузова и гасит выпавшие тела через setEnabled(false)."
+                ),
+                implementation_guidance=(
+                    "Тюнинг подвески считается, а не подбирается: статическая просадка ≈ gravity / stiffness, "
+                    "restLength берётся заметно больше просадки. Тяга — спад силы к максималке "
+                    "(force * (1 - speed / maxSpeed)), а не жёсткий клэмп скорости, иначе рельеф "
+                    "перестаёт влиять на игру. Полный разбор с цифрами и ловушками API — в "
+                    "разделе Reference Knowledge ниже."
+                ),
+                common_mistakes=[
+                    "setLinvel каждый кадр: машина едет вдоль мировой оси, подвески нет, колёса — декорация.",
+                    "Отдельный wheelRoot, копирующий только translation() — колёса отваливаются от кузова.",
+                    "Луч колеса без фильтра групп — машина встаёт на собственный груз и опрокидывается.",
+                    "Груз, спавнящийся внутри коллайдера кузова — выстреливает наружу на первом кадре.",
+                    "Дорога из отдельных повёрнутых боксов — ступенька на каждом стыке.",
+                    "Пересборка мешей и тел на каждый заезд — утечка старого тела и dispose общей геометрии.",
+                    "Тень DirectionalLight не едет за машиной — на длинном маршруте тени пропадают.",
+                ],
+                checklist=[
+                    "В покое все четыре колеса в контакте, ход подвески одинаковый и внутри maxTravel.",
+                    "Полный газ: машина разгоняется, колёса крутятся вперёд, максималка близка к тюнингу.",
+                    "Руль вправо — машина едет вправо; проверено на фиксированной камере.",
+                    "Тормоз останавливает машину с максималки меньше чем за 3 секунды.",
+                    "Груз доезжает до финиша при спокойной езде и теряется только на реальных кочках.",
+                    "Второй и третий заезды идентичны первому: ничего не осталось от предыдущего.",
+                    "Хедлесс-проверка физики проходит в CI до любого визуального теста.",
+                ],
+                knowledge_refs=[
+                    "threejs/rapier_vehicle_controller.md",
+                    "threejs/vehicle_wheel_rig.md",
+                    "threejs/physics_integration.md",
+                ]
+            ))
+
         log_agent("SkillGenerator", f"Compiled {len(concept.skills)} reusable skill documents.")
+
+    # Слова те же, что у PromptCompiler._DRIVING_WORDS: профиль управления и
+    # профиль физики у машины всегда совпадают.
+    _DRIVING_WORDS = (
+        "гонк", "дрифт", "маш", "грузовик", "трак", "racing", "drift",
+        "vehicle", "car", "truck", "derby", "driving", "rally",
+    )
+
+    @classmethod
+    def _is_driving_game(cls, ctx: GenerationContext) -> bool:
+        """Есть ли в игре управляемая машина — по жанру, механикам и исходной идее."""
+        concept = ctx.concept
+        haystack = " ".join([
+            str(concept.genre or ""),
+            str(concept.subgenre or ""),
+            str(concept.title or ""),
+            str(ctx.raw_prompt or ""),
+            " ".join(m.name for m in concept.mechanics),
+            " ".join(m.category for m in concept.mechanics),
+        ]).lower()
+        return any(word in haystack for word in cls._DRIVING_WORDS)

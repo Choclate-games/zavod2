@@ -32,6 +32,8 @@ every generated `AI_DEVELOPER_PROMPT.md`.
 | `audio/web_audio_and_muting.md` | Web Audio only, autoplay unlock, master bus, platform mute |
 | `platform_builds/android_capacitor.md` | Capacitor shell, package/icon setup, native banner reserve |
 | `threejs/adaptive_quality.md` | Converging quality auto-tuner, the vsync headroom trap |
+| `threejs/rapier_vehicle_controller.md` | Ray-cast vehicle, suspension tuning, cargo that stays in the bed, head-less physics checks |
+| `threejs/vehicle_wheel_rig.md` | Wheel rig for arcade **and** physics cars — the two are opposite, see §0 |
 | `patterns/*.md` | Core-loop blueprints per genre |
 | `mechanics/*.md` | Individual mechanic specs |
 | `references/*.md` | Deconstructed market references |

@@ -167,9 +167,49 @@ moderation rejection. Violating any of them ships a broken or rejected game.
     swallows button taps, and a held throttle survives an ad break otherwise.
     See `knowledge/ux/touch_controls.md`.
 
+## Physics vehicles
+
+60. A physics vehicle is **never** driven by writing `setLinvel()` every frame.
+    That overwrites the solver, ignores slopes and heading, and leaves the wheels
+    as decoration — the "wheels don't turn, the truck doesn't move" bug. Use the
+    engine's own ray-cast vehicle controller (`world.createVehicleController`).
+61. Visual wheels of a physics vehicle are **children of the chassis group**, and
+    their suspension travel, steering angle and roll angle are read from the
+    controller. A separate wheel root that copies only `translation()` detaches
+    the wheels from the body the moment it tilts, and leaves parts overlapping
+    where the body has moved on. The opposite rule in `vehicle_wheel_rig.md` §3
+    applies to kinematic arcade cars only.
+62. `updateVehicle(dt)` runs **before** `world.step()`, and the wheels' ray-casts
+    are filtered to the ground collision group — unfiltered they hit the chassis
+    or the cargo and the vehicle climbs its own load.
+63. Cargo and props carried by a body spawn from **body-local** slots that do not
+    intersect its colliders. An overlap at spawn is resolved by ejection: the load
+    fires out of the bed on frame one. Anything meant to stay put needs real wall
+    colliders, not a painted lip.
+64. Terrain is one continuous displaced ribbon whose collider is built from the
+    **same buffers** as the visible mesh. A road assembled from individually
+    rotated boxes has a ledge at every joint. Trimesh colliders are for static
+    bodies only.
+65. Restarting a run **teleports** existing bodies (translation, rotation and both
+    velocities, then `wakeUp()`); it never rebuilds meshes and bodies. Rebuilds
+    leak the old body, dispose shared geometry and orphan the vehicle controller.
+    Removed items are disabled, not destroyed.
+66. Physics handling is verified head-lessly before it is verified by eye — the
+    physics engine runs in Node without a renderer. Keep the vehicle spec in a
+    renderer-free module and assert acceleration, wheel-rotation sign, steering
+    sign, suspension settling and cargo retention in a script.
+    See `knowledge/threejs/rapier_vehicle_controller.md`.
+
+## Build hygiene
+
+67. In a Vite + TypeScript project `tsc` must run with **`noEmit: true`**. Vite
+    resolves `./Foo` to `Foo.js` before `Foo.ts`, so a compiled file left beside a
+    source silently shadows it and every later edit to the `.ts` does nothing.
+    Never commit `src/**/*.js` in a TypeScript project.
+
 ## Development log
 
-60. Every work session ends with an entry in `DEVLOG.md` (task, what was done,
+68. Every work session ends with an entry in `DEVLOG.md` (task, what was done,
     files touched, what was verified, what remains) and in `CHANGELOG.md` under
     `## [Unreleased]` in player-facing language. A change nobody can reconstruct
     later is a change that will be redone from scratch.

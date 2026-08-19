@@ -1,98 +1,311 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { InputSnapshot, SaveData } from '../core/types';
-import { PhysicsWorld } from '../physics/PhysicsWorld';
+import { PhysicsWorld, WHEEL_RAY_GROUPS } from '../physics/PhysicsWorld';
 import { SceneManager } from '../rendering/SceneManager';
+import { RoadGenerator } from '../world/RoadGenerator';
+import { BED, BRAKE, CABIN, ENGINE, FRAME, MASS, RIDE_HEIGHT, STEERING, SUSPENSION, TIRE, WHEEL } from './truckSpec';
 
+const FRONT_WHEELS = [0, 1];
+const REAR_WHEELS = [2, 3];
+const SPAWN_Z = 2;
+
+interface WheelRig {
+  steer: THREE.Group;
+  spin: THREE.Group;
+}
+
+/**
+ * The truck is a single dynamic chassis body driven by Rapier's ray-cast vehicle controller.
+ * Wheels are not physical bodies: each one is a suspension ray, and its visual rig hangs off
+ * the chassis group so it inherits the body's roll and pitch exactly.
+ */
 export class TruckController {
-  private body: RAPIER.RigidBody | null = null;
-  private chassis = new THREE.Group();
-  private wheelRoot = new THREE.Group();
-  private readonly wheelSpins: THREE.Group[] = [];
-  private readonly position = new THREE.Vector3();
-  private readonly velocity = new THREE.Vector3();
-  private spin = 0;
+  readonly chassis = new THREE.Group();
+  readonly position = new THREE.Vector3();
+  readonly rotation = new THREE.Quaternion();
+  readonly forward = new THREE.Vector3(0, 0, 1);
   speed = 0;
-  positionZ = 4;
+  positionZ = SPAWN_Z;
+  private body: RAPIER.RigidBody | null = null;
+  private vehicle: RAPIER.DynamicRayCastVehicleController | null = null;
+  private readonly wheels: WheelRig[] = [];
+  private readonly spawn = new THREE.Vector3();
+  private steerAngle = 0;
+  private upsideDownFor = 0;
 
-  constructor(private readonly physics: PhysicsWorld, private readonly scene: SceneManager) {}
+  constructor(
+    private readonly physics: PhysicsWorld,
+    private readonly scene: SceneManager,
+    private readonly road: RoadGenerator,
+  ) {}
 
+  /** Built exactly once. A run reset only teleports the body — it never re-creates meshes or bodies. */
   build(): void {
-    this.scene.truckGroup.add(this.chassis, this.wheelRoot);
-    const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.25, 5.8), this.scene.materials.truck);
-    bodyMesh.position.y = 0.1;
-    bodyMesh.castShadow = true;
-    this.chassis.add(bodyMesh);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(3.1, 1.9, 2.3), this.scene.materials.truck);
-    cabin.position.set(0, 1.45, -1.45);
-    cabin.castShadow = true;
-    this.chassis.add(cabin);
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.7, .72, .08), this.scene.materials.metal);
-    windshield.position.set(0, 1.62, -2.62);
-    this.chassis.add(windshield);
-    const bed = new THREE.Mesh(new THREE.BoxGeometry(3.35, .65, 2.85), this.scene.materials.truckDark);
-    bed.position.set(0, 1.05, 1.15);
-    bed.castShadow = true;
-    this.chassis.add(bed);
-    this.createWheels();
-    this.createBody();
+    this.spawn.set(0, this.road.roadHeightAt(SPAWN_Z) + RIDE_HEIGHT + 0.1, SPAWN_Z);
+    this.scene.truckGroup.add(this.chassis);
+    this.buildVisuals();
+    this.body = this.physics.createChassis(this.chassis, this.spawn);
+    this.buildColliders();
+    this.buildVehicle();
+    this.reset();
   }
 
   reset(): void {
-    this.scene.clearGroup(this.scene.truckGroup);
-    this.chassis = new THREE.Group();
-    this.wheelRoot = new THREE.Group();
-    this.wheelSpins.length = 0;
-    this.build();
+    if (!this.body) return;
+    this.physics.placeBody(this.body, this.spawn);
+    this.steerAngle = 0;
+    this.upsideDownFor = 0;
+    this.speed = 0;
+    this.position.copy(this.spawn);
+    this.rotation.identity();
+    this.forward.set(0, 0, 1);
+    this.positionZ = this.spawn.z;
+    this.chassis.position.copy(this.spawn);
+    this.chassis.quaternion.identity();
+    if (this.vehicle) {
+      for (let i = 0; i < this.wheels.length; i += 1) {
+        this.vehicle.setWheelEngineForce(i, 0);
+        this.vehicle.setWheelBrake(i, 0);
+        this.vehicle.setWheelSteering(i, 0);
+      }
+    }
+  }
+
+  /**
+   * Chassis-local point → world space, taken from the rigid body rather than the scene graph
+   * so it is correct even before the first render has updated any matrices.
+   */
+  localToWorld(local: THREE.Vector3): THREE.Vector3 {
+    return local.applyQuaternion(this.rotation).add(this.position);
   }
 
   fixedUpdate(dt: number, controls: InputSnapshot, upgrades: SaveData['upgrades']): void {
-    if (!this.body) return;
-    const enginePower = 26 + upgrades.engine * 5;
-    const brakePower = 18;
-    const current = this.body.linvel();
-    const target = controls.throttle * (7 + upgrades.engine * 0.8) - controls.brake * 3.5;
-    const acceleration = controls.throttle > 0 ? enginePower : brakePower;
-    const nextZ = current.z + Math.max(-acceleration * dt, Math.min(acceleration * dt, target - current.z));
-    this.body.setLinvel({ x: current.x * 0.92 + controls.steer * 0.22, y: current.y, z: nextZ }, true);
-    if (controls.handbrake) this.body.setLinvel({ x: current.x * 0.72, y: current.y, z: nextZ * 0.45 }, true);
-    const lean = -controls.brake * 0.06 + controls.throttle * 0.025;
-    this.body.applyTorqueImpulse({ x: lean, y: 0, z: -controls.steer * Math.min(0.12, Math.abs(nextZ) * 0.015) }, true);
-    this.position.copy(this.body.translation());
-    this.velocity.set(current.x, current.y, current.z);
-    this.positionZ = this.position.z;
-    this.speed = Math.abs(nextZ) * 3.6;
+    const vehicle = this.vehicle;
+    const body = this.body;
+    if (!vehicle || !body) return;
+
+    const speed = vehicle.currentVehicleSpeed();
+    this.applySteering(vehicle, dt, controls, speed);
+    this.applyDrive(vehicle, controls, upgrades, speed);
+    vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+
+    this.speed = Math.abs(speed) * 3.6;
+    const p = body.translation();
+    const r = body.rotation();
+    this.position.set(p.x, p.y, p.z);
+    this.rotation.set(r.x, r.y, r.z, r.w);
+    this.positionZ = p.z;
+    this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
+    this.recoverFromRollover(body, dt);
   }
 
+  /** Wheels read their transform straight from the controller, so they always meet the ground. */
   render(_alpha: number): void {
-    if (!this.body) return;
-    const p = this.body.translation();
-    this.wheelRoot.position.set(p.x, Math.max(.45, p.y - .65), p.z);
-    this.spin += this.velocity.z * 0.04;
-    for (const wheel of this.wheelSpins) wheel.rotation.x = this.spin;
+    const vehicle = this.vehicle;
+    if (!vehicle) return;
+    for (let i = 0; i < this.wheels.length; i += 1) {
+      const rig = this.wheels[i];
+      const suspension = vehicle.wheelSuspensionLength(i) ?? SUSPENSION.restLength;
+      rig.steer.position.y = WHEEL.connectionY - suspension;
+      rig.steer.rotation.y = vehicle.wheelSteering(i) ?? 0;
+      rig.spin.rotation.x = vehicle.wheelRotation(i) ?? 0;
+    }
   }
 
-  private createBody(): void {
-    this.body = this.physics.createDynamic(this.chassis, new THREE.Vector3(0, 2.3, 4), new THREE.Vector3(1.75, .65, 2.9), 8);
-    this.body.setEnabled(true);
+  private applySteering(vehicle: RAPIER.DynamicRayCastVehicleController, dt: number, controls: InputSnapshot, speed: number): void {
+    const lock = STEERING.maxAngle / (1 + Math.abs(speed) * STEERING.speedFalloff);
+    const target = controls.steer * lock;
+    const rate = (controls.steer === 0 ? STEERING.returnRate : STEERING.turnRate) * dt;
+    this.steerAngle += THREE.MathUtils.clamp(target - this.steerAngle, -rate, rate);
+    for (const index of FRONT_WHEELS) vehicle.setWheelSteering(index, this.steerAngle);
   }
 
-  private createWheels(): void {
-    const tireGeometry = new THREE.CylinderGeometry(.72, .72, .42, 20);
+  private applyDrive(
+    vehicle: RAPIER.DynamicRayCastVehicleController,
+    controls: InputSnapshot,
+    upgrades: SaveData['upgrades'],
+    speed: number,
+  ): void {
+    const maxSpeed = ENGINE.maxSpeed + upgrades.engine * ENGINE.speedPerUpgrade;
+    const power = ENGINE.baseForce + upgrades.engine * ENGINE.forcePerUpgrade;
+    let engineForce = 0;
+    let brake: number = BRAKE.idle;
+
+    if (controls.throttle > 0 && speed > -0.6) {
+      // Force tapers to zero at top speed instead of a hard clamp, so hills still bog the truck down.
+      engineForce = power * controls.throttle * Math.max(0, 1 - Math.max(0, speed) / maxSpeed);
+      brake = 0;
+    } else if (controls.brake > 0 && speed < 0.6) {
+      engineForce = -ENGINE.reverseForce * controls.brake * Math.max(0, 1 - Math.abs(Math.min(0, speed)) / ENGINE.maxReverseSpeed);
+      brake = 0;
+    } else if (controls.brake > 0 || (controls.throttle > 0 && speed <= -0.6)) {
+      brake = BRAKE.foot;
+    }
+
+    if (controls.handbrake) {
+      engineForce = 0;
+      brake = BRAKE.hand;
+    }
+
+    for (const index of REAR_WHEELS) vehicle.setWheelEngineForce(index, engineForce);
+    for (let i = 0; i < this.wheels.length; i += 1) vehicle.setWheelBrake(i, brake);
+  }
+
+  /** A tipped-over truck is a dead run otherwise: flip it back after a beat instead of stranding the player. */
+  private recoverFromRollover(body: RAPIER.RigidBody, dt: number): void {
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.rotation);
+    if (up.y > 0.25) {
+      this.upsideDownFor = 0;
+      return;
+    }
+    this.upsideDownFor += dt;
+    if (this.upsideDownFor < 2) return;
+    this.upsideDownFor = 0;
+    const heading = Math.atan2(this.forward.x, this.forward.z);
+    this.physics.placeBody(
+      body,
+      new THREE.Vector3(
+        THREE.MathUtils.clamp(this.position.x, -4, 4),
+        this.road.roadHeightAt(this.position.z) + RIDE_HEIGHT + 0.4,
+        this.position.z,
+      ),
+      heading,
+    );
+  }
+
+  private buildVehicle(): void {
+    const body = this.body;
+    if (!body) return;
+    const vehicle = this.physics.createVehicle(body);
+    vehicle.indexUpAxis = 1;
+    vehicle.setIndexForwardAxis = 2;
+    const direction = { x: 0, y: -1, z: 0 };
+    const axle = { x: -1, y: 0, z: 0 };
+    // Order matters: FRONT_WHEELS / REAR_WHEELS index into this list.
+    for (const z of [WHEEL.frontZ, WHEEL.rearZ]) {
+      for (const x of [-WHEEL.offsetX, WHEEL.offsetX]) {
+        vehicle.addWheel({ x, y: WHEEL.connectionY, z }, direction, axle, SUSPENSION.restLength, WHEEL.radius);
+      }
+    }
+    for (let i = 0; i < 4; i += 1) {
+      vehicle.setWheelSuspensionStiffness(i, SUSPENSION.stiffness);
+      vehicle.setWheelSuspensionCompression(i, SUSPENSION.compression);
+      vehicle.setWheelSuspensionRelaxation(i, SUSPENSION.relaxation);
+      vehicle.setWheelMaxSuspensionTravel(i, SUSPENSION.maxTravel);
+      vehicle.setWheelMaxSuspensionForce(i, SUSPENSION.maxForce);
+      vehicle.setWheelFrictionSlip(i, TIRE.frictionSlip);
+      vehicle.setWheelSideFrictionStiffness(i, TIRE.sideFrictionStiffness);
+    }
+    this.vehicle = vehicle;
+  }
+
+  private buildColliders(): void {
+    const body = this.body;
+    if (!body) return;
+    const wallHalfZ = (BED.frontZ - BED.backZ) / 2;
+    const wallCentreZ = (BED.frontZ + BED.backZ) / 2;
+    const wallY = BED.floorY + BED.wallHalfY;
+    this.physics.addBoxCollider(body, new THREE.Vector3(FRAME.hx, FRAME.hy, FRAME.hz), new THREE.Vector3(0, 0, 0), MASS.frame);
+    this.physics.addBoxCollider(body, new THREE.Vector3(CABIN.hx, CABIN.hy, CABIN.hz), new THREE.Vector3(0, CABIN.y, CABIN.z), MASS.cabin);
+    for (const side of [-1, 1]) {
+      this.physics.addBoxCollider(
+        body,
+        new THREE.Vector3(BED.wallThickness, BED.wallHalfY, wallHalfZ),
+        new THREE.Vector3(side * (BED.innerHalfX + BED.wallThickness), wallY, wallCentreZ),
+        MASS.wall,
+      );
+    }
+    for (const z of [BED.frontZ + BED.wallThickness, BED.backZ - BED.wallThickness]) {
+      this.physics.addBoxCollider(
+        body,
+        new THREE.Vector3(BED.innerHalfX + BED.wallThickness * 2, BED.wallHalfY, BED.wallThickness),
+        new THREE.Vector3(0, wallY, z),
+        MASS.wall,
+      );
+    }
+  }
+
+  private buildVisuals(): void {
+    const { materials } = this.scene;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(FRAME.hx * 2, FRAME.hy * 2, FRAME.hz * 2), materials.truck);
+    frame.castShadow = true;
+    this.chassis.add(frame);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(CABIN.hx * 2, CABIN.hy * 2, CABIN.hz * 2), materials.truck);
+    cabin.position.set(0, CABIN.y, CABIN.z);
+    cabin.castShadow = true;
+    this.chassis.add(cabin);
+
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(CABIN.hx * 1.7, 0.72, 0.08), materials.glass);
+    windshield.position.set(0, CABIN.y + 0.18, CABIN.z + CABIN.hz + 0.02);
+    this.chassis.add(windshield);
+
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(FRAME.hx * 2, 0.22, 0.18), materials.metal);
+    bumper.position.set(0, -0.05, FRAME.hz + 0.05);
+    this.chassis.add(bumper);
+
+    for (const side of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.1), materials.glass);
+      lamp.position.set(side * 0.78, 0.24, FRAME.hz + 0.02);
+      this.chassis.add(lamp);
+    }
+
+    this.buildBedVisual();
+    this.buildWheels();
+  }
+
+  private buildBedVisual(): void {
+    const { materials } = this.scene;
+    const wallLength = BED.frontZ - BED.backZ;
+    const wallCentreZ = (BED.frontZ + BED.backZ) / 2;
+    const wallY = BED.floorY + BED.wallHalfY;
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(BED.innerHalfX * 2, 0.08, wallLength), materials.truckDark);
+    floor.position.set(0, BED.floorY + 0.04, wallCentreZ);
+    floor.receiveShadow = true;
+    this.chassis.add(floor);
+
+    const sideGeometry = new THREE.BoxGeometry(BED.wallThickness * 2, BED.wallHalfY * 2, wallLength);
+    for (const side of [-1, 1]) {
+      const wall = new THREE.Mesh(sideGeometry, materials.truckDark);
+      wall.position.set(side * (BED.innerHalfX + BED.wallThickness), wallY, wallCentreZ);
+      wall.castShadow = true;
+      this.chassis.add(wall);
+    }
+    const capGeometry = new THREE.BoxGeometry((BED.innerHalfX + BED.wallThickness * 2) * 2, BED.wallHalfY * 2, BED.wallThickness * 2);
+    for (const z of [BED.frontZ + BED.wallThickness, BED.backZ - BED.wallThickness]) {
+      const cap = new THREE.Mesh(capGeometry, materials.truckDark);
+      cap.position.set(0, wallY, z);
+      cap.castShadow = true;
+      this.chassis.add(cap);
+    }
+  }
+
+  /**
+   * One group per degree of freedom: `steer` yaws with the steering angle and slides along the
+   * suspension, `spin` rolls. Merging them into one Euler would visibly skew the front wheels.
+   */
+  private buildWheels(): void {
+    const { materials } = this.scene;
+    const tireGeometry = new THREE.CylinderGeometry(WHEEL.radius, WHEEL.radius, WHEEL.halfWidth * 2, 22);
     tireGeometry.rotateZ(Math.PI / 2);
-    const hubGeometry = new THREE.CylinderGeometry(.32, .32, .45, 12);
-    hubGeometry.rotateZ(Math.PI / 2);
-    for (const z of [-1.95, 1.85]) {
-      for (const x of [-1.9, 1.9]) {
+    const rimGeometry = new THREE.CylinderGeometry(WHEEL.radius * 0.62, WHEEL.radius * 0.62, WHEEL.halfWidth * 1.96, 14);
+    rimGeometry.rotateZ(Math.PI / 2);
+    const spokeGeometry = new THREE.BoxGeometry(WHEEL.halfWidth * 2.1, WHEEL.radius * 1.15, 0.08);
+
+    for (const z of [WHEEL.frontZ, WHEEL.rearZ]) {
+      for (const x of [-WHEEL.offsetX, WHEEL.offsetX]) {
         const steer = new THREE.Group();
         const spin = new THREE.Group();
-        const tire = new THREE.Mesh(tireGeometry, this.scene.materials.tire);
-        const hub = new THREE.Mesh(hubGeometry, this.scene.materials.metal);
-        spin.add(tire, hub);
+        const tire = new THREE.Mesh(tireGeometry, materials.tire);
+        tire.castShadow = true;
+        const rim = new THREE.Mesh(rimGeometry, materials.metal);
+        const spoke = new THREE.Mesh(spokeGeometry, materials.metal);
+        spin.add(tire, rim, spoke);
         steer.add(spin);
-        steer.position.set(x, .72, z);
-        this.wheelRoot.add(steer);
-        this.wheelSpins.push(spin);
+        steer.position.set(x, WHEEL.connectionY - SUSPENSION.restLength, z);
+        this.chassis.add(steer);
+        this.wheels.push({ steer, spin });
       }
     }
   }

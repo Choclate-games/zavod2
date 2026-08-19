@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { EventBus } from './EventBus';
 import { GameLoop, type FixedUpdateTarget } from './GameLoop';
 import type { GameState, RunResult } from './types';
@@ -20,8 +21,8 @@ export class Game implements FixedUpdateTarget {
   readonly audio = new AudioManager();
   readonly platform = new PlaygamaService();
   readonly road = new RoadGenerator();
-  readonly truck = new TruckController(this.physics, this.scene);
-  readonly cargo = new CargoManager(this.physics, this.scene, this.events);
+  readonly truck = new TruckController(this.physics, this.scene, this.road);
+  readonly cargo = new CargoManager(this.physics, this.scene, this.truck, this.road);
   readonly ui: UIManager;
   readonly loop = new GameLoop(this);
   private state: GameState = 'menu';
@@ -50,6 +51,7 @@ export class Game implements FixedUpdateTarget {
     this.road.build(this.scene, this.physics);
     this.truck.build();
     this.cargo.build();
+    this.scene.resetCamera(this.truck.position);
     this.scene.onResize();
     this.platform.bindLifecycle((paused) => {
       if (paused && this.state === 'running') this.setPaused(true);
@@ -68,10 +70,11 @@ export class Game implements FixedUpdateTarget {
     if (this.state !== 'running') return;
     const controls = this.input.snapshot();
     this.elapsed += dt;
+    // The vehicle controller writes into the chassis velocity, so it has to run before the world step.
     this.truck.fixedUpdate(dt, controls, this.save.upgrades);
     this.physics.step();
-    this.cargo.fixedUpdate(this.truck.positionZ, this.events);
-    this.distance = Math.max(0, this.truck.positionZ - this.road.startZ);
+    this.cargo.fixedUpdate(this.events);
+    this.distance = THREE.MathUtils.clamp(this.truck.positionZ - this.road.startZ, 0, this.road.length);
     this.audio.updateEngine(this.truck.speed, controls.throttle, this.save.settings.muted);
     if (this.truck.positionZ >= this.road.finishZ) {
       const result: RunResult = {
@@ -96,8 +99,7 @@ export class Game implements FixedUpdateTarget {
 
   render(alpha: number): void {
     this.truck.render(alpha);
-    this.cargo.render(alpha);
-    this.scene.render(this.truck.positionZ, this.truck.speed);
+    this.scene.render(this.truck.position, this.truck.forward, this.truck.speed);
   }
 
   private startRun(): void {
@@ -105,9 +107,10 @@ export class Game implements FixedUpdateTarget {
     this.state = 'running';
     this.elapsed = 0;
     this.distance = 0;
-    this.road.resetRun(this.scene, this.physics);
+    // Reset order matters: the truck must be back at the depot before cargo is placed in its bed.
     this.truck.reset();
     this.cargo.reset();
+    this.scene.resetCamera(this.truck.position);
     this.input.releaseAll();
     this.ui.showHud();
     this.events.emit('game:state', { state: this.state });
