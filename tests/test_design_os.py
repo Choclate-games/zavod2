@@ -16,6 +16,15 @@ from providers.local import LocalAIProvider
 from validators.contract_validator import validate_contract, validate_project_contracts
 from validators.design_os_validator import DesignOsValidator
 
+from app.config import DESIGN_OS_ENABLED
+
+# Слой Design OS отключён в app/config.py по решению владельца фабрики.
+# Тесты слоя сохранены и снова заработают, как только флаг вернут в True.
+pytestmark = pytest.mark.skipif(
+    not DESIGN_OS_ENABLED,
+    reason="Слой Design OS отключён (config.DESIGN_OS_ENABLED = False)",
+)
+
 
 def _context(prompt: str = "3D дрифт против зомби на Яндекс Игры") -> GenerationContext:
     provider = LocalAIProvider()

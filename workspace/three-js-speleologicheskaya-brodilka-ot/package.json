@@ -1,0 +1,22 @@
+{
+  "name": "three-js-speleologicheskaya-brodilka-ot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@playgama/bridge": "^2.0.0",
+    "howler": "^2.2.4",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.12",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}

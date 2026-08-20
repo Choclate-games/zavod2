@@ -32,6 +32,7 @@ from generators.contract_generator import ContractGenerator
 from generators.design_os_docs import DESIGN_OS_DOCS
 from validators.output_validator import OutputValidator
 from app.models import GameConcept
+from app.config import DESIGN_OS_ENABLED
 
 class Pipeline:
     """Main execution pipeline orchestrating AI role agents, generators, and validators."""
@@ -74,12 +75,12 @@ class Pipeline:
             IdeaAnalyzerAgent().run(ctx)
             progress.update(t1, completed=1)
 
-            # 1b. Concept Architect: дизайн-ядро и обещание игроку.
-            # Стоит сразу после разбора идеи: всё, что проектируется дальше,
-            # обязано обслуживать выбранное ядро.
-            t1b = progress.add_task("[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...", total=1)
-            ConceptArchitectAgent().run(ctx)
-            progress.update(t1b, completed=1)
+            # 1b. Concept Architect — часть слоя Design OS, отключён флагом
+            # config.DESIGN_OS_ENABLED (см. app/config.py).
+            if DESIGN_OS_ENABLED:
+                t1b = progress.add_task("[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...", total=1)
+                ConceptArchitectAgent().run(ctx)
+                progress.update(t1b, completed=1)
 
             # 2. Game Designer
             t2 = progress.add_task("[magenta]Game Designer: Shaping vision, core loop, and session rules...", total=1)
@@ -126,11 +127,11 @@ class Pipeline:
             UXDesignerAgent().run(ctx)
             progress.update(t10, completed=1)
 
-            # 10b. Experience Density: плотность первой сессии и телеметрия.
-            # Запускается после UX, потому что считает нагрузку по реальному HUD.
-            t10b = progress.add_task("[magenta]Experience Density: Плотность первой сессии и телеметрия...", total=1)
-            ExperienceDensityAgent().run(ctx)
-            progress.update(t10b, completed=1)
+            # 10b. Experience Density — часть слоя Design OS, отключена флагом.
+            if DESIGN_OS_ENABLED:
+                t10b = progress.add_task("[magenta]Experience Density: Плотность первой сессии и телеметрия...", total=1)
+                ExperienceDensityAgent().run(ctx)
+                progress.update(t10b, completed=1)
 
             # 11. Preview Designer
             t11 = progress.add_task("[magenta]Preview Designer: Framing concept screenshot prompt...", total=1)
@@ -142,15 +143,16 @@ class Pipeline:
             SkillGeneratorAgent().run(ctx)
             progress.update(t12, completed=1)
 
-            # 12b. Validation Planner и журнал решений: что проверяем до продакшена
-            # и где фабрика останавливается и спрашивает человека.
-            t12b = progress.add_task("[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...", total=1)
-            ValidationPlannerAgent().run(ctx)
-            progress.update(t12b, completed=1)
+            # 12b/12c. Validation Planner и Decision Recorder — слой Design OS,
+            # отключён флагом.
+            if DESIGN_OS_ENABLED:
+                t12b = progress.add_task("[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...", total=1)
+                ValidationPlannerAgent().run(ctx)
+                progress.update(t12b, completed=1)
 
-            t12c = progress.add_task("[magenta]Decision Recorder: Решения, откаты и человеческие ворота...", total=1)
-            DecisionRecorderAgent().run(ctx)
-            progress.update(t12c, completed=1)
+                t12c = progress.add_task("[magenta]Decision Recorder: Решения, откаты и человеческие ворота...", total=1)
+                DecisionRecorderAgent().run(ctx)
+                progress.update(t12c, completed=1)
 
             # 13. Self-Critique Agent
             t13 = progress.add_task("[magenta]Self-Critique Agent: Verifying coherence & Definition of Done...", total=1)
@@ -229,13 +231,22 @@ class Pipeline:
                 f.write(self.doc_gen._gen_gameplay(ctx).strip())
             with open(game_dir / "MECHANICS.md", "w", encoding="utf-8") as f:
                 f.write(self.doc_gen._gen_mechanics(ctx).strip())
-            log_success("Updated GAMEPLAY_SPECIFICATION.md and MECHANICS.md")
+            # Ядро пересобирается целиком: петля, механики и прогрессия ссылаются
+            # друг на друга, и рассинхрон между ними ломает промпт кодового агента.
+            with open(game_dir / "CORE_LOOP.md", "w", encoding="utf-8") as f:
+                f.write(self.doc_gen._gen_core_loop(ctx).strip())
+            with open(game_dir / "PROGRESSION.md", "w", encoding="utf-8") as f:
+                f.write(self.doc_gen._gen_progression(ctx).strip())
+            log_success("Updated GAMEPLAY_SPECIFICATION.md, MECHANICS.md, CORE_LOOP.md, PROGRESSION.md")
         elif sec in ["playgama", "bridge"]:
             PlaygamaSpecialistAgent().run(ctx)
             with open(game_dir / "PLAYGAMA_INTEGRATION.md", "w", encoding="utf-8") as f:
                 f.write(self.doc_gen._gen_playgama(ctx).strip())
             log_success("Updated PLAYGAMA_INTEGRATION.md")
         elif sec in ["design-os", "design_os", "designos", "validation", "density"]:
+            if not DESIGN_OS_ENABLED:
+                log_info("Слой Design OS отключён (config.DESIGN_OS_ENABLED = False) — пересборка пропущена.")
+                return
             # Пересборка проверяемого слоя целиком: ядро, плотность, допущения,
             # решения и ворота считаются вместе — они ссылаются друг на друга.
             ConceptArchitectAgent().run(ctx)

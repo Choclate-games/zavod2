@@ -45,6 +45,11 @@ const state = {
   timerHandle: null,
   elapsed: 0,
   streamBubble: null,
+  streamRaw: "",
+  gallerySort: localStorage.getItem("gallerySort") || "new",
+  showArchived: localStorage.getItem("showArchived") === "1",
+  showArchivedList: localStorage.getItem("showArchivedList") === "1",
+  hideTools: localStorage.getItem("hideTools") === "1",
 };
 
 /* ── Тосты ────────────────────────────────────────────────────────────── */
@@ -217,19 +222,99 @@ async function loadStudioState() {
   setStudioRunning(st.running);
 }
 
+function sortProjects(projects, mode) {
+  const list = [...projects];
+  const byCreated = (a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  if (mode === "old") list.sort((a, b) => -byCreated(a, b));
+  else if (mode === "rating") list.sort((a, b) => (b.rating || 0) - (a.rating || 0) || byCreated(a, b));
+  else if (mode === "updated") list.sort((a, b) => (b.updated_ts || 0) - (a.updated_ts || 0));
+  else list.sort(byCreated);
+  return list;
+}
+
+function visibleProjects(showArchived, mode) {
+  const all = state.projects || [];
+  const list = showArchived ? all : all.filter((p) => !p.archived);
+  return sortProjects(list, mode || state.gallerySort);
+}
+
+/* Оценка игры: пять звёзд, повторный клик по той же звезде снимает оценку. */
+function starWidget(project, size = "") {
+  const box = el("span", `stars ${size}`);
+  for (let i = 1; i <= 5; i += 1) {
+    const star = el("button", `star ${i <= (project.rating || 0) ? "on" : ""}`, i <= (project.rating || 0) ? "★" : "☆");
+    star.title = `Оценка ${i} из 5`;
+    star.onclick = async (e) => {
+      e.stopPropagation();
+      const value = project.rating === i ? 0 : i;
+      const res = await api(`/api/projects/${encodeURIComponent(project.slug)}/rating`, { body: { rating: value } });
+      if (res.status === "error") { toast("Оценка", res.message, "err"); return; }
+      project.rating = res.rating;
+      refreshProjectViews();
+    };
+    box.appendChild(star);
+  }
+  return box;
+}
+
+async function toggleArchive(project) {
+  const res = await api(`/api/projects/${encodeURIComponent(project.slug)}/archive`,
+    { body: { archived: !project.archived } });
+  if (res.status === "error") { toast("Архив", res.message, "err"); return; }
+  project.archived = res.archived;
+  toast("Архив", res.message, "ok");
+  refreshProjectViews();
+}
+
+async function deleteProject(project) {
+  const ok = confirm(
+    `Удалить игру «${project.title}» безвозвратно?
+
+` +
+    `Будут стёрты код, спецификация и чаты (${project.slug}).
+` +
+    `Если игра просто мешает — используйте «📦 В архив»: она останется на диске.`);
+  if (!ok) return;
+  const res = await api(`/api/projects/${encodeURIComponent(project.slug)}`, { method: "DELETE" });
+  if (res.status === "error") { toast("Удаление", res.message, "err"); return; }
+  toast("Удаление", res.message, "ok");
+  if (state.project === project.slug) {
+    state.project = null;
+    state.session = null;
+    state.detail = null;
+    localStorage.removeItem("project");
+    clearFeed();
+    $("project-title").textContent = "Выберите проект из списка слева";
+    $("project-meta").textContent = "";
+  }
+  await loadProjects();
+  loadGallery();
+}
+
+function refreshProjectViews() {
+  loadGallery();
+  loadProjects();
+  if (state.project && state.detail) renderProjectBanner();
+}
+
 async function loadGallery() {
   const { projects } = await api("/api/projects");
   state.projects = projects;
   const box = $("gallery");
   box.innerHTML = "";
-  $("gallery-count").textContent = projects.length ? `· ${projects.length} шт.` : "";
-  if (!projects.length) {
-    box.appendChild(el("div", "muted",
-      "Пока ни одной игры. Опишите идею выше и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ» — готовые проекты появятся здесь обложками."));
+  const shown = visibleProjects(state.showArchived);
+  const archivedCount = projects.filter((p) => p.archived).length;
+  $("gallery-count").textContent = projects.length
+    ? `· показано ${shown.length} из ${projects.length}${archivedCount ? ` · 📦 в архиве ${archivedCount}` : ""}`
+    : "";
+  if (!shown.length) {
+    box.appendChild(el("div", "muted", projects.length
+      ? "Все игры убраны в архив. Включите галочку «📦 Архив», чтобы увидеть их."
+      : "Пока ни одной игры. Опишите идею выше и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ» — готовые проекты появятся здесь обложками."));
     return;
   }
-  projects.forEach((p) => {
-    const card = el("div", "game-card");
+  shown.forEach((p) => {
+    const card = el("div", `game-card ${p.archived ? "archived" : ""}`);
     const cover = el("div", "cover");
     if (p.has_preview) {
       const img = el("img");
@@ -237,21 +322,32 @@ async function loadGallery() {
       img.loading = "lazy";
       cover.appendChild(img);
     } else cover.textContent = "🖼 превью ещё не создано";
+    if (p.archived) cover.appendChild(el("span", "archive-badge", "📦 архив"));
     card.appendChild(cover);
 
     const body = el("div", "body");
     body.appendChild(el("div", "name", `🎮 ${esc(p.title)}`));
     body.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`));
+    const line = el("div", "card-rating");
+    line.appendChild(starWidget(p));
+    line.appendChild(el("span", "dim", p.created_label ? `создана ${esc(p.created_label)}` : ""));
+    body.appendChild(line);
     card.appendChild(body);
 
     const actions = el("div", "card-actions");
     const play = el("button", `btn small ${p.playable ? "ok" : ""}`, p.playable ? "▶ Играть" : "▶ Нет кода");
     play.disabled = !p.playable;
     play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
-    const open = el("button", "btn small", "📄 Открыть ТЗ");
+    const open = el("button", "btn small", "📄 ТЗ");
     open.onclick = (e) => { e.stopPropagation(); selectProject(p.slug); };
-    actions.append(play, open);
+    const archive = el("button", "btn small", p.archived ? "↩️" : "📦");
+    archive.title = p.archived ? "Вернуть из архива" : "Убрать в архив (игра останется на диске)";
+    archive.onclick = (e) => { e.stopPropagation(); toggleArchive(p); };
+    const remove = el("button", "btn small danger", "🗑");
+    remove.title = "Удалить игру безвозвратно";
+    remove.onclick = (e) => { e.stopPropagation(); deleteProject(p); };
+    actions.append(play, open, archive, remove);
     card.appendChild(actions);
 
     card.onclick = () => selectProject(p.slug);
@@ -343,12 +439,14 @@ async function loadProjects() {
   state.projects = projects;
   const box = $("projects-list");
   box.innerHTML = "";
-  if (!projects.length) {
-    box.appendChild(el("div", "muted", "Нет проектов в workspace/"));
-    return;
+  const shown = visibleProjects(state.showArchivedList);
+  if (!shown.length) {
+    box.appendChild(el("div", "muted", projects.length
+      ? "Все проекты в архиве — включите «📦 Архив»."
+      : "Нет проектов в workspace/"));
   }
-  projects.forEach((p) => {
-    const item = el("div", `list-item ${p.slug === state.project ? "active" : ""}`);
+  shown.forEach((p) => {
+    const item = el("div", `list-item ${p.slug === state.project ? "active" : ""} ${p.archived ? "archived" : ""}`);
     if (p.has_preview) {
       const img = el("img", "thumb");
       img.src = `/api/projects/${encodeURIComponent(p.slug)}/preview.png?v=${p.preview_mtime}`;
@@ -357,14 +455,34 @@ async function loadProjects() {
     } else {
       item.appendChild(el("div", "thumb-empty", "🖼 превью ещё не создано"));
     }
-    item.appendChild(el("div", "name", `🎮 ${esc(p.title)}`));
+    item.appendChild(el("div", "name", `${p.archived ? "📦 " : "🎮 "}${esc(p.title)}`));
     item.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код" : "📄 только ТЗ"}`));
+    const line = el("div", "card-rating");
+    line.appendChild(starWidget(p, "tiny"));
+    line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
+    item.appendChild(line);
     item.onclick = () => selectProject(p.slug);
     box.appendChild(item);
   });
   fillPlayProjects();
   fillChatProjects();
+}
+
+function renderProjectBanner() {
+  const detail = state.detail;
+  if (!detail) return;
+  const card = (state.projects || []).find((p) => p.slug === detail.slug) || detail;
+  $("project-title").textContent = `${card.archived ? "📦 " : "🎮 "}${detail.title}`;
+  $("project-meta").textContent =
+    `Slug: ${detail.slug}  |  Жанр: ${detail.genre}  |  Рендерер: ${detail.renderer}  |  Оценка ИИ: ⭐ ${detail.score}/10`
+    + (detail.created_label ? `  |  Создана: ${detail.created_label}` : "")
+    + (card.archived ? "  |  📦 в архиве" : "");
+  const stars = $("project-stars");
+  stars.innerHTML = "";
+  stars.appendChild(starWidget(card));
+  $("btn-archive-project").textContent = card.archived ? "↩️ Из архива" : "📦 В архив";
+  $("btn-play-project").disabled = !detail.playable;
 }
 
 async function selectProject(slug) {
@@ -373,11 +491,8 @@ async function selectProject(slug) {
   state.session = null;
   showView("projects");
   const detail = await api(`/api/projects/${encodeURIComponent(slug)}`);
-  $("project-title").textContent = `🎮 ${detail.title}`;
-  $("project-meta").textContent =
-    `Slug: ${detail.slug}  |  Жанр: ${detail.genre}  |  Рендерер: ${detail.renderer}  |  Оценка: ⭐ ${detail.score}/10`;
   state.detail = detail;
-  $("btn-play-project").disabled = !detail.playable;
+  renderProjectBanner();
   document.querySelectorAll("#projects-list .list-item").forEach((n) => n.classList.remove("active"));
   loadProjects();
   loadChats();
@@ -387,8 +502,9 @@ async function selectProject(slug) {
 function docTabButtons() {
   const box = $("doc-tabs");
   box.innerHTML = "";
+  // Вкладка Design OS появляется только когда слой включён на бэкенде.
   const tabs = [
-    { key: "__designos", label: "🧠 Design OS" },
+    ...(state.boot.design_os_enabled ? [{ key: "__designos", label: "🧠 Design OS" }] : []),
     ...state.boot.doc_tabs,
     { key: "__preview", label: "🎨 Превью" },
     { key: "__rebuild", label: "🔄 Ребилд" },
@@ -406,7 +522,11 @@ async function openDoc(key) {
   const view = $("doc-view");
   if (!state.project) { view.innerHTML = '<div class="muted">Выберите проект.</div>'; return; }
 
-  if (key === "__designos") { renderDesignOsPane(); return; }
+  if (key === "__designos") {
+    if (!state.boot.design_os_enabled) { openDoc(state.boot.doc_tabs[0].key); return; }
+    renderDesignOsPane();
+    return;
+  }
   if (key === "__preview") { renderPreviewPane(); return; }
   if (key === "__rebuild") { renderRebuildPane(); return; }
 
@@ -653,9 +773,15 @@ function renderRebuildPane() {
 
 /* ── Чаты ─────────────────────────────────────────────────────────────── */
 
+/* В выпадающих списках архив не мешается — кроме случая, когда архивный
+   проект открыт прямо сейчас. */
+function activeProjects() {
+  return (state.projects || []).filter((p) => !p.archived || p.slug === state.project);
+}
+
 function fillChatProjects() {
   const select = $("chat-project");
-  const projects = state.projects || [];
+  const projects = activeProjects();
   select.innerHTML = "";
   projects.forEach((p) => select.appendChild(new Option(p.slug, p.slug)));
   if (state.project && projects.some((p) => p.slug === state.project)) select.value = state.project;
@@ -747,6 +873,7 @@ function setChatStatus(text, color) {
 function clearFeed() {
   $("chat-feed").innerHTML = "";
   state.streamBubble = null;
+  state.streamRaw = "";
 }
 
 function showTyping(visible) {
@@ -776,39 +903,141 @@ function addBubble(cls, html) {
   return node;
 }
 
+/*
+ * Длинный ответ агента не должен занимать весь экран: как только блок
+ * перерастает лимит, он сворачивается до «шапки» с кнопкой «Показать
+ * целиком». Проверка идёт после отрисовки — иначе высоту не измерить.
+ */
+const CLAMP_HEIGHT = 260;
+
+function attachClamp(bubble, body) {
+  requestAnimationFrame(() => {
+    const existing = bubble.querySelector(":scope > .clamp-toggle");
+    if (existing) {
+      if (body.scrollHeight <= CLAMP_HEIGHT && bubble.classList.contains("clamped")) {
+        bubble.classList.remove("clamped");
+        existing.remove();
+      }
+      return;
+    }
+    if (body.scrollHeight <= CLAMP_HEIGHT) return;
+    bubble.classList.add("clamped");
+    const toggle = el("button", "clamp-toggle", "▾ Показать целиком");
+    toggle.onclick = () => {
+      const clamped = bubble.classList.toggle("clamped");
+      toggle.textContent = clamped ? "▾ Показать целиком" : "▴ Свернуть";
+      if (!clamped) scrollFeed();
+    };
+    bubble.appendChild(toggle);
+  });
+}
+
+/* Ответ агента приходит потоком и почти всегда является markdown —
+   рендерим его как разметку, а не как «сырой» текст с решётками и звёздами. */
+let streamFrame = 0;
+
+function renderStream() {
+  // Поток идёт мелкими кусками: перерисовываем markdown не чаще кадра,
+  // иначе длинный ответ агента начинает подтормаживать ленту.
+  if (streamFrame) return;
+  streamFrame = requestAnimationFrame(() => {
+    streamFrame = 0;
+    if (!state.streamBubble) return;
+    const body = state.streamBubble.querySelector(".body");
+    body.innerHTML = renderMarkdown(state.streamRaw);
+    attachClamp(state.streamBubble, body);
+    scrollFeed();
+  });
+}
+
+/* Поток закончился — дорисовываем остаток сразу, не дожидаясь кадра. */
+function flushStream() {
+  if (streamFrame) { cancelAnimationFrame(streamFrame); streamFrame = 0; }
+  if (!state.streamBubble) return;
+  const body = state.streamBubble.querySelector(".body");
+  body.innerHTML = renderMarkdown(state.streamRaw);
+  attachClamp(state.streamBubble, body);
+  scrollFeed();
+}
+
+function firstLine(text, limit = 90) {
+  const line = String(text || "").split("\n").find((l) => l.trim()) || "";
+  return line.length > limit ? line.slice(0, limit) + "…" : line;
+}
+
+/* Инструментов за задачу набегают десятки — по умолчанию каждый свёрнут
+   в одну строку, детали раскрываются кликом по заголовку. */
+function addToolBubble(event) {
+  const bubble = addBubble("tool collapsed", "");
+  if (state.hideTools) bubble.classList.add("hidden");
+
+  const head = el("button", "tool-head");
+  head.appendChild(el("span", "chev", "▸"));
+  head.appendChild(el("span", "tool-title", `🔧 ${esc(event.title || event.tool || "Инструмент")}`));
+  head.appendChild(el("span", "tool-sub", esc(firstLine(event.detail))));
+  head.appendChild(el("span", "tool-status", ""));
+  head.onclick = () => {
+    bubble.classList.toggle("collapsed");
+    head.querySelector(".chev").textContent = bubble.classList.contains("collapsed") ? "▸" : "▾";
+    scrollFeed();
+  };
+  bubble.appendChild(head);
+
+  const body = el("div", "tool-body");
+  if (event.detail) body.appendChild(el("pre", "tool-detail", esc(event.detail)));
+  bubble.appendChild(body);
+  return bubble;
+}
+
 function pushChatEvent(event) {
   const kind = event.kind || "raw";
 
   if (kind === "assistant") {
     if (!state.streamBubble) {
       state.streamBubble = addBubble("assistant",
-        `<span class="who">⚡ агент · ${now()}</span><span class="body"></span>`);
+        `<span class="who">⚡ агент · ${now()}</span><span class="body md"></span>`);
+      state.streamRaw = "";
     }
-    const body = state.streamBubble.querySelector(".body");
-    body.textContent += event.text || "";
-    scrollFeed();
+    state.streamRaw += event.text || "";
+    renderStream();
     return;
   }
+  flushStream();
   state.streamBubble = null;
+  state.streamRaw = "";
 
   if (kind === "user") {
-    addBubble("user", `${esc(event.text)}<span class="stamp">вы · ${now()}</span>`);
+    const bubble = addBubble("user", "");
+    const body = el("div", "body md", renderMarkdown(event.text));
+    bubble.append(body, el("span", "stamp", `вы · ${now()}`));
+    attachClamp(bubble, body);
   } else if (kind === "assistant_final") {
-    addBubble("assistant", `<span class="who">⚡ агент</span>${esc(event.text)}`);
+    const bubble = addBubble("assistant", `<span class="who">⚡ агент · ${now()}</span>`);
+    const body = el("div", "body md", renderMarkdown(event.text));
+    bubble.appendChild(body);
+    attachClamp(bubble, body);
   } else if (kind === "system") {
     addBubble("system", `${esc(event.icon || "⚙")} ${esc(event.text)} <span class="stamp">${now()}</span>`);
   } else if (kind === "tool") {
-    const detail = event.detail ? `<div class="tool-detail">${esc(event.detail)}</div>` : "";
-    addBubble("tool", `<div class="tool-title">🔧 ${esc(event.title || event.tool || "Инструмент")}</div>${detail}`);
+    addToolBubble(event);
   } else if (kind === "tool_result") {
     const last = [...$("chat-feed").querySelectorAll(".bubble.tool")].pop();
-    const html = `<div class="tool-result">↪ ${esc(event.text || "готово")} ${esc(event.meta || "")}</div>`;
-    if (last) { last.insertAdjacentHTML("beforeend", html); scrollFeed(); }
-    else addBubble("tool", html);
+    const text = `↪ ${event.text || "готово"} ${event.meta || ""}`.trim();
+    const body = last && last.querySelector(".tool-body");
+    if (body) {
+      body.appendChild(el("div", "tool-result", esc(text)));
+      const status = last.querySelector(".tool-status");
+      if (status) status.textContent = firstLine(event.meta || event.text || "готово", 40);
+      scrollFeed();
+    } else {
+      addBubble("tool", `<div class="tool-result">${esc(text)}</div>`);
+    }
   } else if (kind === "result") {
-    const body = event.text ? `<div style="margin-top:6px">${esc(event.text)}</div>` : "";
-    addBubble("result",
-      `✅ Статус: ${esc(event.status)} · Токенов: ${esc(event.tokens)} · Время: ${esc(event.duration)}${body}`);
+    const body = event.text ? `<div class="body md">${renderMarkdown(event.text)}</div>` : "";
+    const bubble = addBubble("result",
+      `<span class="who">✅ ${esc(event.status)} · токенов ${esc(event.tokens)} · ${esc(event.duration)}</span>${body}`);
+    const node = bubble.querySelector(".body");
+    if (node) attachClamp(bubble, node);
   } else if (kind === "error") {
     addBubble("error", `❌ ${esc(event.text)}`);
   } else if (kind === "meta") {
@@ -816,6 +1045,30 @@ function pushChatEvent(event) {
   } else if ((event.text || "").trim()) {
     addBubble("meta", esc(event.text));
   }
+}
+
+function applyToolVisibility() {
+  document.querySelectorAll("#chat-feed .bubble.tool").forEach((node) => {
+    node.classList.toggle("hidden", state.hideTools);
+  });
+}
+
+/* Одна кнопка на всю ленту: если хоть что-то свёрнуто — разворачиваем всё,
+   иначе сворачиваем обратно. */
+function toggleAllBlocks() {
+  const feed = $("chat-feed");
+  const expand = !!(feed.querySelector(".bubble.tool.collapsed") || feed.querySelector(".bubble.clamped"));
+  feed.querySelectorAll(".bubble.tool").forEach((node) => {
+    node.classList.toggle("collapsed", !expand);
+    const chev = node.querySelector(".chev");
+    if (chev) chev.textContent = expand ? "▾" : "▸";
+  });
+  feed.querySelectorAll(".bubble > .clamp-toggle").forEach((btn) => {
+    const bubble = btn.parentElement;
+    bubble.classList.toggle("clamped", !expand);
+    btn.textContent = expand ? "▴ Свернуть" : "▾ Показать целиком";
+  });
+  $("btn-chat-expand").textContent = expand ? "↕ Свернуть всё" : "↕ Развернуть всё";
 }
 
 async function sendChatTask() {
@@ -886,7 +1139,7 @@ async function refreshModels(quiet = false) {
 
 function fillPlayProjects() {
   const select = $("play-project");
-  const projects = state.projects || [];
+  const projects = (state.projects || []).filter((p) => !p.archived || p.slug === state.playSlug);
   const current = select.value;
   select.innerHTML = "";
   projects.forEach((p) => select.appendChild(new Option(p.slug + (p.playable ? "" : "  (нет кода)"), p.slug)));
@@ -1258,6 +1511,33 @@ function bindStudio() {
 
 function bindProjects() {
   $("btn-refresh-projects").onclick = loadProjects;
+  $("gallery-sort").value = state.gallerySort;
+  $("gallery-sort").onchange = () => {
+    state.gallerySort = $("gallery-sort").value;
+    localStorage.setItem("gallerySort", state.gallerySort);
+    loadGallery();
+    loadProjects();
+  };
+  $("chk-archived").checked = state.showArchived;
+  $("chk-archived").onchange = () => {
+    state.showArchived = $("chk-archived").checked;
+    localStorage.setItem("showArchived", state.showArchived ? "1" : "0");
+    loadGallery();
+  };
+  $("chk-archived-list").checked = state.showArchivedList;
+  $("chk-archived-list").onchange = () => {
+    state.showArchivedList = $("chk-archived-list").checked;
+    localStorage.setItem("showArchivedList", state.showArchivedList ? "1" : "0");
+    loadProjects();
+  };
+  $("btn-archive-project").onclick = () => {
+    const card = (state.projects || []).find((p) => p.slug === state.project);
+    if (card) toggleArchive(card);
+  };
+  $("btn-delete-project").onclick = () => {
+    const card = (state.projects || []).find((p) => p.slug === state.project);
+    if (card) deleteProject(card);
+  };
   $("btn-new-chat").onclick = newChat;
   $("btn-new-chat-2").onclick = newChat;
 
@@ -1344,6 +1624,13 @@ function bindChats() {
     if (enabled && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
   };
   $("chk-chat-autoscroll").onchange = scrollFeed;
+  $("chk-hide-tools").checked = state.hideTools;
+  $("chk-hide-tools").onchange = () => {
+    state.hideTools = $("chk-hide-tools").checked;
+    localStorage.setItem("hideTools", state.hideTools ? "1" : "0");
+    applyToolVisibility();
+  };
+  $("btn-chat-expand").onclick = toggleAllBlocks;
 
   const presets = $("chat-presets");
   state.boot.chat_presets.forEach((preset) => {

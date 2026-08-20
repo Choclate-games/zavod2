@@ -51,7 +51,16 @@ class LocalAIProvider(AIProvider):
 
     def _synthesize_brainstorm(self, user_prompt: str) -> BrainstormResult:
         """Оффлайн-идеи берём из общего каталога брейнштормера — список один на всю фабрику."""
-        return BrainstormResult(ideas=fallback_catalog(user_prompt))
+        # Из промпта нужны только тема и количество: остальное (случайные линзы,
+        # список «не повторяй») адресовано облачной модели и в подбор по каталогу
+        # не годится — иначе тему определяли бы слова из случайной подсказки.
+        theme = ""
+        match = re.search(r"Пожелания / Тема: '(.*?)'", user_prompt)
+        if match:
+            theme = match.group(1)
+        count_match = re.search(r"Придумай (\d+) уникальных концептов", user_prompt)
+        count = int(count_match.group(1)) if count_match else 10
+        return BrainstormResult(ideas=fallback_catalog(theme, count))
 
     # ------------------------------------------------------------------
     # Визуальные стили по сеттингу.
@@ -479,13 +488,32 @@ class LocalAIProvider(AIProvider):
         raw_prompt = self._clean_prompt(raw_prompt)
         lower = raw_prompt.lower()
 
-        # Тематический анализ
-        is_drift = any(w in lower for w in ["дрифт", "машин", "авто", "таран", "гонк", "drift", "car", "zombie", "зомби", "кармагеддон", "derby", "дерби"])
-        is_microbe = any(w in lower for w in ["микроб", "клетк", "спор", "бактери", "microbe", "evolution", "эволюц", "spore", "agar"])
-        is_gladiator = any(w in lower for w in ["гладиатор", "gladiator", "рим", "арен", "меч", "щит", "коллизей", "colosseum", "рэгдолл", "ragdoll"])
-        is_mech = any(w in lower for w in ["мех", "mech", "баз", "base", "строит", "build", "defense", "оборон", "турел"])
-        is_cards = any(w in lower for w in ["карт", "card", "колод", "deck", "battler", "драфт"])
-        is_survivor = any(w in lower for w in ["survivor", "vampire", "выживан", "орд", "swarm", "автострел"])
+        # Тематический анализ.
+        #
+        # Раньше здесь стояла проверка вхождением подстроки по коротким огрызкам
+        # («мех», «меч», «арен», «карт», «баз», «авто»). Из-за неё почти любая идея
+        # цеплялась за чужой шаблон: слово «механика» в питче давало документы
+        # «Мех-Осада», «мечта» — «Гладиаторы Арены», «автоматически» — «Зомби Дрифт».
+        # Именно так у пользователя выходили документы совсем на другую игру.
+        # Теперь совпадение ищется по границе слова и по полным основам.
+        def has(*stems: str) -> bool:
+            """Ищет основу как отдельное слово: «механика» больше не считается «мехом»."""
+            pattern = r"(?:^|[^\w])(?:" + "|".join(stems) + r")(?![\w])"
+            return re.search(pattern, lower) is not None
+
+        is_drift = has(r"дрифт\w*", r"машин\w*", r"автомобил\w*", r"гоноч\w*", r"гонк\w*",
+                       r"зомби\w*", r"таран\w*", r"drift\w*", r"racing", r"derby", r"дерби")
+        is_microbe = has(r"микроб\w*", r"бактери\w*", r"клетк\w*", r"эволюци\w*",
+                         r"microbe\w*", r"spore", r"agar")
+        is_gladiator = has(r"гладиатор\w*", r"арена", r"арене", r"арену", r"арены",
+                           r"колизе\w*", r"коллизе\w*", r"рэгдолл\w*", r"gladiator\w*",
+                           r"ragdoll", r"мечом", r"мечник\w*")
+        is_mech = has(r"мех", r"меха", r"мехи", r"мехов", r"робот\w*", r"турел\w*",
+                      r"оборон\w*", r"tower\s*defense", r"mech", r"mecha")
+        is_cards = has(r"карточн\w*", r"колод\w*", r"деккбилд\w*", r"card\s*battler",
+                       r"deckbuild\w*")
+        is_survivor = has(r"survivor\w*", r"vampire\s*survivors", r"автострел\w*",
+                          r"орда", r"орды", r"орду", r"хорд\w*")
 
         if is_drift:
             theme = "drift"
@@ -723,6 +751,14 @@ class LocalAIProvider(AIProvider):
                     weaknesses=["Требует точной настройки отклика на слабых устройствах"]
                 )
             ]
+
+        # Идентичность игры всегда берётся из идеи пользователя, даже если
+        # сработал тематический шаблон: иначе выбранная идея молча подменяется
+        # каталожной игрой, и пакет документов оказывается про другое.
+        prompt_title = self._title_from_prompt(raw_prompt)
+        if prompt_title and prompt_title != "Новая игра" and len(prompt_title.split()) >= 2:
+            title = prompt_title
+            slug = self._slugify(title)
 
         # Explicit overrides
         if "three.js" in lower or "threejs" in lower:

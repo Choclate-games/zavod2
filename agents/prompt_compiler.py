@@ -1,4 +1,5 @@
 from app import knowledge
+from app.config import DESIGN_OS_ENABLED
 from app.context import GenerationContext
 from app.logging import log_agent
 
@@ -204,6 +205,78 @@ class PromptCompilerAgent:
             "- [ ] Ни одна задача не пересекла ворота со статусом `pending` из HUMAN_GATES.md",
         ])
 
+    @staticmethod
+    def _mechanic_depth_block(deep) -> str:
+        """Глубина механики для кодового агента: числа, состояния, псевдокод.
+
+        Без этого блока агент реализует жанровый шаблон, а не эту игру.
+        """
+        if deep is None:
+            return ""
+        params = "\n".join(f"  - `{p.name}` = `{p.value}` — {p.tuning_note}" for p in deep.parameters)
+        states = ", ".join(f"`{s}`" for s in deep.states)
+        feedback = "\n".join(f"  - {f}" for f in deep.feedback_layers)
+        synergies = "\n".join(f"  - {s}" for s in deep.synergies)
+        pseudocode = f"\n- **Псевдокод тика**:\n```text\n{deep.pseudocode.strip()}\n```" if deep.pseudocode.strip() else ""
+        lines = [f"- **Решение игрока**: {deep.player_decision}" if deep.player_decision else ""]
+        if states:
+            lines.append(f"- **Состояния**: {states}")
+        if params:
+            lines.append(f"- **Числовые параметры (реализуй именно эти значения)**:\n{params}")
+        if feedback:
+            lines.append(f"- **Слои отклика**:\n{feedback}")
+        if deep.failure_mode:
+            lines.append(f"- **Режим отказа игрока**: {deep.failure_mode}")
+        if deep.mastery_curve:
+            lines.append(f"- **Кривая мастерства**: {deep.mastery_curve}")
+        if deep.counterplay:
+            lines.append(f"- **Сопротивление игры**: {deep.counterplay}")
+        if synergies:
+            lines.append(f"- **Синергии**:\n{synergies}")
+        if deep.why_unique:
+            lines.append(f"- **Почему это не жанровый шаблон**: {deep.why_unique}")
+        return "\n".join([l for l in lines if l]) + pseudocode + "\n"
+
+    @staticmethod
+    def _core_design_block(concept) -> str:
+        """Уникальное ядро игры: петли, напряжение и формулы — до списка механик."""
+        core = concept.core_design
+        if not (core.micro_loop or core.core_formulas or core.signature_moment):
+            return ""
+
+        def steps(items) -> str:
+            return "\n".join(
+                f"- **{s.step}** ({s.duration}): игрок — {s.player_action}; игра — {s.game_response}; "
+                f"решение — {s.decision}"
+                for s in items
+            )
+
+        parts = []
+        if core.signature_moment:
+            parts.append(f"**Фирменный момент**: {core.signature_moment}")
+        if core.what_makes_it_different:
+            parts.append(f"**Чем петля отличается от соседей по жанру**: {core.what_makes_it_different}")
+        if core.genre_template_rejected:
+            parts.append(f"**Шаблон жанра, который НЕ реализуем**: {core.genre_template_rejected}")
+        if core.loop_diagram.strip():
+            parts.append(f"**Схема петли**:\n```text\n{core.loop_diagram.strip()}\n```")
+        if core.micro_loop:
+            parts.append(f"**Микро-петля (посекундно)**:\n{steps(core.micro_loop)}")
+        if core.meso_loop:
+            parts.append(f"**Мезо-петля (этап)**:\n{steps(core.meso_loop)}")
+        if core.macro_loop:
+            parts.append(f"**Макро-петля (забег)**:\n{steps(core.macro_loop)}")
+        if core.tension_curve:
+            parts.append(f"**Кривая напряжения**: {core.tension_curve}")
+        if core.core_formulas:
+            formulas = "\n".join(f"- `{f}`" for f in core.core_formulas)
+            parts.append(f"**Формулы ядра (реализуй буквально)**:\n{formulas}")
+        if core.run_progression:
+            parts.append("**Прогрессия внутри забега**:\n" + "\n".join(f"- {i}" for i in core.run_progression))
+        if core.meta_progression:
+            parts.append("**Мета-прогрессия**:\n" + "\n".join(f"- {i}" for i in core.meta_progression))
+        return "\n\n".join(parts)
+
     def compile(self, ctx: GenerationContext) -> str:
         concept = ctx.concept
         log_agent("PromptCompiler", f"Compiling definitive AI Developer Prompt for '{concept.title}'")
@@ -213,6 +286,7 @@ class PromptCompilerAgent:
             f"- **{layer.get('name', 'Layer') if isinstance(layer, dict) else str(layer)}**: {layer.get('responsibility', layer.get('desc', '')) if isinstance(layer, dict) else ''}"
             for layer in concept.tech_spec.layers
         ]) if concept.tech_spec.layers else "- **Core Systems Layer**: Complete game loop and state management"
+        deep_by_name = {d.name.strip().lower(): d for d in concept.core_design.mechanics if d.name}
         mechanics_items = "\n".join([
             f"### {m.name} ({m.priority.upper()})\n"
             f"- **Category**: {m.category}\n"
@@ -220,8 +294,10 @@ class PromptCompilerAgent:
             f"- **Player Input**: {m.player_interaction}\n"
             f"- **Hit & Sensory Feedback**: {m.feedback}\n"
             f"- **Technical Complexity**: {m.technical_complexity}\n"
+            + self._mechanic_depth_block(deep_by_name.get(m.name.strip().lower()))
             for m in concept.mechanics
         ])
+        core_block = self._core_design_block(concept)
         rewarded_items = "\n".join([
             f"- **{r.name} (`{r.id}`)**: {r.benefit} (Trigger: {r.trigger_moment}, Limit: {r.cooldown_or_limit})"
             for r in concept.monetization.rewarded_placements
@@ -248,12 +324,32 @@ class PromptCompilerAgent:
 
         # Слой Design OS. Кодовый агент получает не только «что построить»,
         # но и «что здесь гипотеза», «чем это измеряется» и «где остановиться».
-        promise_block = self._promise_block(concept)
-        density_block = self._density_block(concept)
-        telemetry_block = self._telemetry_block(concept)
-        scope_block = self._scope_block(concept)
-        gates_block = self._gates_block(concept)
-        dod_items = dod_items + "\n" + self._design_os_dod(concept)
+        # Слой Design OS отключён флагом config.DESIGN_OS_ENABLED: соответствующие
+        # секции промпта собираются только когда слой включён.
+        if DESIGN_OS_ENABLED:
+            promise_section = (
+                "\n---\n\n## 1a. ОБЕЩАНИЕ ИГРОКУ (ПРОВЕРЯЕМЫЙ КОНТРАКТ)\n"
+                "Это не маркетинг, а приёмочный критерий. Любая реализация, нарушающая обещание\n"
+                "первых 60 секунд, считается невыполненной задачей, даже если код работает.\n\n"
+                + self._promise_block(concept) + "\n"
+            )
+            density_section = (
+                "\n---\n\n## 3a. ПЛОТНОСТЬ ПЕРВОЙ СЕССИИ (EXPERIENCE DENSITY)\n"
+                + self._density_block(concept) + "\n"
+            )
+            design_os_sections = (
+                "\n---\n\n## 8a. ТЕЛЕМЕТРИЯ (ЧАСТЬ DEFINITION OF DONE)\n"
+                + self._telemetry_block(concept) + "\n"
+                "\n---\n\n## 8b. ГРАНИЦЫ ОБЪЁМА И ОТКРЫТЫЕ ДОПУЩЕНИЯ\n"
+                + self._scope_block(concept) + "\n"
+                "\n---\n\n## 8c. ЧЕЛОВЕЧЕСКИЕ ВОРОТА (ГДЕ ОСТАНОВИТЬСЯ И СПРОСИТЬ)\n"
+                + self._gates_block(concept) + "\n"
+            )
+            dod_items = dod_items + "\n" + self._design_os_dod(concept)
+        else:
+            promise_section = ""
+            density_section = ""
+            design_os_sections = ""
 
         prompt_content = f"""# FINAL AI DEVELOPER PROMPT: {concept.title.upper()} 🎮⚡
 
@@ -275,14 +371,7 @@ class PromptCompilerAgent:
 - **Core Hook**: {concept.hook}
 - **Session Model**: {concept.session_model}
 
----
-
-## 1a. ОБЕЩАНИЕ ИГРОКУ (ПРОВЕРЯЕМЫЙ КОНТРАКТ)
-Это не маркетинг, а приёмочный критерий. Любая реализация, нарушающая обещание
-первых 60 секунд, считается невыполненной задачей, даже если код работает.
-
-{promise_block}
-
+{promise_section}
 ---
 
 ## 2. TECHNOLOGY STACK & RENDERING ENGINE
@@ -309,13 +398,11 @@ class PromptCompilerAgent:
 {concept.core_loop}
 ```
 
+{core_block}
+
 {mechanics_items}
 
----
-
-## 3a. ПЛОТНОСТЬ ПЕРВОЙ СЕССИИ (EXPERIENCE DENSITY)
-{density_block}
-
+{density_section}
 ---
 
 ## 4. SOFTWARE ARCHITECTURE & SYSTEMS
@@ -480,21 +567,7 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 ## 8. STEP-BY-STEP DEVELOPMENT ROADMAP
 {roadmap_items}
 
----
-
-## 8a. ТЕЛЕМЕТРИЯ (ЧАСТЬ DEFINITION OF DONE)
-{telemetry_block}
-
----
-
-## 8b. ГРАНИЦЫ ОБЪЁМА И ОТКРЫТЫЕ ДОПУЩЕНИЯ
-{scope_block}
-
----
-
-## 8c. ЧЕЛОВЕЧЕСКИЕ ВОРОТА (ГДЕ ОСТАНОВИТЬСЯ И СПРОСИТЬ)
-{gates_block}
-
+{design_os_sections}
 ---
 
 ## 9. NON-NEGOTIABLE PLATFORM RULES

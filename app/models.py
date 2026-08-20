@@ -34,6 +34,55 @@ class MechanicSpec(BaseSafeModel):
     strengths: List[str] = Field(default_factory=list)
     weaknesses: List[str] = Field(default_factory=list)
 
+class MechanicParameter(BaseSafeModel):
+    """Числовой параметр механики: без чисел спецификация превращается в лозунг."""
+    name: str = Field(default="", description="Название параметра, например «окно парирования»")
+    value: str = Field(default="", description="Конкретное значение с единицей: 0.18 с, 12 ед/с, 3 заряда")
+    tuning_note: str = Field(default="", description="Что ломается в ощущении игры, если крутить параметр вверх/вниз")
+
+class MechanicDeepSpec(BaseSafeModel):
+    """Глубокое описание одной механики: решение, числа, отказ, мастерство."""
+    name: str = Field(default="")
+    role_in_loop: str = Field(default="", description="Роль в петле: двигатель, тормоз, источник риска, источник награды")
+    player_decision: str = Field(default="", description="Какое именно решение игрок принимает каждый раз, применяя механику")
+    input_mapping: str = Field(default="", description="Тач и клавиатура/мышь: конкретные жесты и клавиши")
+    states: List[str] = Field(default_factory=list, description="Состояния механики и условия переходов")
+    parameters: List[MechanicParameter] = Field(default_factory=list)
+    feedback_layers: List[str] = Field(default_factory=list, description="Отклик по слоям: визуал, звук, камера, тактильность, UI")
+    failure_mode: str = Field(default="", description="Как игрок ошибается и по какому сигналу он понимает причину")
+    mastery_curve: str = Field(default="", description="Что умеет новичок на 30-й секунде и что умеет эксперт на 10-м забеге")
+    counterplay: str = Field(default="", description="Чем игра сопротивляется механике, как растёт давление")
+    synergies: List[str] = Field(default_factory=list, description="Связи с другими механиками этой игры")
+    why_unique: str = Field(default="", description="Чем это отличается от стандартной реализации в жанре")
+    pseudocode: str = Field(default="", description="Псевдокод одного тика механики: вход -> проверка -> эффект")
+
+class LoopStep(BaseSafeModel):
+    """Шаг игровой петли: действие игрока, ответ игры и принимаемое решение."""
+    step: str = Field(default="")
+    player_action: str = Field(default="")
+    game_response: str = Field(default="")
+    decision: str = Field(default="", description="Значимый выбор игрока на этом шаге")
+    duration: str = Field(default="", description="Сколько длится шаг: 0.5 с, 45 с, забег")
+
+class CoreDesignSpec(BaseSafeModel):
+    """Уникальное ядро конкретной игры: петли, формулы и глубина механик.
+
+    Существует ровно для того, чтобы CORE_LOOP.md и MECHANICS.md перестали быть
+    одинаковым шаблоном для всех проектов фабрики.
+    """
+    signature_moment: str = Field(default="", description="Момент, который игрок будет пересказывать другу")
+    genre_template_rejected: str = Field(default="", description="Какой шаблон жанра сознательно НЕ берём и почему")
+    what_makes_it_different: str = Field(default="", description="Чем петля отличается от соседней игры того же жанра")
+    micro_loop: List[LoopStep] = Field(default_factory=list, description="Посекундная петля")
+    meso_loop: List[LoopStep] = Field(default_factory=list, description="Петля волны/этапа")
+    macro_loop: List[LoopStep] = Field(default_factory=list, description="Петля забега и возвращения")
+    loop_diagram: str = Field(default="", description="ASCII-диаграмма петли именно этой игры")
+    tension_curve: str = Field(default="", description="Как нарастает и спадает напряжение внутри забега")
+    core_formulas: List[str] = Field(default_factory=list, description="Формулы этой игры: урон, скорость, спавн, счёт")
+    run_progression: List[str] = Field(default_factory=list, description="Рост силы внутри забега, в терминах этой игры")
+    meta_progression: List[str] = Field(default_factory=list, description="Рост между забегами, в терминах этой игры")
+    mechanics: List[MechanicDeepSpec] = Field(default_factory=list)
+
 class SystemSpec(BaseSafeModel):
     name: str = Field(default="")
     purpose: str = Field(default="")
@@ -350,6 +399,7 @@ class GameConcept(BaseSafeModel):
     references: List[ReferenceSpec] = Field(default_factory=list)
     mechanics: List[MechanicSpec] = Field(default_factory=list)
     gameplay_systems: List[SystemSpec] = Field(default_factory=list)
+    core_design: CoreDesignSpec = Field(default_factory=CoreDesignSpec)
     tech_spec: TechArchitectureSpec = Field(default_factory=TechArchitectureSpec)
     monetization: MonetizationSpec = Field(default_factory=MonetizationSpec)
     playgama: PlaygamaSpec = Field(default_factory=PlaygamaSpec)

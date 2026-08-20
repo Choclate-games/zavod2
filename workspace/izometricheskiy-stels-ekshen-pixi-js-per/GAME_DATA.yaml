@@ -1,0 +1,653 @@
+raw_prompt: 'Создай 2D изометрический стелс-экшен на Pixi.js: персонаж ходит по процедурно-сгенерированному
+  ночному лесу, прячется в кустах от блуждающих огоньков и Лешего, зажигает берестяные
+  факелы, собирает ингредиенты и чертит круги из соли.'
+title: 'Изометрический стелс-экшен pixi.js: персонаж'
+slug: izometricheskiy-stels-ekshen-pixi-js-per
+genre: 2D Менеджмент колонии / Idle-стратегия
+subgenre: Жизнь и рост поселения
+renderer: pixijs
+renderer_reason: User explicitly specified 'pixijs'.
+renderer_confidence: 1.0
+platform: Playgama Bridge (Yandex Games / VK / Web)
+orientation: landscape
+target_audience: Игроки Яндекс Игр, CrazyGames и мобильных веб-порталов.
+core_loop: Планирование дня -> Работа колонии -> Событие сезона -> Распределение прироста
+  -> Новый день.
+hook: Вы задаёте правила, а колония живёт сама и приносит последствия ваших решений.
+player_fantasy: 'Растите колонию через сезоны: распределяйте роли, готовьтесь к непогоде
+  и расширяйте владения.'
+session_model: Короткие сессии по 5-8 минут с высоким удержанием и мета-прокачкой.
+unique_value_proposition: Уникальное сочетание жизнь и рост поселения с сочным физическим
+  геймфилом и рогалик-синергиями.
+vision: Создать качественную веб-игру на PIXIJS с понятной первой сессией и высоким
+  удержанием.
+elevator_pitch: 'Ведите живую колонию через сезоны: планируйте, рискуйте и смотрите,
+  как решения дают всходы!'
+win_conditions: Пережить полный годовой цикл и вывести колонию на устойчивый рост.
+lose_conditions: Ресурсы исчерпаны, и колония не переживает сезон.
+progression_summary: ''
+difficulty_curve: ''
+scores:
+  fun: 9
+  originality: 8
+  replayability: 9
+  development_cost: 7
+  visual_appeal: 8
+  mobile_fit: 9
+  monetization: 9
+  platform_fit: 10
+  overall_score: 8.8
+  justification: Высокий виральный потенциал, быстрый цикл игровой сессии (5-8 минут)
+    и естественные точки интеграции Rewarded рекламы.
+references:
+- name: Vampire Survivors / Brotato
+  genre: Horde Survival / Arena Roguelite
+  mechanics:
+  - Выбор из 3 карт
+  - Мета-прогрессия
+  - Синергия способностей
+  lessons: Каждое повышение уровня должно давать мгновенный ощутимый прирост силы.
+  what_to_avoid: Не делать пустые статичные арены без физических объектов.
+- name: Carmageddon / Drift Hunters
+  genre: Physics Action Racing
+  mechanics:
+  - Физика заноса
+  - Таранные удары
+  - Деформация окружения
+  lessons: Физическая инерция и сочные столкновения создают высокий уровень вовлечения.
+  what_to_avoid: Не перегружать управление сложными комбинациями клавиш.
+mechanics:
+- name: Распределение ролей и маршрутов
+  category: progression
+  priority: core
+  description: 'Игрок не управляет каждым жителем: он задаёт приоритеты и маршруты,
+    а колония исполняет их с задержкой.'
+  player_interaction: Виртуальный джойстик и кнопки действий на экране, на ПК — клавиатура
+    и мышь.
+  feedback: Оживающие тропы, растущие постройки, наглядные счётчики прироста и убыли.
+  technical_complexity: Medium
+  strengths:
+  - Понятно с первых секунд
+  - Есть куда расти в мастерстве
+  weaknesses:
+  - Требует точной настройки отклика на слабых устройствах
+gameplay_systems:
+- name: Система Перемещения и Физического Контроля
+  purpose: Обеспечить четкое и отзывчивое управление с учетом инерции и столкновений.
+  input: Плавающий виртуальный джойстик (мобильные) или WASD/Стрелки (ПК).
+  rules:
+  - Скорость масштабируется параметрами маневренности и массы.
+  - Коллизии с препятствиями рассчитываются через физический движок с упругим отскоком.
+  - При потере управления включается автоматическая стабилизация.
+  state:
+  - IDLE
+  - MOVING
+  - DRIFTING
+  - IMPACT
+  - RECOVERING
+  interactions: Взаимодействует с физическими телами врагов, препятствиями и дропами
+    наград.
+  feedback: Следы на поверхности, частицы пыли, звуки мотора/шагов, динамический наклон
+    камеры.
+  edge_cases:
+  - При застревании в геометрии объект мягко телепортируется в ближайшую свободную
+    точку.
+- name: Боевая Система и Расчет Урона
+  purpose: Обработка ударов, тарана, хитбоксов, расчета брони и эффектов отдачи.
+  input: Кнопки атаки, нитро, спец-способностей.
+  rules:
+  - Итоговый Урон = (БазовыйУрон * ФакторСкорости + БонусСилы) * (1 - СнижениеБроней).
+  - Критические удары наносят 2.0x урона при атаке в уязвимые зоны.
+  - Тяжелые попадания вызывают 40мс хит-стоп замедление времени.
+  state:
+  - READY
+  - ATTACKING
+  - HITSTOP
+  - COOLDOWN
+  interactions: Триггеры коллизий проверяют пересечения с хитбоксами противников.
+  feedback: Заморозка кадра (40мс), фонтан искр/частиц, всплывающие цифры урона.
+  edge_cases:
+  - Одновременные встречные удары вызывают взаимное физическое отталкивание.
+tech_spec:
+  language: TypeScript (strict mode)
+  bundler: Vite 5.x
+  renderer: pixijs
+  renderer_version: ^8.0.0
+  physics_engine: Matter.js (^0.19.0)
+  state_manager: Custom TinyEventBus & Reactive GameStore
+  audio_engine: Howler.js (^2.2.4) с WebAudio API
+  target_fps: 60
+  max_draw_calls: 75
+  max_triangles_or_sprites: 40000
+  bundle_size_budget_mb: 4.2
+  layers:
+  - name: Application Layer
+    responsibility: Инициализация Vite, ресайз канваса, полноэкранный режим, прелоадер.
+  - name: Platform & Ads Layer
+    responsibility: Адаптер Playgama Bridge, менеджеры Interstitial и Rewarded рекламы,
+      Cloud Save.
+  - name: Core Engine Layer
+    responsibility: Фиксированный цикл GameLoop 60Гц, EventBus, маршрутизация ввода.
+  - name: Physics Simulation Layer
+    responsibility: Шаги симуляции Rapier3D, фильтрация коллизий, рэгдолл-синхронизация.
+  - name: Gameplay Systems Layer
+    responsibility: Боевая система, спавн врагов, выбор 3 карт улучшений, расчет комбо.
+  - name: Entity Management Layer
+    responsibility: Пул сущностей игрока, врагов, снарядов и осколков.
+  - name: Rendering Layer
+    responsibility: Three.js граф сцены, InstancedMesh батчинг, тени, эмиттеры частиц.
+  - name: UI & HUD Layer
+    responsibility: HTML5/CSS3 оверлей, виртуальный джойстик, полосы HP, модальные
+      окна.
+  modules:
+  - name: src/main.ts
+    desc: 'Точка входа: инициализация Playgama Bridge, загрузка ассетов и запуск Game.'
+  - name: src/core/Game.ts
+    desc: Главный координатор, стейт-машина и управление сценами.
+  - name: src/core/GameLoop.ts
+    desc: Фиксированный 60Гц цикл обновления с аккумулятором дельты.
+  - name: src/core/EventBus.ts
+    desc: Типизированная шина событий для слабой связности систем.
+  - name: src/platform/PlaygamaService.ts
+    desc: Служба работы с @playgama/bridge (реклама, облачные сейвы, лидерборды).
+  - name: src/physics/PhysicsWorld.ts
+    desc: Обертка физического мира Rapier3D с фильтрами слоев коллизий.
+  - name: src/entities/Player.ts
+    desc: Контроллер игрока с расчетом физических сил и управления.
+  - name: src/entities/EnemyPool.ts
+    desc: Пул переиспользуемых сущностей врагов с логикой поведения.
+  - name: src/systems/CombatSystem.ts
+    desc: Расчет урона, хит-стопа, импульсов и комбо-бонусов.
+  - name: src/ui/UIManager.ts
+    desc: Управление HUD, окном выбора карт, главным меню и экраном результатов.
+monetization:
+  strategy_summary: Гибридная модель Free-to-Play для Яндекс Игр и веб-порталов. Высокий
+    eCPM за счет полезных Rewarded видео без агрессивного навязывания.
+  rewarded_placements:
+  - id: revive_run
+    name: Второе Дыхание (Возрождение)
+    benefit: Восстановление 50% HP + 3 сек неуязвимости с силовой волной, раскидывающей
+      врагов.
+    cooldown_or_limit: 1 раз за забег.
+    trigger_moment: При получении смертельного урона.
+  - id: double_gold_run
+    name: Удвоение Наград (2x Золото)
+    benefit: Удваивает все заработанные шестеренки и монеты за завершенный раунд.
+    cooldown_or_limit: Доступно на каждом экране результатов.
+    trigger_moment: Экран окончания игры.
+  - id: free_card_reroll
+    name: Переброс Карт Улучшений
+    benefit: Обновляет список 3 карт улучшений с гарантией Редкой или Эпической карты.
+    cooldown_or_limit: До 2 раз за забег.
+    trigger_moment: Окно выбора 3 карт.
+  interstitial_placements:
+  - trigger_event: Между волнами и при возврате в Главное Меню.
+    cooldown_seconds: 90
+    conditions: Интервал не менее 90 секунд, не показывается во время активного геймплея.
+  in_app_purchases:
+  - sku: ad_free_vip_pass
+    name: VIP Пропуск (Без Рекламы)
+    description: Отключает межстраничные баннеры, дает вечный бонус +25% к золоту
+      и эксклюзивный скин.
+    price_tier: 199 YAN / 199 руб
+    reward: Отключение Interstitial + VIP скин
+  fairness_rules:
+  - Весь игровой контент можно открыть бесплатно через геймплей.
+  - Полное отсутствие рекламы во время активного боя.
+  - Автоматическая пауза игры и отключение звука во время показа рекламы.
+playgama:
+  sdk_version: '@playgama/bridge 2.x'
+  supported_platforms:
+  - yandex
+  - vk
+  - ok
+  - crazy_games
+  - playgama
+  - mock
+  initialization_flow:
+  - 1. installViewportGuards() — блокировка страницы до первой отрисовки.
+  - 2. `await bridge.initialize()` (с таймаутом 10 с) + `in_game_loading_started`.
+  - 3. Язык платформы (`bridge.platform.language`) до первого перевода DOM.
+  - 4. Тихая авторизация на vk/ok — до чтения сейвов, с таймаутом 5 с.
+  - 5. Загрузка сейва через `bridge.storage.get(key)` (без storageType).
+  - '6. Выдача необработанных покупок: `getPurchases()` → выдать → потребить.'
+  - 7. Предзагрузка текстур, мешей и звуков, сборка сцены и UI.
+  - 8. Прогресс до 100% и пауза на затухание сплэша (~700 мс).
+  - 9. `bridge.platform.sendMessage('game_ready')` — ровно один раз.
+  - 10. Поднятие баннеров и старт обучения — только после game_ready.
+  cloud_save_keys:
+  - player_save_v1
+  leaderboards:
+  - globalhighscore
+  - highestwave
+  ads_integration:
+    interstitial: Взводится при завершении забега, показывается по клику на выход
+      с экрана результатов; floor >= платформенного минимума
+    rewarded: Награда только по событию state === 'rewarded'; off() слушателя и защита
+      от повторного вызова
+    banner: Поднят в меню и магазине, скрыт во время игры; на vk/ok — один запрос
+      за сессию
+  lifecycle_hooks:
+  - Пауза и звук — через `bridge.platform.on(EVENT_NAME.PAUSE_STATE_CHANGED / AUDIO_STATE_CHANGED)`.
+  - 'Колбэк вызывается сразу с текущим значением: игра могла стартовать в скрытой
+    вкладке.'
+  - На возобновлении сбрасывается аккумулятор дельты, dt клампится до 0.1 с.
+  - Сейв сбрасывается на `pagehide` и `visibilitychange`.
+art:
+  style_name: 'Тёплая акварель: луга и солнечный свет'
+  camera_perspective: 2D камера с плавным следованием и лёгким параллаксом
+  camera_fov: 0
+  camera_pitch_angle: 0
+  environment_theme: 'Живая природа: травы, пыльца, свет сквозь листву'
+  character_proportions: Округлые дружелюбные формы без острых углов
+  lighting_setup: Мягкий рассеянный дневной свет, тёплые тени
+  color_palette:
+    primary: '#7cb342'
+    secondary: '#f2b134'
+    accent: '#fff3cd'
+    background_dark: '#22301f'
+    surface_panel: '#33452c'
+  vfx_list:
+  - Пыльца в воздухе
+  - Колыхание травы
+  - Капли росы
+  - Порхающие насекомые
+  ui_theme: Деревянные таблички и мягкие скруглённые панели
+ui_ux:
+  hud_elements:
+  - 'Верх-Лево: Полоса прочности (HP) и щита'
+  - 'Верх-Центр: Номер волны и счетчик оставшихся врагов'
+  - 'Верх-Право: Количество монет и кнопка Паузы'
+  - 'Низ-Лево: Плавающий сенсорный виртуальный джойстик'
+  - 'Низ-Право: Кнопки Нитро-Ускорения и Специального Удара'
+  screens:
+  - id: main_menu
+    desc: Кнопка 'В БОЙ', Гараж, Таблица лидеров, Настройки звука
+  - id: gameplay_hud
+    desc: Динамический HUD с полосой HP, миникартой и виртуальным джойстиком
+  - id: upgrade_modal
+    desc: Окно выбора 1 из 3 карт рогалик-улучшений с кнопкой переброса за рекламу
+  - id: game_over_modal
+    desc: Результаты раунда, кнопка 'Возродиться за видео' и удвоение наград
+  mobile_controls_layout: 'Эргономичная раскладка: левая половина экрана — джойстик
+    движения, правая — кнопки действий'
+  keyboard_controls:
+    Движение: WASD / Стрелки
+    Нитро: Shift / Пробел
+    Пауза: Escape
+  touch_controls:
+    Руление: Левый сенсорный джойстик
+    Нитро: Правая кнопка действия
+  wireframes_ascii: '┌─────────────────────────────────────────────────────────────┐
+
+    │ [HP: ████████░░]   [ВОЛНА 04: 18/30]       [💰 1,250] [⚙️]  │
+
+    │                                                             │
+
+    │                                                             │
+
+    │                       [ 3D АРЕНА ]                          │
+
+    │                                                             │
+
+    │                                             (⚡ НИТРО)      │
+
+    │    ( 🕹️ ДЖОЙСТИК )                     (🛡️ ЩИТ)  (⚔️ ТАРАН) │
+
+    └─────────────────────────────────────────────────────────────┘'
+mobile:
+  orientation: landscape
+  touch_implementation: Плавающий мультитач виртуальный джойстик с нулевой задержкой
+  safe_area_handling: Отступы для экранов с вырезами (Notch) через `env(safe-area-inset-*)`
+  performance_throttling:
+  - Ограничение devicePixelRatio до 1.5x на мобильных устройствах
+  - Отключение теней на слабых GPU (< 4 ядра)
+audio: {}
+qa:
+  functional_tests:
+  - Корректный запуск и инициализация @playgama/bridge
+  - Отзывчивое управление с сенсорного экрана и клавиатуры
+  - Начисление наград за просмотр Rewarded видео
+  - Корректное сохранение и загрузка прогресса из Cloud Storage
+  - Авто-пауза при сворачивании вкладки браузера
+  performance_benchmarks:
+  - Стабильные 60 FPS на ПК и от 50 FPS на мобильных устройствах
+  - Количество Draw Calls строго менее 75
+  - Потребление памяти WebGL менее 180 МБ
+  - Время загрузки игры менее 3 секунд
+  cross_browser_matrix:
+  - Chrome (Desktop/Mobile)
+  - Safari (iOS)
+  - Yandex Browser
+  - Firefox
+  - Edge
+  common_bug_checklist: []
+roadmap:
+- phase_number: 1
+  title: Архитектура и Базовый Прототип
+  duration_days: 3
+  tasks:
+  - Настройка Vite, TypeScript и @playgama/bridge
+  - Инициализация сцены Three.js и физического мира Rapier3D
+  - Реализация контроллера движения и физики заноса
+  milestone_deliverable: Управляемая модель машины/персонажа на 3D арене с 60 FPS
+- phase_number: 2
+  title: Боевая Система и Спавн Врагов
+  duration_days: 4
+  tasks:
+  - Система расчета коллизий, урона и хит-стопа
+  - Пул врагов с базовым AI преследования
+  - Реализация шкалы ярости и супер-ударов
+  milestone_deliverable: Рабочий боевой цикл с волнами противников
+- phase_number: 3
+  title: Рогалик-Прогрессия и UI
+  duration_days: 3
+  tasks:
+  - Система 3-Card улучшений и синергий
+  - Верстка адаптивного HUD и меню на HTML5/CSS3
+  - Звуковые эффекты через Howler.js
+  milestone_deliverable: Полноценный цикл забега с прокачкой способностей
+- phase_number: 4
+  title: Интеграция Playgama Bridge и Полишинг
+  duration_days: 2
+  tasks:
+  - Интеграция Rewarded и Interstitial рекламы
+  - Сохранение прогресса в Cloud Storage
+  - Подключение глобальных таблиц рекордов
+  milestone_deliverable: Полная интеграция с порталом Яндекс Игры
+- phase_number: 5
+  title: QA, Оптимизация и Релиз
+  duration_days: 2
+  tasks:
+  - Тестирование на мобильных устройствах (iOS/Android)
+  - Профайлинг WebGL памяти и вызовов отрисовки
+  - Финальная сборка и проверка Definition of Done
+  milestone_deliverable: Готовая релизная сборка для публикации
+risks:
+- risk: Просадка FPS при большом числе одновременных врагов на мобильных устройствах
+  category: technical
+  severity: Medium
+  mitigation: Использование InstancedMesh, пулинга объектов и лимита активных тел
+    до 16.
+- risk: Блокировка рекламы или потеря интернет-соединения
+  category: platform
+  severity: Low
+  mitigation: 'Graceful fallback: игра не зависает при ошибке рекламы и сохраняет
+    данные локально.'
+skills:
+- skill_id: game_skill
+  name: 'Изометрический стелс-экшен pixi.js: персонаж Архитектура и Доменная Модель'
+  filename: GAME_SKILL.md
+  purpose: 'Стандарты архитектуры, стейт-машины и координации систем для Изометрический
+    стелс-экшен pixi.js: персонаж.'
+  when_to_use: При написании основного игрового цикла, шины событий и игровой логики.
+  rules:
+  - Строгий режим TypeScript без использования типа 'any'.
+  - Фиксированный шаг симуляции 60Гц с ограничением максимальной дельты.
+  - Слабая связность систем через EventBus.
+  architecture: '3-уровневая модульная архитектура: Platform/App -> Core Engine ->
+    Rendering/UI.'
+  implementation_guidance: Инициализировать Game из main.ts, подключить PlaygamaService
+    и запустить GameLoop.
+  common_mistakes:
+  - Не создавать новые объекты и меши внутри цикла тика 60Гц.
+  - Не вызывать методы рендеринга напрямую из физических систем.
+  checklist:
+  - Игра инициализируется без ошибок в консоли.
+  - Шина событий корректно маршрутизирует команды.
+  - Звук автоматически выключается при потере фокуса окна.
+  knowledge_refs: []
+- skill_id: gameplay_skill
+  name: Физика, Боевая Система и Управление
+  filename: GAMEPLAY_SKILL.md
+  purpose: Стандарты физической симуляции, расчета столкновений, урона и тактильного
+    отклика.
+  when_to_use: При разработке контроллера движения, коллизий, оружия и спецэффектов.
+  rules:
+  - Ограничивать максимальную дельту времени до 100мс для предотвращения проваливания
+    сквозь стены.
+  - Применять 40мс хит-стоп замедление при сильных столкновениях и ударах.
+  - Синхронизировать координаты физических тел с 3D мешами.
+  architecture: Физика на Rapier3D/Matter.js с интерполяцией положения графических
+    объектов.
+  implementation_guidance: Генерировать события 'entity:hit', 'combo:strike', 'wave:clear'
+    через EventBus.
+  common_mistakes:
+  - Не менять координаты мешей вручную минуя физические rigid bodies.
+  - Не использовать жестко зашитые магические числа без конфигурационного файла.
+  checklist:
+  - Управление персонажем/машиной отзывчивое и плавное.
+  - Столкновения вызывают яркий тактильный отклик (искры, звук, тряска экрана).
+  knowledge_refs: []
+- skill_id: renderer_skill
+  name: PIXIJS Оптимизация и Шейдеры
+  filename: RENDERER_SKILL.md
+  purpose: Руководство по высокой производительности и графике для движка PIXIJS.
+  when_to_use: При настройке сцены, материалов, источников света и систем частиц.
+  rules:
+  - Держать число Draw Calls строго до 75.
+  - Использовать InstancedMesh для повторяющихся объектов и осколков.
+  - Ограничивать pixelRatio до 1.5x на мобильных устройствах.
+  architecture: Граф сцены с предварительно выделенными пулами материалов и мешей.
+  implementation_guidance: 'Инициализировать WebGL с параметром powerPreference: ''high-performance''.'
+  common_mistakes:
+  - Не создавать новые Geometries и Materials в кадре анимации.
+  - Обязательно вызывать .dispose() при удалении графических ресурсов.
+  checklist:
+  - Стабильные 60 FPS на целевых устройствах.
+  - Отсутствие утечек видеопамяти при перезапуске раунда.
+  - Авто-тюнер качества сходится и фиксируется, а не колеблется.
+  knowledge_refs:
+  - pixijs/particle_systems.md
+  - pixijs/sprite_batching.md
+- skill_id: playgama_skill
+  name: Интеграция Playgama Bridge SDK
+  filename: PLAYGAMA_SKILL.md
+  purpose: Стандарты работы с SDK @playgama/bridge v2 (реклама, облачные сейвы, лидерборды,
+    авторизация).
+  when_to_use: При реализации показа видеорекламы, сохранения прогресса, авторизации
+    и хуков паузы.
+  rules:
+  - Дожидаться bridge.initialize() (с таймаутом) перед любыми вызовами SDK.
+  - game_ready отправляется ровно один раз и только после загрузки ассетов и готовности
+    меню.
+  - Награда за rewarded начисляется только по событию state === 'rewarded', не по
+    резолву промиса.
+  - Сейв — один ключ, один JSON-объект; storage.get/set вызываются без аргумента storageType.
+  - authorize() вызывается только по действию игрока (кроме тихой авторизации на vk/ok).
+  - 'UI строится на capability-флагах: кнопка неподдерживаемой функции не рисуется
+    вовсе.'
+  - Пауза и звук берутся из событий платформы, а не только из visibilitychange.
+  architecture: Сервисный синглтон PlaygamaService с поддержкой локального оффлайн-мока
+    (platform.id === 'mock').
+  implementation_guidance: Подписаться на EVENT_NAME.REWARDED_STATE_CHANGED, вызвать
+    bridge.advertisement.showRewarded(placement), снять слушателя в off() и вернуть
+    true только для состояния 'rewarded'. Полный код — knowledge/playgama/ads_integration.md.
+  common_mistakes:
+  - Отправлять game_ready сразу после initialize() — сплэш снимается над незагруженной
+    игрой.
+  - Ждать `await authorize()` внутри загрузки — игра виснет у всех гостей.
+  - 'Определять гостя по player.id/name: у гостя они заполнены, нужен player.isGuest.'
+  - Начислять награду по резолву showRewarded() — платит за скип и закрытие.
+  - Показывать межстраничную рекламу в первые секунды сессии или во время боя.
+  - Потреблять покупку до её выдачи — оплаченный товар уничтожается.
+  - Хранить настройки в localStorage — в iframe платформы это partitioned-хранилище.
+  checklist:
+  - Rewarded начисляет ровно одну награду за один ролик даже при двойном клике.
+  - Прогресс переживает перезагрузку у гостя и у авторизованного игрока.
+  - Битый сейв не роняет игру — старт на дефолтах.
+  - Рекорды сохраняются и отправляются в таблицу лидеров.
+  - game_ready уходит один раз, после него поднимаются баннеры.
+  knowledge_refs:
+  - playgama/game_ready_and_loading.md
+  - playgama/auth_and_player.md
+  - playgama/storage_and_cloud.md
+  - playgama/ads_integration.md
+  - playgama/banners_and_layout.md
+  - compliance/yandex_moderation.md
+  - ux/localization_system.md
+  - ux/touch_controls.md
+- skill_id: controls_skill
+  name: Mobile Touch & Desktop Controls
+  filename: CONTROLS_SKILL.md
+  purpose: 'Задаёт обязательный контракт управления: раскладку под жанр, реализацию
+    на Pointer Events, отмену браузерных жестов и правила видимости.'
+  when_to_use: 'Use when implementing any player input: virtual joystick, action buttons,
+    driving pedals, camera gestures, or keyboard bindings.'
+  rules:
+  - Только Pointer Events + setPointerCapture; учитывать pointerId для каждой кнопки.
+  - Движение и основное действие обязаны работать одновременно (мультитач).
+  - В играх про вождение газ — отдельная кнопка, а не вертикаль стика руля.
+  - 'touch-action: none, отмена contextmenu/dragstart и touchmove с passive:false.'
+  - Отступы через env(safe-area-inset-*); основная кнопка >= 96 px, остальные >= 64
+    px.
+  - Слой управления виден только в игровом процессе и сбрасывается при скрытии.
+  - Сброс всех осей и кнопок на blur и visibilitychange.
+  - Флаг ?touch=1 принудительно включает мобильную раскладку на десктопе.
+  architecture: Отдельный модуль TouchControls создаёт собственный DOM-слой поверх
+    UI, пишет в виртуальные оси InputManager и ничего не знает об игровой логике.
+    InputManager сливает клавиатуру и тач, отдавая игре единый снимок управления.
+  implementation_guidance: 'UIManager владеет экземпляром TouchControls и переключает
+    его видимость в showHud/showPause/hideAllModals. Джойстик — плавающий: база появляется
+    под пальцем, зона захвата — половина экрана, мёртвая зона 8%.'
+  common_mistakes:
+  - Один стик на движение и газ — машина теряет ход в каждом повороте.
+  - 'touchstart/touchend без pointerId: второй палец сбрасывает первый.'
+  - Слой управления оставлен видимым в меню — он перехватывает тапы по кнопкам.
+  - Забытый passive:false — страница продолжает скроллиться под игрой.
+  - Кнопки прижаты к краю без safe-area — их перекрывает вырез и системный жест.
+  checklist:
+  - Газ/атака и направление работают одновременно, проверено тремя пальцами.
+  - Свайп по игре не скроллит страницу и не вызывает pull-to-refresh.
+  - Долгое нажатие не открывает контекстное меню.
+  - Управление скрыто в меню и паузе, оси сброшены после сворачивания вкладки.
+  - ?touch=1 показывает мобильную раскладку на десктопе и кликается мышью.
+  knowledge_refs:
+  - ux/touch_controls.md
+- skill_id: experience_skill
+  name: Плотность первой сессии и телеметрия
+  filename: EXPERIENCE_SKILL.md
+  purpose: 'Держит первую сессию в целевых показателях и делает её измеримой: ED =
+    MD/min × (SF + EB + AR) / CLP.'
+  when_to_use: При работе над стартом игры, обучением, HUD, экраном проигрыша, рестартом
+    и при добавлении любого события телеметрии.
+  rules:
+  - Первое осмысленное действие доступно не позже 3.0 с после загрузки.
+  - Первая награда или явный прогресс — не позже 12.0 с.
+  - Целевая плотность решений — около 12 значимых решений в минуту.
+  - 'Порядок улучшений: окно стимуляции → снижение когнитивной нагрузки → качество
+    отклика → частота решений.'
+  - 'Каждое действие игрока имеет три канала отклика: визуальный, звуковой и изменение
+    состояния цели.'
+  - Экран проигрыша называет причину; рестарт занимает не больше 2 секунд.
+  - 'Обязательные события телеметрии: события не заданы.'
+  - '`first_action` и `first_reward` отправляются ровно один раз за сессию.'
+  architecture: Модуль `src/telemetry/Telemetry.ts` с методами `track` и `trackOnce`;
+    системы публикуют события через EventBus, телеметрия подписывается на них и никогда
+    не вызывается из горячего цикла напрямую.
+  implementation_guidance: Реализуй контракт из TELEMETRY_SPEC.md, замерь тайминги
+    первой сессии локально и зафиксируй результат в DEVLOG.md. Если целевые значения
+    не достигаются, это не повод менять цифры в документе — это находка.
+  common_mistakes:
+  - Логотип, меню или загрузочный экран поверх геймплея в первые секунды — время до
+    первого действия сорвано.
+  - 'Полный HUD с первой секунды: игрок не понимает, на что смотреть (растёт CLP).'
+  - Обучение модальным окном с текстом вместо ограничения сцены.
+  - Синхронная отправка телеметрии в игровом цикле — просадки кадра.
+  - Отправка `first_reward` повторно за сессию — воронка первой сессии искажается.
+  checklist:
+  - 'Замерено: время до первого действия ≤ 3.0 с.'
+  - 'Замерено: время до первой награды ≤ 12.0 с.'
+  - Все события из TELEMETRY_SPEC.md отправляются и видны в консоли dev-сборки.
+  - Ни один сигнал провала из PLAYER_PROMISE.md не воспроизводится на первой сессии.
+  - Отсутствие сети не вызывает исключений в геймплейном коде.
+  knowledge_refs: []
+preview_prompt: 'Authentic in-game gameplay screenshot of ''Изометрический стелс-экшен
+  pixi.js: персонаж'', a 2D Менеджмент колонии / Idle-стратегия game. Visual style:
+  Тёплая акварель: луга и солнечный свет. Camera perspective: 2D камера с плавным
+  следованием и лёгким параллаксом. Environment: Живая природа: травы, пыльца, свет
+  сквозь листву. Central Action: Вы задаёте правила, а колония живёт сама и приносит
+  последствия ваших решений. — the moment is caught mid-action, with clear cause and
+  effect readable in a single frame. Visible in-game HUD overlay: Верх-Лево: Полоса
+  прочности (HP) и щита, Верх-Центр: Номер волны и счетчик оставшихся врагов, Верх-Право:
+  Количество монет и кнопка Паузы, Низ-Лево: Плавающий сенсорный виртуальный джойстик;
+  touch controls at the bottom corners. Lighting: Мягкий рассеянный дневной свет,
+  тёплые тени. Color palette: #7cb342, #f2b134, #fff3cd, #22301f, #33452c. High visual
+  clarity, readable silhouettes, immersive WebGL game aesthetics.'
+preview_image_path: preview/concept_preview.png
+preview_status: completed
+definition_of_done:
+- Полная компиляция проекта на TypeScript без ошибок сборки
+- Стабильные 60 FPS в браузере с временем отклика управления < 50мс
+- 'Рабочий цикл сессии: старт -> волны врагов -> 3-Card апгрейды -> битва с боссом
+  -> результат'
+- 'Интеграция Playgama Bridge: Rewarded видео, баннеры, Cloud Save и Leaderboards'
+- 'Мобильное управление на Pointer Events: движение и основное действие работают одновременно,
+  мультитач, отмена скролла и контекстного меню, safe-area'
+- Слой тач-управления виден только в игровом процессе и сбрасывается при паузе, сворачивании
+  вкладки и показе рекламы
+- Мобильную раскладку можно проверить на десктопе флагом ?touch=1
+- 'Звуковое сопровождение: фоновая музыка и сочные звуки попаданий/дрифта'
+- '`npm install && npm run dev` поднимают играбельную сборку без ошибок в консоли'
+- Ведутся DEVLOG.md и CHANGELOG.md, в README.md описаны запуск и управление
+- Соответствие всем критериям публикации на Яндекс Играх
+player_promise:
+  concept_title: ''
+  store_promise:
+    claim: ''
+    expected_evidence: []
+    failure_signals: []
+  first_session_promise:
+    claim: ''
+    expected_evidence: []
+    failure_signals: []
+  long_term_promise:
+    claim: ''
+    expected_evidence: []
+    failure_signals: []
+  assumptions: []
+  validation_notes: []
+design_nucleus: []
+selected_nucleus: ''
+assumptions: []
+experience_density:
+  formula: ED = MD/min × (SF + EB + AR) / CLP
+  theory_status: design_hypothesis
+  metric_model: web_session
+  evidence_level: UL-L3
+  boredom_type: ''
+  stimulation_window: ''
+  md_per_min_target: 12
+  time_to_first_action_sec: 3.0
+  time_to_first_reward_sec: 12.0
+  first_session_beats: []
+  clp_reducers: []
+  sf_boosters: []
+  eb_boosters: []
+  ar_boosters: []
+  primary_lever: MD/min
+  variants: []
+  telemetry: []
+  dashboard_fields: []
+  decision_rules: []
+hlls:
+  hook: ''
+  loop: ''
+  link: ''
+  surprise: ''
+  weakest_layer: ''
+  fixes: []
+validation:
+  riskiest_assumption: ''
+  smallest_playable_prototype: ''
+  voi_note: ''
+  experiments: []
+  stop_rule: ''
+  scope_gate:
+    mvp_must: []
+    vertical_slice_should: []
+    after_launch: []
+    marketing_only: []
+    cut: []
+decisions: []
+gates: []

@@ -32,8 +32,13 @@ def test_local_provider_synthesizes_mech_builder():
         "Браузерная игра в духе Vampire Survivors где мех строит базу",
         GameConcept
     )
-    assert "Mech" in concept.title or "mech" in concept.slug
+    # Название и слаг обязаны идти от идеи пользователя, а не от каталожного
+    # шаблона: раньше любая идея со словом «мех» превращалась в «Мех-Осада».
+    assert "vampire" in concept.slug or "survivors" in concept.slug
     assert concept.renderer == "threejs"
+    # Тематика идеи при этом сохраняется: остаётся ветка про мех и постройки.
+    haystack = (concept.hook + concept.player_fantasy + " ".join(m.name for m in concept.mechanics)).lower()
+    assert "мех" in haystack or "турел" in haystack or "баз" in haystack
 
 def test_local_provider_synthesizes_cards_pixijs():
     provider = LocalAIProvider()

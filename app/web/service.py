@@ -13,6 +13,7 @@ HTTP-запросы и отдаёт события браузеру через �
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -24,9 +25,9 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from app import chat_store, design_os, notify, sandbox
+from app import chat_store, design_os, notify, project_meta, sandbox
 from app.chat_jobs import ChatJobManager
-from app.config import BASE_DIR, config
+from app.config import BASE_DIR, DESIGN_OS_ENABLED, config
 from app.context import GenerationContext
 from app.game_runner import DevServer, detect_start_command, open_internal_browser
 from app.logging import register_log_listener
@@ -132,6 +133,7 @@ DOC_TABS = [
     {"key": "AI_DEVELOPER_PROMPT.md", "label": "AI_DEVELOPER_PROMPT.md", "file": "AI_DEVELOPER_PROMPT.md"},
     {"key": "GDD", "label": "GDD", "file": "GAME_DESIGN_DOCUMENT.md"},
     {"key": "Mechanics", "label": "Mechanics", "file": "MECHANICS.md"},
+    {"key": "CoreLoop", "label": "🔁 Core Loop", "file": "CORE_LOOP.md"},
     {"key": "Architecture", "label": "Architecture", "file": "ARCHITECTURE_DOCUMENT.md"},
     {"key": "Playgama", "label": "Playgama", "file": "PLAYGAMA_INTEGRATION.md"},
     {"key": "Monetization", "label": "Monetization", "file": "MONETIZATION.md"},
@@ -144,6 +146,12 @@ DOC_TABS = [
     {"key": "Devlog", "label": "📓 Devlog", "file": sandbox.DEVLOG_NAME},
     {"key": "Changelog", "label": "🧾 Changelog", "file": sandbox.CHANGELOG_NAME},
 ]
+# Документы слоя Design OS показываются только при включённом слое
+# (config.DESIGN_OS_ENABLED): без него фабрика их не создаёт.
+_DESIGN_OS_TABS = {"Promise", "Density", "Telemetry", "Validation", "Assumptions", "Decisions"}
+if not DESIGN_OS_ENABLED:
+    DOC_TABS = [tab for tab in DOC_TABS if tab["key"] not in _DESIGN_OS_TABS]
+
 DOC_FILES = {tab["key"]: tab["file"] for tab in DOC_TABS}
 
 REBUILD_SECTIONS = [
@@ -155,6 +163,8 @@ REBUILD_SECTIONS = [
     {"key": "skills", "label": "🧩 Перегенерировать Game Skills для ИИ"},
     {"key": "design-os", "label": "🧠 Пересобрать слой Design OS (ядро, плотность, валидация)"},
 ]
+if not DESIGN_OS_ENABLED:
+    REBUILD_SECTIONS = [s for s in REBUILD_SECTIONS if s["key"] != "design-os"]
 
 CODE_TASK_PROMPT = (
     "Прочитай AI_DEVELOPER_PROMPT.md и специализированные скиллы в папке skills/ "
@@ -558,6 +568,9 @@ class FactoryService:
                 "genre": idea.genre,
                 "renderer": idea.renderer,
                 "hook": idea.hook,
+                "pitch": idea.pitch,
+                "family": idea.family,
+                "art_style": idea.art_style,
                 "prompt_seed": idea.prompt_seed,
             }
             for idea in ideas
@@ -591,6 +604,13 @@ class FactoryService:
             return False
 
     def list_projects(self) -> List[Dict[str, Any]]:
+        """
+        Витрина проектов: свежие сверху, архивные отмечены флагом.
+
+        Сортировка идёт по дате появления игры, а не по mtime каталога:
+        иначе любая правка агента в старой игре выкидывала бы её на первое
+        место и «сначала новые» переставало работать.
+        """
         projects: List[Dict[str, Any]] = []
         for path in sandbox.list_projects():
             slug = path.name
@@ -598,9 +618,13 @@ class FactoryService:
             data = self._read_yaml(docs / "GAME_DATA.yaml")
             preview = docs / "preview" / "concept_preview.png"
             try:
-                updated = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d.%m %H:%M")
+                stat = path.stat()
+                updated_ts = stat.st_mtime
+                updated = datetime.fromtimestamp(updated_ts).strftime("%d.%m %H:%M")
             except OSError:
-                updated = ""
+                updated_ts, updated = 0.0, ""
+            meta = project_meta.get(slug, created_fallback=self._created_fallback(path))
+            created_at = meta.get("created_at") or ""
             projects.append({
                 "slug": slug,
                 "title": data.get("title", slug),
@@ -612,14 +636,84 @@ class FactoryService:
                 "has_preview": preview.exists(),
                 "preview_mtime": int(preview.stat().st_mtime) if preview.exists() else 0,
                 "updated_at": updated,
+                "updated_ts": updated_ts,
+                "created_at": created_at,
+                "created_label": self._date_label(created_at),
+                "rating": int(meta.get("rating") or 0),
+                "archived": bool(meta.get("archived")),
                 "chats": len(chat_store.list_sessions(slug)),
             })
+        projects.sort(key=lambda p: (p["created_at"], p["updated_ts"]), reverse=True)
         return projects
+
+    @staticmethod
+    def _created_fallback(path: Path) -> float:
+        """Дата появления каталога: ctime, а при недоступности — mtime."""
+        try:
+            stat = path.stat()
+            return getattr(stat, "st_ctime", 0.0) or stat.st_mtime
+        except OSError:
+            return 0.0
+
+    @staticmethod
+    def _date_label(iso: str) -> str:
+        try:
+            return datetime.fromisoformat(iso).strftime("%d.%m.%Y")
+        except (TypeError, ValueError):
+            return ""
+
+    def set_project_rating(self, slug: str, rating: int) -> Dict[str, Any]:
+        meta = project_meta.set_rating(slug, rating)
+        bus.publish("projects.changed")
+        stars = "★" * meta["rating"] + "☆" * (5 - meta["rating"])
+        return {"status": "success", "rating": meta["rating"],
+                "message": f"Оценка проекта: {stars}"}
+
+    def set_project_archived(self, slug: str, archived: bool) -> Dict[str, Any]:
+        """Архив прячет игру из витрины, но ничего не удаляет с диска."""
+        if archived:
+            self.stop_play(slug)
+        meta = project_meta.set_archived(slug, archived)
+        bus.publish("projects.changed")
+        return {
+            "status": "success",
+            "archived": meta["archived"],
+            "message": "📦 Игра убрана в архив" if archived else "↩️ Игра возвращена из архива",
+        }
+
+    def delete_project(self, slug: str) -> Dict[str, Any]:
+        """Полное удаление игры: код, спецификация и запись в реестре."""
+        try:
+            folder = sandbox.project_dir(slug)
+        except sandbox.SandboxViolation as exc:
+            return {"status": "error", "message": str(exc)}
+
+        for session_id in [job.session_id for job in self.chat_jobs.running_jobs() if job.slug == slug]:
+            self.chat_jobs.request_stop(session_id)
+        self.stop_play(slug)
+        with self._play_lock:
+            self.play.pop(slug, None)
+
+        removed: List[str] = []
+        for target in (folder, sandbox.legacy_docs_dir(slug)):
+            if target.is_dir():
+                try:
+                    shutil.rmtree(target)
+                    removed.append(str(target))
+                except OSError as exc:
+                    return {"status": "error", "message": f"Не удалось удалить {target}: {exc}"}
+        project_meta.forget(slug)
+        bus.publish("projects.changed")
+        if not removed:
+            return {"status": "error", "message": "Каталог проекта не найден."}
+        self.append_log(f"🗑 Удалён проект {slug}")
+        return {"status": "success", "message": f"🗑 Проект «{slug}» удалён", "removed": removed}
 
     def project_detail(self, slug: str) -> Dict[str, Any]:
         docs = sandbox.docs_dir(slug)
         data = self._read_yaml(docs / "GAME_DATA.yaml")
         preview = docs / "preview" / "concept_preview.png"
+        meta = project_meta.get(slug)
         return {
             "slug": slug,
             "title": data.get("title", slug),
@@ -633,6 +727,9 @@ class FactoryService:
             "playable": self.project_is_playable(slug),
             "docs_dir": str(docs),
             "project_dir": str(sandbox.project_dir(slug)),
+            "rating": int(meta.get("rating") or 0),
+            "archived": bool(meta.get("archived")),
+            "created_label": self._date_label(meta.get("created_at") or ""),
         }
 
     def resolve_doc_path(self, slug: str, filename: str) -> Path:
@@ -684,6 +781,9 @@ class FactoryService:
 
     def design_os_payload(self, slug: str) -> Dict[str, Any]:
         """Сводка проверяемого слоя проекта для вкладки «Design OS»."""
+        if not DESIGN_OS_ENABLED:
+            return {"available": False,
+                    "message": "Слой Design OS отключён (config.DESIGN_OS_ENABLED = False)."}
         game_dir = sandbox.docs_dir(slug)
         concept = design_os.load_concept(game_dir)
         if concept is None:
@@ -1487,6 +1587,7 @@ class FactoryService:
             "image_providers": IMAGE_PROVIDER_OPTIONS,
             "studio_presets": STUDIO_PRESETS,
             "chat_presets": CHAT_PRESETS,
+            "design_os_enabled": DESIGN_OS_ENABLED,
             "doc_tabs": DOC_TABS,
             "rebuild_sections": REBUILD_SECTIONS,
             "model_default": MODEL_DEFAULT,

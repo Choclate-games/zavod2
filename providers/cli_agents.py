@@ -42,6 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from app.logging import log_warning
 from providers.agent_usage import AgentUsageTracker
 from providers.base import AIProvider, T
 from providers.local import LocalAIProvider
@@ -573,12 +574,30 @@ class CodingCLIAgent(AIProvider):
             f"Do not include any explanation or markdown before or after the JSON.\n\n"
             f"JSON Schema:\n{schema_str}\n"
         )
-        try:
-            raw = self.run_once(combined)
-            return response_model.model_validate(json.loads(_extract_json_string(raw)))
-        except Exception as exc:
-            print(f"[{self.title}] Структурированный вывод не удался ({exc}), беру локального эксперта…")
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+        # Одна повторная попытка: срыв JSON у терминального агента — частая
+        # случайность, а откат на локальный шаблон стоит дорого. Локальный
+        # эксперт собирает концепт по шаблону, и пакет документов может выйти
+        # не про выбранную идею — поэтому падение оформлено как предупреждение,
+        # видимое в логе студии, а не как тихий print.
+        last_error: Optional[Exception] = None
+        for attempt in (1, 2):
+            prompt = combined if attempt == 1 else (
+                combined + "\n[REMINDER] Предыдущий ответ не разобрался как JSON. "
+                "Верни ТОЛЬКО валидный JSON-объект по схеме, без пояснений и markdown.\n"
+            )
+            try:
+                raw = self.run_once(prompt)
+                return response_model.model_validate(json.loads(_extract_json_string(raw)))
+            except Exception as exc:
+                last_error = exc
+                if attempt == 1:
+                    log_warning(f"[{self.title}] Структурированный вывод не разобрался ({exc}); повторяю запрос.")
+        log_warning(
+            f"[{self.title}] Модель не вернула валидный JSON ({last_error}). "
+            f"Беру локальный шаблон — документы могут не соответствовать выбранной идее. "
+            f"Проверьте {response_model.__name__} в результате или перезапустите генерацию."
+        )
+        return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
 
 
 def _extract_json_string(text: str) -> str:

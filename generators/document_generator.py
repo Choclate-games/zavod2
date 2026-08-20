@@ -4,6 +4,7 @@ from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
 from generators.design_os_docs import DESIGN_OS_DOCS
+from app.config import DESIGN_OS_ENABLED
 
 class DocumentGenerator:
     """Generates the full suite of specialized Game Development Documents in Markdown."""
@@ -34,9 +35,11 @@ class DocumentGenerator:
             "REFERENCE_ANALYSIS.md": self._gen_references,
             "RISKS.md": self._gen_risks,
         }
-        # Слой Design OS: обещание игроку, допущения, плотность впечатлений,
-        # телеметрия, план валидации, решения и человеческие ворота.
-        generators.update(DESIGN_OS_DOCS)
+        # Слой Design OS (обещание игроку, допущения, плотность впечатлений,
+        # телеметрия, план валидации, решения и ворота) отключён флагом
+        # config.DESIGN_OS_ENABLED — документы этого слоя не создаются.
+        if DESIGN_OS_ENABLED:
+            generators.update(DESIGN_OS_DOCS)
 
         for filename, gen_fn in generators.items():
             content = gen_fn(ctx)
@@ -169,6 +172,23 @@ workspace/{c.slug}/
 {edge_str}
 
 """
+        # Формулы приходят из ядра, спроектированного под эту игру. Универсальная
+        # формула урона остаётся только как заглушка для проектов без ядра.
+        core = c.core_design
+        formulas_md = "\n".join(f"- `{f}`" for f in core.core_formulas) or (
+            "- `Эффект = БазоваяСила × КачествоИсполнения × (1 + НакопленныйБонус)`\n"
+            "- `СложностьЭтапа(n) = База × (1 + 0.18 × n)`"
+        )
+        params_rows = [
+            f"| {d.name} | {p.name} | `{p.value}` | {p.tuning_note} |"
+            for d in core.mechanics
+            for p in d.parameters
+        ]
+        params_md = (
+            "| Механика | Параметр | Значение | Что сломается при изменении |\n"
+            "| :--- | :--- | :--- | :--- |\n" + "\n".join(params_rows)
+        ) if params_rows else "Числовые параметры механик не заданы — см. MECHANICS.md."
+
         return f"""# Gameplay Specification: {c.title}
 
 ## 1. Overview
@@ -179,113 +199,183 @@ This document specifies the exact mechanical logic, mathematical formulas, state
 ## 2. Gameplay Systems
 {systems_md if systems_md else "Standard gameplay loop systems."}
 
-## 3. Damage & Physics Combat Formulas
-- **Base Damage Formula**:
-  $$\\text{{FinalDamage}} = (\\text{{BaseDamage}} \\times \\text{{ImpactVelocityFactor}} + \\text{{AttackPower}}) \\times (1 - \\text{{ArmorMitigation}})$$
-- **Critical Strike Multiplier**: $2.0\\times$ on weak points or staggered enemies.
-- **Hit-Stop Dilation**: 40ms camera and physics time dilation ($0.05\\times$ timescale) upon heavy hit connection.
-- **Knockback Momentum**: Applied directly to target physics rigid body as a directional impulse vector.
+## 3. Формулы и числа этой игры
+{formulas_md}
+
+## 4. Параметры механик (значения по умолчанию)
+{params_md}
 """
+
+    # ------------------------------------------------------------------
+    # Ядро игры. Эти три документа раньше были одинаковым шаблоном во всех
+    # проектах; теперь они рендерятся из CoreDesignSpec, который агент механик
+    # проектирует под конкретную игру. Шаблонный текст остаётся только как
+    # аварийная заглушка, если ядро не заполнено.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _loop_table(steps) -> str:
+        if not steps:
+            return ""
+        rows = "\n".join(
+            f"| {s.step} | {s.player_action} | {s.game_response} | {s.decision} | {s.duration} |"
+            for s in steps
+        )
+        return (
+            "| Шаг | Действие игрока | Ответ игры | Решение игрока | Длительность |\n"
+            "| :--- | :--- | :--- | :--- | :--- |\n" + rows
+        )
 
     def _gen_core_loop(self, ctx: GenerationContext) -> str:
         c = ctx.concept
+        core = c.core_design
+        micro = self._loop_table(core.micro_loop)
+        meso = self._loop_table(core.meso_loop)
+        macro = self._loop_table(core.macro_loop)
+        diagram = core.loop_diagram.strip() or f"{c.core_loop}"
+        formulas = "\n".join(f"- `{f}`" for f in core.core_formulas) or "- Формулы ядра не заданы."
+
         return f"""# Core Loop Design: {c.title}
 
-## 1. Visual Flow Diagram
+## 1. Чем эта петля отличается
+- **Фирменный момент**: {core.signature_moment or c.hook}
+- **Отличие от жанрового шаблона**: {core.what_makes_it_different or c.unique_value_proposition}
+- **Сознательно НЕ берём**: {core.genre_template_rejected or "—"}
+- **Дизайн-ядро**: {c.selected_nucleus or "—"}
+
+---
+
+## 2. Схема петли
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                       MAIN GAME RUN                         │
-└─────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-                ┌───────────────────────────┐
-                │ 1. Spawn Wave & Action    │
-                └───────────────────────────┘
-                               │
-                               ▼
-                ┌───────────────────────────┐
-                │ 2. Tactical Gameplay      │
-                │    - Evading & Striking   │
-                │    - Collecting XP/Orbs   │
-                └───────────────────────────┘
-                               │
-                               ▼
-                ┌───────────────────────────┐
-                │ 3. Wave Clear & Spoils    │
-                └───────────────────────────┘
-                               │
-                               ▼
-                ┌───────────────────────────┐
-                │ 4. 3-Card Upgrade Choice  │
-                │    - Synergies & Rerolls  │
-                └───────────────────────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                ▼                             ▼
-        [ Next Wave ]                 [ Boss Encounter ]
-                │                             │
-                ▼                             ▼
-       ( Escalating Waves )          ( Triumph / Defeat )
-                                              │
-                                              ▼
-                               ┌─────────────────────────────┐
-                               │ 5. Meta Armory & Upgrades   │
-                               │    - Playgama Cloud Save    │
-                               │    - Leaderboard Submit     │
-                               └─────────────────────────────┘
+{diagram}
 ```
 
-## 2. Micro-Loop (Second-by-Second)
-- Read enemy tell animation -> Dash or Parry -> Strike with impact -> Watch feedback reaction -> Reposition.
+---
 
-## 3. Meso-Loop (Wave-by-Wave)
-- Clear wave (45-60 seconds) -> Collect spoils -> Select 1 of 3 upgrade cards -> Prepare for next wave composition.
+## 3. Микро-петля (посекундно)
+{micro or "- " + (c.core_loop or "Микро-петля не детализирована.")}
 
-## 4. Macro-Loop (Session-by-Session)
-- Complete run (5-8 minutes) -> Bank currency -> Unlock new weapons/talents -> Climb leaderboards.
+---
+
+## 4. Мезо-петля (этап за этапом)
+{meso or "- Мезо-петля не детализирована."}
+
+---
+
+## 5. Макро-петля (забег за забегом)
+{macro or "- Макро-петля не детализирована."}
+
+---
+
+## 6. Кривая напряжения
+{core.tension_curve or c.difficulty_curve or "Кривая напряжения не задана."}
+
+---
+
+## 7. Формулы ядра
+{formulas}
 """
 
     def _gen_mechanics(self, ctx: GenerationContext) -> str:
         c = ctx.concept
+        deep_by_name = {d.name.strip().lower(): d for d in c.core_design.mechanics if d.name}
         mechanics_md = ""
         for m in c.mechanics:
-            strengths_str = ", ".join(m.strengths) if m.strengths else "High engagement"
-            weaknesses_str = ", ".join(m.weaknesses) if m.weaknesses else "Requires precise timing"
-            mechanics_md += f"""## Mechanic: {m.name} ({m.priority.upper()})
-- **Category**: {m.category}
-- **Description**: {m.description}
-- **Player Interaction**: {m.player_interaction}
-- **Hit Feedback**: {m.feedback}
-- **Technical Complexity**: {m.technical_complexity}
-- **Key Strengths**: {strengths_str}
-- **Watchouts**: {weaknesses_str}
+            strengths_str = ", ".join(m.strengths) if m.strengths else "Высокая вовлечённость"
+            weaknesses_str = ", ".join(m.weaknesses) if m.weaknesses else "Требует точного тайминга"
+            mechanics_md += f"""## Механика: {m.name} ({m.priority.upper()})
+- **Категория**: {m.category}
+- **Описание**: {m.description}
+- **Взаимодействие игрока**: {m.player_interaction}
+- **Отклик**: {m.feedback}
+- **Техническая сложность**: {m.technical_complexity}
+- **Сильные стороны**: {strengths_str}
+- **На что смотреть**: {weaknesses_str}
+{self._mechanic_depth(deep_by_name.get(m.name.strip().lower()))}
+---
 
+"""
+        # Механики, которые архитектор добавил сверх исходного списка концепции.
+        extra = [
+            d for d in c.core_design.mechanics
+            if d.name and d.name.strip().lower() not in {m.name.strip().lower() for m in c.mechanics}
+        ]
+        for d in extra:
+            mechanics_md += f"""## Механика: {d.name} (ДОБАВЛЕНА АРХИТЕКТОРОМ)
+- **Роль в петле**: {d.role_in_loop}
+{self._mechanic_depth(d)}
 ---
 
 """
         return f"""# Mechanics Catalog: {c.title}
 
-{mechanics_md if mechanics_md else "Core game mechanics documented."}
+> Каждая механика описана до уровня, на котором её можно реализовать без
+> додумывания: решение игрока, числа, состояния, режим отказа и сопротивление игры.
+
+{mechanics_md if mechanics_md else "Механики ядра не заданы."}
+"""
+
+    @staticmethod
+    def _mechanic_depth(d) -> str:
+        """Блок глубины механики; пустая строка, если ядро не заполнено."""
+        if d is None:
+            return ""
+        params = "\n".join(
+            f"  - **{p.name}**: `{p.value}` — {p.tuning_note}" for p in d.parameters
+        ) or "  - Числовые параметры не заданы."
+        states = ", ".join(f"`{s}`" for s in d.states) or "`READY`, `ACTIVE`, `RECOVERY`"
+        feedback = "\n".join(f"  - {f}" for f in d.feedback_layers) or "  - Слои отклика не заданы."
+        synergies = "\n".join(f"  - {s}" for s in d.synergies) or "  - Связи не заданы."
+        pseudocode = f"""
+- **Псевдокод тика**:
+```text
+{d.pseudocode.strip()}
+```""" if d.pseudocode.strip() else ""
+        return f"""
+### Глубина механики
+- **Роль в петле**: {d.role_in_loop}
+- **Решение игрока**: {d.player_decision}
+- **Управление**: {d.input_mapping}
+- **Состояния**: {states}
+- **Параметры и настройка**:
+{params}
+- **Слои отклика**:
+{feedback}
+- **Режим отказа**: {d.failure_mode}
+- **Кривая мастерства**: {d.mastery_curve}
+- **Сопротивление игры**: {d.counterplay}
+- **Синергии**:
+{synergies}
+- **Почему это не жанровый шаблон**: {d.why_unique}{pseudocode}
 """
 
     def _gen_progression(self, ctx: GenerationContext) -> str:
         c = ctx.concept
+        core = c.core_design
+        run_items = "\n".join(f"- {item}" for item in core.run_progression)
+        meta_items = "\n".join(f"- {item}" for item in core.meta_progression)
+        if not run_items:
+            run_items = (
+                "- Рост силы внутри забега идёт через основную механику игры.\n"
+                "- Не более трёх активных усилений одновременно, чтобы экран оставался читаемым."
+            )
+        if not meta_items:
+            meta_items = (
+                f"- {c.progression_summary or 'Между забегами открываются новые способы играть.'}\n"
+                "- Прогресс сохраняется через Playgama Cloud Save и виден при возвращении."
+            )
         return f"""# Progression & Economy: {c.title}
 
-## 1. In-Run Roguelite Card Progression
-- **Leveling**: Eliminating enemies drops currency and XP orbs.
-- **3-Card Drafting**: Each wave completion grants a choice of 3 randomized cards with rarity tiers:
-  - **Common (60% chance)**: +15% Health, +10% Attack Speed, +10% Movement.
-  - **Rare (28% chance)**: Shockwave on parry, Flame weapon trail, +20% Knockback.
-  - **Epic (10% chance)**: Double Strike chance, 25% Damage reflect, Whirlwind attack.
-  - **Legendary (2% chance)**: Executioner's Surge (instantly kill foes below 20% HP).
+## 1. Прогрессия внутри забега
+{run_items}
 
-## 2. Persistent Meta-Progression
-- **Currency**: Banked permanently via Playgama Cloud Save.
-- **Armory Upgrades**:
-  - *Special Stances / Builds*: Unlock hybrid playstyles.
-  - *Vitality Training*: Permanent +5% max HP per rank (10 ranks).
-  - *Mastery*: Permanent +5% base weapon damage (10 ranks).
+## 2. Мета-прогрессия между забегами
+{meta_items}
+
+## 3. Правила экономики
+- Любая награда объясняется игроку в момент выдачи, без отдельного экрана обучения.
+- Ни одно усиление не отменяет решение из ядра «{c.selected_nucleus or c.hook}» — иначе петля схлопывается.
+- Валюта и открытия хранятся в облаке платформы; локальное хранилище — только кэш.
 """
 
     def _gen_level_design(self, ctx: GenerationContext) -> str:
@@ -670,3 +760,4 @@ Full contract and traps: `knowledge/playgama/` — see `bridge_api_reference.md`
 
 {risks_md if risks_md else "Technical and performance risk mitigation."}
 """
+

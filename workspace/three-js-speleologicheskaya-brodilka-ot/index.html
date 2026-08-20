@@ -1,0 +1,112 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#030712" />
+  <meta name="description" content="Three.js Спелеологическая бродилка - 3D экшен-рогалик с LiDAR-эхолокацией в темных пещерах" />
+  <title>Эхолокация: Спелеолог</title>
+  <style>
+    :root {
+      --primary: #00f0ff;
+      --primary-dim: #00a8b3;
+      --accent: #ffd700;
+      --danger: #ff3366;
+      --purple: #bf55ec;
+      --bg-dark: #040812;
+      --bg-panel: rgba(10, 18, 32, 0.88);
+      --border-glow: rgba(0, 240, 255, 0.35);
+      --font-cyber: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: var(--font-cyber);
+      color: #e6f1ff;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #app-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #game-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    #ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .interactive {
+      pointer-events: auto;
+    }
+
+    /* Screen shake container */
+    .screen-shake {
+      animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+    }
+
+    @keyframes shake {
+      10%, 90% { transform: translate3d(-2px, 1px, 0); }
+      20%, 80% { transform: translate3d(3px, -2px, 0); }
+      30%, 50%, 70% { transform: translate3d(-4px, 3px, 0); }
+      40%, 60% { transform: translate3d(4px, -3px, 0); }
+    }
+
+    /* Hitstop / Vignette */
+    #danger-vignette {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      box-shadow: inset 0 0 100px rgba(255, 34, 68, 0);
+      transition: box-shadow 0.2s ease-out;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    #danger-vignette.active {
+      box-shadow: inset 0 0 120px rgba(255, 34, 68, 0.7);
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <canvas id="game-canvas"></canvas>
+    <div id="danger-vignette"></div>
+    <div id="ui-layer"></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

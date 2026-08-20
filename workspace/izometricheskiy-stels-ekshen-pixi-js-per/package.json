@@ -1,0 +1,24 @@
+{
+  "name": "izometricheskiy-stels-ekshen-pixi-js-per",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@playgama/bridge": "^2.0.2",
+    "howler": "^2.2.4",
+    "matter-js": "^0.19.0",
+    "pixi.js": "^8.6.6"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.12",
+    "@types/matter-js": "^0.19.6",
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

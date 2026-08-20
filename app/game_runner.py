@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -35,19 +36,48 @@ def _npm_command() -> str:
     return "npm.cmd" if sys.platform == "win32" else "npm"
 
 
-def detect_start_command(project_dir: Path) -> Optional[list[str]]:
-    """Возвращает команду запуска dev-сервера или None, если проект не Node-овый."""
+def _read_scripts(project_dir: Path) -> dict:
     pkg = project_dir / "package.json"
     if not pkg.exists():
-        return None
+        return {}
     try:
-        scripts = (json.loads(pkg.read_text(encoding="utf-8")) or {}).get("scripts", {})
+        return (json.loads(pkg.read_text(encoding="utf-8")) or {}).get("scripts", {}) or {}
     except Exception:
-        scripts = {}
+        return {}
+
+
+def detect_start_command(project_dir: Path) -> Optional[list[str]]:
+    """Возвращает команду запуска dev-сервера или None, если проект не Node-овый."""
+    scripts = _read_scripts(project_dir)
     for script in ("dev", "start", "preview"):
         if script in scripts:
             return [_npm_command(), "run", script]
     return None
+
+
+def _dev_script(project_dir: Path) -> Optional[tuple]:
+    """Имя скрипта запуска и его команда — нужны, чтобы понять, это Vite или нет."""
+    scripts = _read_scripts(project_dir)
+    for script in ("dev", "start", "preview"):
+        if script in scripts:
+            return script, str(scripts[script])
+    return None
+
+
+def _free_port() -> int:
+    """Свободный порт от ОС: два проекта подряд не должны драться за 3000/5173."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _normalize_url(url: str) -> str:
+    """`0.0.0.0` и `[::]` в выводе Vite нельзя открыть в браузере — это localhost."""
+    return (url.replace("http://0.0.0.0", "http://localhost")
+               .replace("http://[::]", "http://localhost")
+               .replace("http://[::1]", "http://localhost"))
 
 
 class DevServer:
@@ -59,7 +89,10 @@ class DevServer:
         self.on_url = on_url
         self.proc: Optional[subprocess.Popen] = None
         self.url: Optional[str] = None
+        self.expected_url: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
+        self._watchdog: Optional[threading.Thread] = None
+        self._tail: list[str] = []
 
     @property
     def is_running(self) -> bool:
@@ -118,6 +151,20 @@ class DevServer:
                 self.on_log("❌ npm install завершился с ошибкой, запуск отменён.\n")
                 return False
 
+        # Порт и хост задаём сами. Каждый проект пишет свой vite.config.ts: один
+        # берёт 3000, другой 5173, третий host '0.0.0.0'. Из-за этого одна игра
+        # запускалась, а соседняя — нет: порт занят другим проектом или в лог
+        # уходил адрес, который не открыть в браузере. Свой свободный порт плюс
+        # --strictPort делает запуск одинаковым для всех проектов.
+        script = _dev_script(self.project_dir)
+        if script and "vite" in script[1].lower():
+            port = _free_port()
+            cmd = cmd + ["--", "--host", "localhost", "--port", str(port), "--strictPort"]
+            self.expected_url = f"http://localhost:{port}/"
+        else:
+            self.expected_url = None
+
+        self._tail = []
         self.on_log(f"▶ {' '.join(cmd)}  (cwd: {self.project_dir})\n")
         try:
             self.proc = subprocess.Popen(
@@ -138,19 +185,59 @@ class DevServer:
 
         self._thread = threading.Thread(target=self._pump, daemon=True)
         self._thread.start()
+        self._watchdog = threading.Thread(target=self._wait_for_url, daemon=True)
+        self._watchdog.start()
         return True
+
+    def _publish_url(self, url: str) -> None:
+        url = _normalize_url(url).rstrip("/,;") or url
+        if self.url:
+            return
+        self.url = url
+        self.on_url(url)
 
     def _pump(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None
         for line in self.proc.stdout:
             self.on_log(line)
+            self._tail.append(line.rstrip())
+            del self._tail[:-15]
             if not self.url:
                 match = _URL_RE.search(line)
                 if match:
-                    self.url = match.group(0).rstrip("/,;")
-                    self.on_url(self.url)
+                    self._publish_url(match.group(0))
         code = self.proc.wait()
+        if code not in (0, None) and not self.url:
+            # Сервер упал, не успев напечатать адрес: без этого сообщения кнопка
+            # «Играть» просто молчала, и было непонятно, почему игра не открылась.
+            tail = "\n".join(self._tail[-10:])
+            self.on_log(
+                f"❌ Dev-сервер завершился с кодом {code}, адрес так и не появился.\n"
+                f"   Последние строки вывода:\n{tail}\n"
+                "   Обычно помогает: удалить node_modules и запустить снова, "
+                "либо попросить агента починить сборку в чате проекта.\n"
+            )
         self.on_log(f"⏹ Dev-сервер остановлен (код {code}).\n")
+
+    def _wait_for_url(self, timeout: float = 40.0) -> None:
+        """Страховка: Vite не всегда печатает адрес так, как мы его ждём."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.url or not self.is_running:
+                return
+            time.sleep(0.5)
+        if self.url or not self.is_running:
+            return
+        if self.expected_url:
+            self.on_log(
+                f"ℹ️ Адрес в выводе не найден, но сервер жив — открываю ожидаемый {self.expected_url}\n"
+            )
+            self._publish_url(self.expected_url)
+        else:
+            self.on_log(
+                "⚠️ Сервер запущен, но не напечатал локальный адрес. "
+                "Посмотрите лог выше и откройте адрес вручную.\n"
+            )
 
     def stop(self) -> None:
         if not self.is_running or self.proc is None:

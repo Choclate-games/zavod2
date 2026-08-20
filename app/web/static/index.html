@@ -81,6 +81,13 @@
               <strong class="small">🎮 Готовые игры студии</strong>
               <span class="dim" id="gallery-count"></span>
               <span class="grow"></span>
+              <select id="gallery-sort" class="mini-select" title="Порядок игр">
+                <option value="new">🆕 Сначала новые</option>
+                <option value="old">🕰 Сначала старые</option>
+                <option value="rating">⭐ По рейтингу</option>
+                <option value="updated">🕒 По изменению</option>
+              </select>
+              <label class="check"><input type="checkbox" id="chk-archived" /> 📦 Архив</label>
               <button class="btn small" id="btn-refresh-gallery">🔄 Обновить</button>
               <button class="btn small" id="btn-open-workspace-2">📂 Папка</button>
             </div>
@@ -109,7 +116,10 @@
           <div class="panel tight">
             <div class="row spread">
               <h2>📦 Проекты</h2>
-              <button class="btn small" id="btn-refresh-projects">🔄</button>
+              <div class="row">
+                <label class="check"><input type="checkbox" id="chk-archived-list" /> 📦 Архив</label>
+                <button class="btn small" id="btn-refresh-projects">🔄</button>
+              </div>
             </div>
           </div>
           <div class="scroll grow" id="projects-list"></div>
@@ -134,6 +144,10 @@
               <button class="btn small" id="btn-open-project-folder">📂 Папка проекта</button>
               <button class="btn small" id="btn-export-zip">📦 Экспорт ZIP</button>
               <button class="btn small" id="btn-validate">✅ Валидация</button>
+              <span class="grow"></span>
+              <span class="stars" id="project-stars" title="Ваша оценка игры"></span>
+              <button class="btn small" id="btn-archive-project">📦 В архив</button>
+              <button class="btn small danger" id="btn-delete-project">🗑 Удалить</button>
             </div>
           </div>
 
@@ -188,6 +202,8 @@
             <strong class="small" id="chat-status" style="color:var(--ok)">● Готов</strong>
             <span class="dim" id="chat-session-name">чат не выбран</span>
             <span class="grow"></span>
+            <label class="check"><input type="checkbox" id="chk-hide-tools" /> 🧰 Скрыть инструменты</label>
+            <button class="btn small" id="btn-chat-expand">↕ Развернуть всё</button>
             <button class="btn small ok" id="btn-chat-play" disabled>▶ Играть</button>
             <button class="btn small" id="btn-chat-copy">📋 Копировать</button>
             <button class="btn small" id="btn-chat-clear">🗑 Очистить</button>

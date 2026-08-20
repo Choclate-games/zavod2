@@ -162,6 +162,27 @@ def project_detail(slug: str) -> Dict[str, Any]:
     return service.project_detail(_slug(slug))
 
 
+@app.delete("/api/projects/{slug}")
+def project_delete(slug: str) -> Dict[str, Any]:
+    return service.delete_project(_slug(slug))
+
+
+@app.post("/api/projects/{slug}/rating")
+async def project_rating(slug: str, request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    try:
+        rating = int(payload.get("rating", 0))
+    except (TypeError, ValueError):
+        return {"status": "error", "message": "Оценка должна быть числом 0–5."}
+    return service.set_project_rating(_slug(slug), rating)
+
+
+@app.post("/api/projects/{slug}/archive")
+async def project_archive(slug: str, request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.set_project_archived(_slug(slug), bool(payload.get("archived", True)))
+
+
 @app.get("/api/projects/{slug}/doc")
 def project_doc(slug: str, name: str = "AI_DEVELOPER_PROMPT.md") -> Dict[str, Any]:
     return service.read_doc(_slug(slug), name)

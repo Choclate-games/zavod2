@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Изометрический стелс-экшен pixi.js: персонаж</title>
+  <style>
+    :root {
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-r: env(safe-area-inset-right, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-l: env(safe-area-inset-left, 0px);
+      --color-primary: #7cb342;
+      --color-gold: #f2b134;
+      --color-accent: #fff3cd;
+      --color-dark: #121910;
+      --color-surface: #22301f;
+      --color-panel: rgba(30, 42, 26, 0.92);
+      --font-main: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0b1109;
+      font-family: var(--font-main);
+      color: #e8ede0;
+      position: fixed;
+      inset: 0;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+
+    #game-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+      z-index: 1;
+    }
+
+    #ui-root {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .safe-container {
+      position: absolute;
+      top: var(--safe-t);
+      left: var(--safe-l);
+      right: var(--safe-r);
+      bottom: var(--safe-b);
+      pointer-events: none;
+    }
+
+    /* Top HUD */
+    #hud-top {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 12;
+    }
+
+    .hud-card {
+      background: var(--color-panel);
+      backdrop-filter: blur(8px);
+      border: 2px solid #3c5432;
+      border-radius: 12px;
+      padding: 8px 14px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bar-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 130px;
+    }
+
+    .bar-bg {
+      width: 100%;
+      height: 10px;
+      background: #152013;
+      border-radius: 5px;
+      overflow: hidden;
+      border: 1px solid #34482c;
+    }
+
+    .bar-fill-hp {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, #e53935, #43a047);
+      transition: width 0.15s ease-out;
+    }
+
+    .bar-fill-stealth {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #3949ab, #00e5ff);
+      transition: width 0.15s ease-out;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #9eb692;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .wave-badge {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--color-gold);
+      text-shadow: 0 0 10px rgba(242, 177, 52, 0.4);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .wave-badge small {
+      font-size: 10px;
+      color: #b0c9a4;
+      font-weight: 600;
+    }
+
+    .resource-counter {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff3cd;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon {
+      background: var(--color-panel);
+      border: 2px solid #3c5432;
+      color: #e8ede0;
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: all 0.15s;
+    }
+
+    .btn-icon:hover {
+      background: #2b3d25;
+      border-color: #7cb342;
+      transform: scale(1.05);
+    }
+
+    .btn-icon:active {
+      transform: scale(0.95);
+    }
+
+    /* Action bar / hotbar */
+    #hud-bottom {
+      position: absolute;
+      bottom: 12px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      pointer-events: none;
+      z-index: 12;
+    }
+
+    .hud-tools {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .tool-btn {
+      background: var(--color-panel);
+      border: 2px solid #3c5432;
+      border-radius: 10px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #e8ede0;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: all 0.15s;
+    }
+
+    .tool-btn.active {
+      border-color: var(--color-gold);
+      background: #34482c;
+      box-shadow: 0 0 12px rgba(242, 177, 52, 0.4);
+    }
+
+    .tool-btn .keybind {
+      background: #141c12;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: #9eb692;
+      border: 1px solid #2b3d25;
+    }
+
+    /* Mobile Touch Controls Layer */
+    #touch-controls {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 20;
+      display: none;
+    }
+
+    #touch-zone-left {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 50%;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    #touch-zone-right {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 50%;
+      pointer-events: none;
+      touch-action: none;
+      padding-right: calc(18px + var(--safe-r));
+      padding-bottom: calc(18px + var(--safe-b));
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+    }
+
+    #joystick-base {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(124, 179, 66, 0.25) 0%, rgba(34, 48, 31, 0.5) 100%);
+      border: 2px solid rgba(124, 179, 66, 0.6);
+      transform: translate(-50%, -50%);
+      display: none;
+      pointer-events: none;
+    }
+
+    #joystick-knob {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #f2b134 0%, #7cb342 100%);
+      border: 2px solid #fff3cd;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 15px rgba(242, 177, 52, 0.6);
+    }
+
+    .touch-buttons-cluster {
+      display: grid;
+      grid-template-columns: repeat(2, auto);
+      gap: 14px;
+      pointer-events: auto;
+    }
+
+    .touch-btn {
+      border-radius: 50%;
+      border: 3px solid #7cb342;
+      background: radial-gradient(circle, #2b3d25 0%, #152013 100%);
+      color: #fff3cd;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+      font-weight: 800;
+      touch-action: none;
+      user-select: none;
+      pointer-events: auto;
+      transition: transform 0.08s, border-color 0.08s;
+    }
+
+    .touch-btn:active, .touch-btn.pressed {
+      transform: scale(0.92);
+      border-color: #f2b134;
+      background: radial-gradient(circle, #3d5634 0%, #1c2a19 100%);
+    }
+
+    .touch-btn-main {
+      width: 96px;
+      height: 96px;
+      font-size: 16px;
+      border-color: #f2b134;
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    .touch-btn-sub {
+      width: 68px;
+      height: 68px;
+      font-size: 13px;
+    }
+
+    /* Modals & Screens */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 14, 7, 0.85);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      pointer-events: auto;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.25s, visibility 0.25s;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal-box {
+      background: var(--color-panel);
+      border: 3px solid #4a683e;
+      border-radius: 20px;
+      padding: 28px;
+      max-width: 640px;
+      width: 90%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 30px rgba(124, 179, 66, 0.2);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      animation: modalPop 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    }
+
+    @keyframes modalPop {
+      0% { transform: scale(0.85); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .modal-title {
+      font-size: 26px;
+      font-weight: 900;
+      color: #fff3cd;
+      text-shadow: 0 0 15px rgba(242, 177, 52, 0.5);
+    }
+
+    .modal-subtitle {
+      font-size: 14px;
+      color: #b0c9a4;
+      line-height: 1.5;
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-top: 10px;
+    }
+
+    .upgrade-card {
+      background: #1a2517;
+      border: 2px solid #3c5432;
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+
+    .upgrade-card:hover {
+      border-color: #f2b134;
+      transform: translateY(-4px);
+      box-shadow: 0 8px 20px rgba(242, 177, 52, 0.3);
+      background: #23321f;
+    }
+
+    .upgrade-card.rare {
+      border-color: #42a5f5;
+    }
+
+    .upgrade-card.epic {
+      border-color: #ab47bc;
+    }
+
+    .upgrade-card.legendary {
+      border-color: #ffa726;
+      box-shadow: 0 0 15px rgba(255, 167, 38, 0.4);
+    }
+
+    .card-icon {
+      font-size: 32px;
+    }
+
+    .card-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: #fff3cd;
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: #b0c9a4;
+      line-height: 1.4;
+    }
+
+    .card-rarity {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: #111a0f;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #7cb342 0%, #558b2f 100%);
+      border: 2px solid #aed581;
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+      padding: 12px 28px;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(85, 139, 47, 0.5);
+      transition: all 0.15s;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(124, 179, 66, 0.7);
+    }
+
+    .btn-rewarded {
+      background: linear-gradient(135deg, #f2b134 0%, #e65100 100%);
+      border: 2px solid #ffe082;
+      color: #fff;
+      font-weight: 800;
+      font-size: 15px;
+      padding: 12px 22px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 15px rgba(230, 81, 0, 0.5);
+      transition: all 0.15s;
+    }
+
+    .btn-rewarded:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(242, 177, 52, 0.7);
+    }
+
+    .btn-secondary {
+      background: #22301f;
+      border: 2px solid #3c5432;
+      color: #b0c9a4;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 12px 22px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-secondary:hover {
+      background: #2b3d25;
+      color: #fff;
+    }
+
+    /* Stealth alert indicator */
+    #stealth-indicator {
+      position: absolute;
+      top: 75px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18, 25, 16, 0.9);
+      border: 2px solid #3c5432;
+      border-radius: 30px;
+      padding: 6px 18px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #9eb692;
+      transition: all 0.2s;
+      pointer-events: none;
+      z-index: 12;
+    }
+
+    #stealth-indicator.hidden-mode {
+      border-color: #42a5f5;
+      color: #80d8ff;
+      box-shadow: 0 0 15px rgba(66, 165, 245, 0.4);
+    }
+
+    #stealth-indicator.spotted-mode {
+      border-color: #e53935;
+      color: #ff8a80;
+      box-shadow: 0 0 15px rgba(229, 57, 53, 0.6);
+      animation: alertBlink 0.5s infinite alternate;
+    }
+
+    @keyframes alertBlink {
+      from { opacity: 0.7; transform: translateX(-50%) scale(0.98); }
+      to { opacity: 1; transform: translateX(-50%) scale(1.04); }
+    }
+
+    /* Floating combat text container */
+    #fct-container {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+    }
+
+    .fct-item {
+      position: absolute;
+      font-weight: 900;
+      font-size: 16px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6);
+      pointer-events: none;
+      animation: fctFloat 0.8s ease-out forwards;
+      transform: translate(-50%, -50%);
+    }
+
+    @keyframes fctFloat {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(0.7); }
+      30% { transform: translate(-50%, -80%) scale(1.2); }
+      100% { opacity: 0; transform: translate(-50%, -120%) scale(1); }
+    }
+
+    /* Leaderboard list */
+    .leaderboard-list {
+      max-height: 220px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-right: 6px;
+    }
+
+    .leaderboard-row {
+      background: #182315;
+      border: 1px solid #34482c;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+    }
+
+    .leaderboard-row.me {
+      border-color: var(--color-gold);
+      background: #253520;
+    }
+
+    /* Loading screen */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      background: #090e07;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      transition: opacity 0.5s ease-out;
+    }
+
+    #loading-screen.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #22301f;
+      border-top-color: #7cb342;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+
+    .loading-bar-wrap {
+      width: 240px;
+      height: 10px;
+      background: #182315;
+      border-radius: 5px;
+      overflow: hidden;
+      border: 1px solid #3c5432;
+    }
+
+    #loading-progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #7cb342, #f2b134);
+      transition: width 0.2s;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading Splash Screen -->
+  <div id="loading-screen">
+    <div style="font-size: 40px;">🌲🕯️✨</div>
+    <h2 style="color: #fff3cd; font-size: 22px; font-weight: 800; text-shadow: 0 0 15px rgba(242,177,52,0.4);">
+      Изометрический стелс-экшен pixi.js: персонаж
+    </h2>
+    <p style="color: #9eb692; font-size: 13px;">Загрузка леса и древних духов...</p>
+    <div class="loading-bar-wrap">
+      <div id="loading-progress-bar"></div>
+    </div>
+    <div class="loading-spinner"></div>
+  </div>
+
+  <!-- Main Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Floating Combat Text Overlay -->
+  <div id="fct-container"></div>
+
+  <!-- HUD Overlay -->
+  <div id="ui-root">
+    <div class="safe-container">
+      <!-- Top HUD -->
+      <div id="hud-top" style="display: none;">
+        <!-- Left: HP & Stealth -->
+        <div class="hud-card">
+          <div style="font-size: 20px;">🛡️</div>
+          <div class="bar-container">
+            <div class="stat-label">
+              <span>Здоровье</span>
+              <span id="label-hp">100/100</span>
+            </div>
+            <div class="bar-bg">
+              <div id="bar-hp" class="bar-fill-hp" style="width: 100%;"></div>
+            </div>
+            <div class="stat-label" style="margin-top: 3px;">
+              <span>Скрытность</span>
+              <span id="label-stealth">100%</span>
+            </div>
+            <div class="bar-bg">
+              <div id="bar-stealth" class="bar-fill-stealth" style="width: 100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center: Night / Wave / Hope -->
+        <div class="hud-card" style="flex-direction: column; gap: 4px; padding: 6px 18px;">
+          <div class="wave-badge">
+            <span id="label-wave">НОЧЬ 1</span>
+            <small id="label-season">Весна • Выживание</small>
+          </div>
+          <div style="font-size: 11px; color: #aed581; font-weight: 700;">
+            Духов в лесу: <span id="label-enemies">0</span>
+          </div>
+        </div>
+
+        <!-- Right: Resources & Pause -->
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <div class="hud-card">
+            <div class="resource-counter">
+              <span>🧂</span>
+              <span id="label-salt">5</span>
+            </div>
+            <div class="resource-counter" style="margin-left: 8px;">
+              <span>🌿</span>
+              <span id="label-herbs">0</span>
+            </div>
+            <div class="resource-counter" style="margin-left: 8px; color: var(--color-gold);">
+              <span>🪙</span>
+              <span id="label-coins">0</span>
+            </div>
+          </div>
+          <button id="btn-pause" class="btn-icon" title="Пауза (P / Esc)">⚙️</button>
+        </div>
+      </div>
+
+      <!-- Stealth Alert Indicator -->
+      <div id="stealth-indicator" style="display: none;">
+        <span id="stealth-eye">👁️</span>
+        <span id="stealth-status-text">В тени кустов (Невидим)</span>
+      </div>
+
+      <!-- Bottom HUD / Action Bar -->
+      <div id="hud-bottom" style="display: none;">
+        <div class="hud-tools">
+          <button id="tool-torch" class="tool-btn" title="Зажечь факел (Пробел / Кнопка 1)">
+            <span>🔥 Факел</span>
+            <span class="keybind">Пробел</span>
+          </button>
+          <button id="tool-salt" class="tool-btn" title="Начертить круг соли (E / Кнопка 2)">
+            <span>🧂 Круг Соли</span>
+            <span class="keybind">E</span>
+          </button>
+          <button id="tool-dash" class="tool-btn" title="Бесшумный рывок (Shift / Кнопка 3)">
+            <span>💨 Рывок</span>
+            <span class="keybind">Shift</span>
+          </button>
+        </div>
+
+        <!-- Colony Favor / Hope Bar -->
+        <div class="hud-card" style="padding: 6px 14px;">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 120px;">
+            <div class="stat-label">
+              <span>Надежда Колонии</span>
+              <span id="label-favor">100%</span>
+            </div>
+            <div class="bar-bg">
+              <div id="bar-favor" style="width: 100%; height: 100%; background: linear-gradient(90deg, #f2b134, #aed581);"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Touch Controls -->
+  <div id="touch-controls">
+    <div id="touch-zone-left">
+      <div id="joystick-base">
+        <div id="joystick-knob"></div>
+      </div>
+    </div>
+    <div id="touch-zone-right">
+      <div class="touch-buttons-cluster">
+        <button id="touch-btn-salt" class="touch-btn touch-btn-sub" style="grid-column: 1; grid-row: 1;">
+          🧂<br><span style="font-size: 10px;">Соль</span>
+        </button>
+        <button id="touch-btn-dash" class="touch-btn touch-btn-sub" style="grid-column: 2; grid-row: 1;">
+          💨<br><span style="font-size: 10px;">Рывок</span>
+        </button>
+        <button id="touch-btn-torch" class="touch-btn touch-btn-sub" style="grid-column: 1; grid-row: 2;">
+          🔥<br><span style="font-size: 10px;">Факел</span>
+        </button>
+        <button id="touch-btn-attack" class="touch-btn touch-btn-main">
+          🗡️<br><span style="font-size: 11px;">УДАР</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Menu Modal -->
+  <div id="modal-main-menu" class="modal-overlay active">
+    <div class="modal-box">
+      <div style="font-size: 48px;">🌲⚔️🕯️</div>
+      <h1 class="modal-title">ИЗОМЕТРИЧЕСКИЙ СТЕЛС-ЭКШЕН</h1>
+      <p class="modal-subtitle">
+        Прячьтесь в кустах от блуждающих огоньков и древнего Лешего.<br>
+        Зажигайте берестяные факелы, собирайте редкие травы и чертите защитные круги из соли!
+      </p>
+
+      <div style="display: flex; justify-content: center; gap: 18px; margin: 10px 0;">
+        <div class="hud-card" style="padding: 10px 20px;">
+          <span style="font-size: 20px;">🪙</span>
+          <span id="menu-coins" style="font-size: 18px; font-weight: 800; color: var(--color-gold);">0</span>
+        </div>
+        <div class="hud-card" style="padding: 10px 20px;">
+          <span style="font-size: 20px;">🏆</span>
+          <span id="menu-highscore" style="font-size: 18px; font-weight: 800; color: #aed581;">Ночь 1</span>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-start-game" class="btn-primary" style="font-size: 18px; padding: 14px 40px;">
+          ⚔️ В БОЙ (СТАРТ)
+        </button>
+        <button id="btn-open-talents" class="btn-secondary">
+          ✨ Улучшения лагеря
+        </button>
+        <button id="btn-open-leaderboard" class="btn-secondary">
+          🏆 Лидеры
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3-Card Upgrade Modal -->
+  <div id="modal-upgrade" class="modal-overlay">
+    <div class="modal-box" style="max-width: 720px;">
+      <h2 class="modal-title">✨ ДАРЫ ЛЕСА И СИЛА ЗНАНИЙ</h2>
+      <p class="modal-subtitle">Рассвет наступил! Выберите одно улучшение для выживания в следующую ночь:</p>
+      
+      <div id="upgrade-cards-container" class="cards-grid">
+        <!-- Injected via JS -->
+      </div>
+
+      <div class="btn-group" style="margin-top: 10px;">
+        <button id="btn-reroll-ad" class="btn-rewarded" style="display: none;">
+          🎬 Перебросить за рекламу (Редкие+)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Camp Talents Modal -->
+  <div id="modal-talents" class="modal-overlay">
+    <div class="modal-box" style="max-width: 600px;">
+      <h2 class="modal-title">🏕️ УЛУЧШЕНИЯ ЛАГЕРЯ КОЛОНИИ</h2>
+      <p class="modal-subtitle">Постоянные улучшения за собранные монеты и травы:</p>
+
+      <div id="talents-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto; padding: 4px;">
+        <!-- Injected via JS -->
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-close-talents" class="btn-secondary">
+          ⬅️ Назад в меню
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaderboard Modal -->
+  <div id="modal-leaderboard" class="modal-overlay">
+    <div class="modal-box" style="max-width: 500px;">
+      <h2 class="modal-title">🏆 ТАБЛИЦА ЛИДЕРОВ</h2>
+      <p class="modal-subtitle">Лучшие выжившие в священном лесу:</p>
+
+      <div id="leaderboard-content" class="leaderboard-list">
+        <!-- Injected via JS -->
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-close-leaderboard" class="btn-secondary">
+          ⬅️ Закрыть
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pause Modal -->
+  <div id="modal-pause" class="modal-overlay">
+    <div class="modal-box" style="max-width: 440px;">
+      <h2 class="modal-title">⏸️ ПАУЗА</h2>
+      <p class="modal-subtitle">Лес замер в ожидании ваших решений.</p>
+
+      <div class="btn-group" style="flex-direction: column;">
+        <button id="btn-resume" class="btn-primary">▶️ Продолжить</button>
+        <button id="btn-toggle-sound" class="btn-secondary">🔊 Звук: ВКЛ</button>
+        <button id="btn-quit-menu" class="btn-secondary">🏠 Выйти в меню</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over / Victory Modal -->
+  <div id="modal-gameover" class="modal-overlay">
+    <div class="modal-box">
+      <div id="gameover-icon" style="font-size: 48px;">💀</div>
+      <h2 id="gameover-title" class="modal-title">ВЫ ПОГЛОЩЕНЫ ТЬМОЙ</h2>
+      <p id="gameover-desc" class="modal-subtitle">Леший и блуждающие духи одолели вас.</p>
+
+      <div class="hud-card" style="justify-content: space-around; padding: 14px;">
+        <div style="text-align: center;">
+          <div style="font-size: 11px; color: #9eb692;">ПРОЖИТО НОЧЕЙ</div>
+          <div id="gameover-nights" style="font-size: 20px; font-weight: 800; color: var(--color-gold);">1</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 11px; color: #9eb692;">ПОБЕЖДЕНО ДУХОВ</div>
+          <div id="gameover-kills" style="font-size: 20px; font-weight: 800; color: #aed581;">0</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 11px; color: #9eb692;">ЗАРАБОТАНО МОНЕТ</div>
+          <div id="gameover-coins" style="font-size: 20px; font-weight: 800; color: #fff3cd;">0</div>
+        </div>
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-revive-ad" class="btn-rewarded" style="display: none;">
+          ⚡ Второе Дыхание (+50% HP и щит)
+        </button>
+        <button id="btn-double-gold-ad" class="btn-rewarded" style="display: none;">
+          💰 Удвоить золото (2x)
+        </button>
+        <button id="btn-gameover-restart" class="btn-primary">
+          🔄 Начать заново
+        </button>
+        <button id="btn-gameover-menu" class="btn-secondary">
+          🏠 В меню
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
