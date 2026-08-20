@@ -11,19 +11,28 @@
 <div id="app">
   <!-- ── Боковая навигация ─────────────────────────────────────────── -->
   <aside id="sidebar">
-    <button class="nav-btn active" data-view="studio">🚀 Студия генерации</button>
-    <button class="nav-btn" data-view="projects">📁 Проекты и ТЗ</button>
-    <button class="nav-btn" data-view="chats">💬 Чаты разработки</button>
-    <button class="nav-btn" data-view="play">🌐 Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
-    <button class="nav-btn" data-view="quota">📊 Квоты агентов</button>
-    <button class="nav-btn" data-view="settings">⚙️ Настройки</button>
+    <div class="sidebar-brand">
+      <div class="sidebar-logo">🎮</div>
+      <div style="flex:1;min-width:0">
+        <div class="sidebar-title">Game Factory</div>
+        <div class="sidebar-version">AI Game Studio v2.4</div>
+      </div>
+      <button class="theme-toggle-btn" id="btn-theme-toggle" title="Переключить тему (Светлая / Тёмная)">☀️</button>
+    </div>
 
-    <!-- Активность: что агенты делают прямо сейчас и что закончили только что -->
+    <button class="nav-btn active" data-view="studio"><span class="nav-icon">🚀</span> Студия генерации</button>
+    <button class="nav-btn" data-view="projects"><span class="nav-icon">📁</span> Проекты и ТЗ</button>
+    <button class="nav-btn" data-view="chats"><span class="nav-icon">💬</span> Чаты разработки</button>
+    <button class="nav-btn" data-view="play"><span class="nav-icon">🌐</span> Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
+    <button class="nav-btn" data-view="quota"><span class="nav-icon">📊</span> Квоты агентов</button>
+    <button class="nav-btn" data-view="settings"><span class="nav-icon">⚙️</span> Настройки</button>
+
+    <!-- Активность: что агенты делают прямо сейчас -->
     <div class="activity">
       <div class="activity-head">
         <span>⚡ Активные чаты</span>
         <span class="row" style="gap:6px">
-          <button class="act-clear" id="btn-activity-clear" title="Убрать из панели все завершённые темы">🧹</button>
+          <button class="act-clear" id="btn-activity-clear" title="Убрать завершённые">🧹</button>
           <span class="conn-dot" id="sidebar-status" title="Связь с фабрикой">●</span>
         </span>
       </div>
@@ -37,16 +46,16 @@
     <!-- ── Студия ───────────────────────────────────────────────────── -->
     <section class="view active" id="view-studio">
       <div class="panel">
-        <div class="row spread">
+        <div class="row spread" style="margin-bottom:8px">
           <h2>💡 Идея игры <span class="dim">— 14 AI-агентов соберут архитектуру, скиллы и код</span></h2>
-          <button class="btn violet" id="btn-brainstorm">✨ ПРИДУМАТЬ ИДЕЮ ОТ ИИ</button>
+          <button class="btn violet small" id="btn-brainstorm">✨ ПРИДУМАТЬ ИДЕЮ ОТ ИИ</button>
         </div>
 
-        <div class="presets" id="studio-presets" style="margin:10px 0"></div>
+        <div class="presets" id="studio-presets" style="margin-bottom:10px"></div>
 
         <textarea id="studio-prompt" rows="3" placeholder="Опишите идею игры...">3D гладиаторский roguelike с активным рэгдоллом, расчленением и боссами на Яндекс Игры</textarea>
 
-        <div class="controls-grid" style="margin:10px 0">
+        <div class="controls-grid" style="margin:12px 0">
           <label class="field">🤖 AI Provider<select id="sel-provider"></select></label>
           <label class="field">🎨 Рендерер<select id="sel-renderer"></select></label>
           <label class="field">📊 Режим<select id="sel-mode"></select></label>
@@ -54,9 +63,9 @@
         </div>
 
         <div class="actions-row">
-          <button class="btn primary big" id="btn-create-full">🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ<br /><span class="small">Анализ ➔ 25+ Документов ➔ Скиллы ➔ Кодинг агентом</span></button>
-          <button class="btn big" id="btn-create-spec" style="flex:0 0 220px">📄 Только ТЗ и Спека<br /><span class="small">25+ файлов Markdown</span></button>
-          <button class="btn big" id="btn-analyze" style="flex:0 0 120px">🔍 Анализ<br /><span class="small">идеи</span></button>
+          <button class="btn primary big" id="btn-create-full">🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ<br /><span class="small" style="opacity:0.9">Анализ ➔ 25+ Документов ➔ Скиллы ➔ Кодинг агентом</span></button>
+          <button class="btn big" id="btn-create-spec" style="flex:0 0 220px">📄 Только ТЗ и Спека<br /><span class="small muted">25+ файлов Markdown</span></button>
+          <button class="btn big" id="btn-analyze" style="flex:0 0 130px">🔍 Анализ<br /><span class="small muted">концепта</span></button>
         </div>
       </div>
 
@@ -82,6 +91,10 @@
               <strong class="small">🎮 Готовые игры студии</strong>
               <span class="dim" id="gallery-count"></span>
               <span class="grow"></span>
+              <div class="search-input-wrap" style="width:180px">
+                <span class="search-icon">🔍</span>
+                <input type="search" id="gallery-search" placeholder="Поиск игры..." style="padding:4px 8px 4px 28px;font-size:11.5px" />
+              </div>
               <select id="gallery-sort" class="mini-select" title="Порядок игр">
                 <option value="new">🆕 Сначала новые</option>
                 <option value="old">🕰 Сначала старые</option>
@@ -89,8 +102,8 @@
                 <option value="updated">🕒 По изменению</option>
               </select>
               <label class="check"><input type="checkbox" id="chk-archived" /> 📦 Архив</label>
-              <button class="btn small" id="btn-refresh-gallery">🔄 Обновить</button>
-              <button class="btn small" id="btn-open-workspace-2">📂 Папка</button>
+              <button class="btn small" id="btn-refresh-gallery" title="Обновить список">🔄</button>
+              <button class="btn small" id="btn-open-workspace-2" title="Открыть рабочую папку">📂 Папка</button>
             </div>
             <div class="gallery" id="gallery"></div>
           </div>
@@ -115,12 +128,16 @@
       <div class="projects-layout">
         <div class="col">
           <div class="panel tight">
-            <div class="row spread">
+            <div class="row spread" style="margin-bottom:6px">
               <h2>📦 Проекты</h2>
               <div class="row">
-                <label class="check"><input type="checkbox" id="chk-archived-list" /> 📦 Архив</label>
-                <button class="btn small" id="btn-refresh-projects">🔄</button>
+                <label class="check"><input type="checkbox" id="chk-archived-list" /> Архив</label>
+                <button class="btn small icon-only" id="btn-refresh-projects" title="Обновить">🔄</button>
               </div>
+            </div>
+            <div class="search-input-wrap">
+              <span class="search-icon">🔍</span>
+              <input type="search" id="project-search" placeholder="Поиск проекта..." style="font-size:12px;padding:6px 10px 6px 30px" />
             </div>
           </div>
           <div class="scroll grow" id="projects-list"></div>
@@ -135,20 +152,27 @@
         </div>
 
         <div class="col panel" style="min-height:0">
-          <div id="project-banner" style="background:#18233a;border-radius:8px;padding:10px 12px">
-            <div style="font-size:16px;font-weight:700" id="project-title">Выберите проект из списка слева</div>
-            <div class="small" style="color:var(--accent);margin:3px 0 8px" id="project-meta"></div>
-            <div class="row">
-              <button class="btn primary small" id="btn-copy-prompt">📋 Скопировать Master Prompt</button>
-              <button class="btn ok small" id="btn-play-project">🌐 Запустить игру</button>
-              <button class="btn small" id="btn-continue-agent">⚡ Продолжить в агенте</button>
-              <button class="btn small" id="btn-rename-project">✏️ Переименовать</button>
-              <button class="btn small" id="btn-open-project-folder">📂 Папка проекта</button>
+          <div id="project-banner" class="project-header-box">
+            <div class="project-header-top">
+              <div>
+                <div style="font-size:16px;font-weight:700;color:var(--text)" id="project-title">Выберите проект из списка слева</div>
+                <div class="small" style="color:var(--text-muted);margin-top:2px" id="project-meta"></div>
+              </div>
+              <div class="row">
+                <span class="stars" id="project-stars" title="Ваша оценка игры"></span>
+              </div>
+            </div>
+            
+            <div class="project-header-actions">
+              <button class="btn ok small" id="btn-play-project">▶ Запустить игру</button>
+              <button class="btn small primary" id="btn-continue-agent">💬 Чат разработки</button>
+              <button class="btn small" id="btn-project-build-zip">🏗 Build + ZIP</button>
+              <button class="btn small" id="btn-copy-prompt">📋 Master Prompt</button>
+              <button class="btn small" id="btn-open-project-folder">📂 Папка</button>
               <button class="btn small" id="btn-export-zip">📦 Экспорт ZIP</button>
-              <button class="btn small primary" id="btn-project-build-zip">🏗 Build + ZIP</button>
               <button class="btn small" id="btn-validate">✅ Валидация</button>
               <span class="grow"></span>
-              <span class="stars" id="project-stars" title="Ваша оценка игры"></span>
+              <button class="btn small" id="btn-rename-project" title="Переименовать">✏️</button>
               <button class="btn small" id="btn-archive-project">📦 В архив</button>
               <button class="btn small danger" id="btn-delete-project">🗑 Удалить</button>
             </div>
@@ -174,39 +198,42 @@
     <section class="view" id="view-chats">
       <div class="chat-layout">
         <div class="col panel" style="min-height:0">
-          <div class="row spread">
+          <div class="row spread" style="margin-bottom:6px">
             <h2 id="chat-side-title">💬 Чаты</h2>
-            <button class="btn small primary" id="btn-new-chat-2">➕</button>
+            <button class="btn small primary" id="btn-new-chat-2" title="Новый чат">➕ Новый</button>
           </div>
-          <label class="field" style="margin-top:8px">Проект<select id="chat-project"></select></label>
-          <div class="scroll grow" id="chat-list" style="margin-top:8px"></div>
+          <label class="field" style="margin-bottom:6px">Проект<select id="chat-project"></select></label>
+          <div class="scroll grow" id="chat-list"></div>
         </div>
 
         <div class="col panel" style="min-height:0">
           <div class="row spread">
-            <h2>💬 Чат разработки <span class="dim">AGY · Claude · Codex · Kimi · OpenCode</span></h2>
+            <div class="row">
+              <h2>💬 Чат разработки</h2>
+              <span class="dim" id="chat-session-name" style="margin-left:6px">чат не выбран</span>
+            </div>
             <span class="dim" id="chat-sandbox"></span>
           </div>
 
-          <div class="row" style="margin:8px 0">
-            <label class="field" style="flex:0 0 210px">Агент<select id="chat-agent"></select></label>
-            <label class="field" style="flex:0 0 230px">Модель<select id="chat-model"></select></label>
+          <div class="row" style="margin:8px 0;gap:8px">
+            <label class="field" style="flex:0 0 200px">Агент<select id="chat-agent"></select></label>
+            <label class="field" style="flex:0 0 220px">Модель<select id="chat-model"></select></label>
             <button class="btn small" id="btn-reload-models" title="Обновить список моделей">🔄</button>
             <button class="btn small" id="btn-agent-login">🔑 Вход</button>
+            <span class="grow"></span>
             <label class="check"><input type="checkbox" id="chk-yolo" checked /> 🔥 YOLO</label>
-            <label class="check"><input type="checkbox" id="chk-continue" checked /> 🧵 Продолжать диалог</label>
+            <label class="check"><input type="checkbox" id="chk-continue" checked /> 🧵 Продолжать</label>
             <label class="check"><input type="checkbox" id="chk-chat-autoscroll" checked /> ⚡ Автоскролл</label>
             <label class="check"><input type="checkbox" id="chk-notify" checked /> 🔔 Уведомления</label>
           </div>
 
-          <div class="presets" id="chat-presets"></div>
+          <div class="presets" id="chat-presets" style="margin-bottom:6px"></div>
 
-          <div class="toolbar" style="margin-top:8px">
+          <div class="toolbar">
             <strong class="small" id="chat-status" style="color:var(--ok)">● Готов</strong>
-            <span class="dim" id="chat-session-name">чат не выбран</span>
             <span class="grow"></span>
-            <label class="check"><input type="checkbox" id="chk-hide-tools" /> 🧰 Скрыть инструменты</label>
-            <button class="btn small" id="btn-chat-expand">↕ Развернуть всё</button>
+            <label class="check"><input type="checkbox" id="chk-hide-tools" /> 🧰 Скрыть тулы</label>
+            <button class="btn small" id="btn-chat-expand">↕ Развернуть</button>
             <button class="btn small ok" id="btn-chat-play" disabled>▶ Играть</button>
             <button class="btn small" id="btn-chat-copy">📋 Копировать</button>
             <button class="btn small" id="btn-chat-clear">🗑 Очистить</button>
@@ -215,12 +242,11 @@
 
           <div class="feed" id="chat-feed"></div>
 
-          <!-- Прикреплённые файлы и скриншоты: ложатся во временную папку
-               проекта и уходят агенту ссылками прямо в задаче -->
+          <!-- Прикреплённые файлы и скриншоты -->
           <div class="attach-bar hidden" id="chat-attachments"></div>
 
           <div class="composer" id="chat-composer" style="margin-top:8px">
-            <textarea id="chat-input" class="grow" placeholder="Опишите задачу агенту. Enter — отправить, Shift+Enter — новая строка. Скриншот можно вставить из буфера (Ctrl+V) или перетащить файл сюда."></textarea>
+            <textarea id="chat-input" class="grow" placeholder="Опишите задачу агенту. Enter — отправить, Shift+Enter — новая строка. Скриншот (Ctrl+V) или Drag&Drop."></textarea>
             <div class="composer-actions">
               <button class="btn primary" id="btn-chat-send">⚡ Отправить</button>
               <button class="btn small" id="btn-chat-attach">📎 Файл / скриншот</button>
@@ -238,18 +264,14 @@
       <div class="panel">
         <div class="row spread">
           <h2>🌐 Запуск игры и предпросмотр</h2>
-          <span class="small muted" id="play-status">● Сервер остановлен</span>
+          <span class="small" id="play-status" style="color:var(--text-muted)">● Сервер остановлен</span>
         </div>
-        <p class="dim" style="margin:6px 0 10px">
-          Агент разрабатывает игру в workspace/. Здесь она поднимается через <code>npm run dev</code>
-          и открывается во вкладке браузера или в отдельном окне предпросмотра.
-        </p>
-        <div class="row">
-          <label class="field" style="flex:0 0 280px">Проект<select id="play-project"></select></label>
+        <div class="row" style="margin-top:8px">
+          <label class="field" style="flex:0 0 260px">Проект<select id="play-project"></select></label>
           <label class="field grow">URL<input type="text" id="play-url" placeholder="http://localhost:5173/" /></label>
         </div>
         <div class="row" style="margin-top:10px">
-          <button class="btn ok big grow" id="btn-play-start">▶ ЗАПУСТИТЬ ИГРУ (npm run dev)</button>
+          <button class="btn ok big" id="btn-play-start" style="flex:1">▶ ЗАПУСТИТЬ ИГРУ (npm run dev)</button>
           <button class="btn primary" id="btn-play-open">🖥 Открыть вкладку</button>
           <button class="btn" id="btn-play-window">🪟 Отдельное окно</button>
           <button class="btn" id="btn-play-build">🏗 Сборка</button>
@@ -258,10 +280,10 @@
         </div>
       </div>
 
-      <!-- Менеджер запущенных игр: занятые порты, открыть/погасить лишнее -->
+      <!-- Менеджер запущенных игр -->
       <div class="panel tight">
         <div class="toolbar">
-          <strong class="small">🎮 Запущенные игры</strong>
+          <strong class="small">🎮 Запущенные dev-серверы</strong>
           <span class="dim" id="servers-count"></span>
           <span class="grow"></span>
           <button class="btn small" id="btn-servers-refresh">🔄 Обновить</button>
@@ -270,13 +292,27 @@
         <div class="servers" id="play-servers"></div>
       </div>
 
-      <div class="panel grow" style="padding:0">
+      <!-- Контейнер вывода / встроенного предпросмотра -->
+      <div class="panel grow" style="padding:0;display:flex;flex-direction:column">
         <div class="toolbar">
-          <strong class="small">📟 Вывод dev-сервера</strong>
+          <div class="row" style="gap:4px">
+            <button class="btn small primary" id="btn-play-mode-frame">📱 Встроенный предпросмотр</button>
+            <button class="btn small" id="btn-play-mode-log">📟 Лог dev-сервера</button>
+          </div>
           <span class="grow"></span>
-          <button class="btn small" id="btn-play-clear">🗑 Очистить</button>
+          <div class="row" id="play-frame-controls" style="gap:6px">
+            <button class="btn small" id="btn-frame-desktop" title="Десктоп">🖥 Full</button>
+            <button class="btn small" id="btn-frame-tablet" title="Планшет">📱 768px</button>
+            <button class="btn small" id="btn-frame-mobile" title="Телефон">📱 375px</button>
+            <button class="btn small" id="btn-frame-reload" title="Перезагрузить фрейм">🔄</button>
+          </div>
+          <button class="btn small hidden" id="btn-play-clear">🗑 Очистить лог</button>
         </div>
-        <div class="console" id="play-log"></div>
+        
+        <div class="play-iframe-wrap" id="play-iframe-container">
+          <iframe class="play-iframe" id="play-frame" src="about:blank"></iframe>
+        </div>
+        <div class="console hidden" id="play-log"></div>
       </div>
     </section>
 
@@ -358,7 +394,7 @@
   <div class="modal">
     <div class="row spread">
       <h2>💡 Генератор идей от ИИ</h2>
-      <button class="btn small" id="btn-close-brainstorm">✕</button>
+      <button class="btn small icon-only" id="btn-close-brainstorm">✕</button>
     </div>
     <p class="dim">
       ИИ придумает виральные концепты для Яндекс Игр / WebGL. Возьмите один вариант в студию
@@ -385,7 +421,7 @@
   <div class="modal" style="max-width:720px">
     <div class="row spread">
       <h2>↩ Откатить запрос</h2>
-      <button class="btn small" id="btn-close-undo">✕</button>
+      <button class="btn small icon-only" id="btn-close-undo">✕</button>
     </div>
     <p class="dim">
       Файлы проекта вернутся к состоянию на момент этого запроса.

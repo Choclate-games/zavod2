@@ -58,6 +58,7 @@ const state = {
   showArchived: localStorage.getItem("showArchived") === "1",
   showArchivedList: localStorage.getItem("showArchivedList") === "1",
   hideTools: localStorage.getItem("hideTools") === "1",
+  theme: localStorage.getItem("theme") || "dark",
 };
 
 /* ── Тосты ────────────────────────────────────────────────────────────── */
@@ -240,9 +241,18 @@ function sortProjects(projects, mode) {
   return list;
 }
 
-function visibleProjects(showArchived, mode) {
+function visibleProjects(showArchived, mode, query = "") {
   const all = state.projects || [];
-  const list = showArchived ? all : all.filter((p) => !p.archived);
+  let list = showArchived ? all : all.filter((p) => !p.archived);
+  if (query && typeof query === "string" && query.trim()) {
+    const q = query.trim().toLowerCase();
+    list = list.filter((p) =>
+      (p.title && p.title.toLowerCase().includes(q)) ||
+      (p.slug && p.slug.toLowerCase().includes(q)) ||
+      (p.genre && p.genre.toLowerCase().includes(q)) ||
+      (p.renderer && p.renderer.toLowerCase().includes(q))
+    );
+  }
   return sortProjects(list, mode || state.gallerySort);
 }
 
@@ -298,11 +308,8 @@ async function renameProject(project) {
 
 async function deleteProject(project) {
   const ok = confirm(
-    `Удалить игру «${project.title}» безвозвратно?
-
-` +
-    `Будут стёрты код, спецификация и чаты (${project.slug}).
-` +
+    `Удалить игру «${project.title}» безвозвратно?\n\n` +
+    `Будут стёрты код, спецификация и чаты (${project.slug}).\n` +
     `Если игра просто мешает — используйте «📦 В архив»: она останется на диске.`);
   if (!ok) return;
   const res = await api(`/api/projects/${encodeURIComponent(project.slug)}`, { method: "DELETE" });
@@ -332,14 +339,15 @@ async function loadGallery() {
   state.projects = projects;
   const box = $("gallery");
   box.innerHTML = "";
-  const shown = visibleProjects(state.showArchived);
+  const query = $("gallery-search") ? $("gallery-search").value : "";
+  const shown = visibleProjects(state.showArchived, null, query);
   const archivedCount = projects.filter((p) => p.archived).length;
   $("gallery-count").textContent = projects.length
-    ? `· показано ${shown.length} из ${projects.length}${archivedCount ? ` · 📦 в архиве ${archivedCount}` : ""}`
+    ? `· ${shown.length} из ${projects.length}${archivedCount ? ` · 📦 ${archivedCount}` : ""}`
     : "";
   if (!shown.length) {
     box.appendChild(el("div", "muted", projects.length
-      ? "Все игры убраны в архив. Включите галочку «📦 Архив», чтобы увидеть их."
+      ? (query ? `Ничего не найдено по запросу «${esc(query)}».` : "Все игры убраны в архив. Включите галочку «📦 Архив», чтобы увидеть их.")
       : "Пока ни одной игры. Опишите идею выше и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ» — готовые проекты появятся здесь обложками."));
     return;
   }
@@ -472,10 +480,11 @@ async function loadProjects() {
   state.projects = projects;
   const box = $("projects-list");
   box.innerHTML = "";
-  const shown = visibleProjects(state.showArchivedList);
+  const query = $("project-search") ? $("project-search").value : "";
+  const shown = visibleProjects(state.showArchivedList, null, query);
   if (!shown.length) {
     box.appendChild(el("div", "muted", projects.length
-      ? "Все проекты в архиве — включите «📦 Архив»."
+      ? (query ? `Ничего не найдено по запросу «${esc(query)}».` : "Все проекты в архиве — включите «📦 Архив».")
       : "Нет проектов в workspace/"));
   }
   shown.forEach((p) => {
@@ -1729,6 +1738,14 @@ async function loadPlayState() {
   $("play-log").scrollTop = $("play-log").scrollHeight;
   $("play-url").value = st.url || "";
   setPlayStatus(st.running, st.starting, st.url);
+  const frame = $("play-frame");
+  if (frame) {
+    if (st.running && st.url) {
+      if (!frame.src.startsWith(st.url)) frame.src = st.url;
+    } else if (!st.running) {
+      frame.src = "about:blank";
+    }
+  }
 }
 
 function setPlayStatus(running, starting, url) {
@@ -2167,6 +2184,7 @@ function bindStudio() {
     toast("Журнал", "Скопирован в буфер обмена", "ok");
   };
   $("btn-refresh-gallery").onclick = loadGallery;
+  if ($("gallery-search")) $("gallery-search").oninput = loadGallery;
 
   $("btn-brainstorm").onclick = openBrainstorm;
   $("btn-close-brainstorm").onclick = closeBrainstorm;
@@ -2192,6 +2210,7 @@ function bindStudio() {
 
 function bindProjects() {
   $("btn-refresh-projects").onclick = loadProjects;
+  if ($("project-search")) $("project-search").oninput = loadProjects;
   $("gallery-sort").value = state.gallerySort;
   $("gallery-sort").onchange = () => {
     state.gallerySort = $("gallery-sort").value;
@@ -2286,8 +2305,13 @@ function bindChats() {
     toast("Вход", res.message || "", res.status === "success" ? "ok" : "err");
   };
   $("btn-chat-send").onclick = sendChatTask;
-  $("chat-input").addEventListener("keydown", (e) => {
+  const chatInput = $("chat-input");
+  chatInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatTask(); }
+  });
+  chatInput.addEventListener("input", () => {
+    chatInput.style.height = "auto";
+    chatInput.style.height = Math.min(Math.max(chatInput.scrollHeight, 52), 220) + "px";
   });
 
   // Вложения: кнопка, Ctrl+V со скриншотом и перетаскивание файлов в композер.
@@ -2296,7 +2320,7 @@ function bindChats() {
     await attachFiles(e.target.files);
     e.target.value = "";
   };
-  $("chat-input").addEventListener("paste", (e) => {
+  chatInput.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData ? e.clipboardData.files : [])];
     if (!files.length) return;   // обычный текст вставляем как обычно
     e.preventDefault();
@@ -2392,12 +2416,68 @@ function bindPlay() {
     await loadServers();
     loadPlayState();
   };
+
+  const frameModeBtn = $("btn-play-mode-frame");
+  const logModeBtn = $("btn-play-mode-log");
+  const frameContainer = $("play-iframe-container");
+  const logContainer = $("play-log");
+  const frameControls = $("play-frame-controls");
+  const clearBtn = $("btn-play-clear");
+
+  if (frameModeBtn && logModeBtn) {
+    frameModeBtn.onclick = () => {
+      frameModeBtn.classList.add("primary");
+      logModeBtn.classList.remove("primary");
+      frameContainer.classList.remove("hidden");
+      logContainer.classList.add("hidden");
+      frameControls.classList.remove("hidden");
+      clearBtn.classList.add("hidden");
+    };
+    logModeBtn.onclick = () => {
+      logModeBtn.classList.add("primary");
+      frameModeBtn.classList.remove("primary");
+      logContainer.classList.remove("hidden");
+      frameContainer.classList.add("hidden");
+      frameControls.classList.add("hidden");
+      clearBtn.classList.remove("hidden");
+    };
+  }
+  if ($("btn-frame-desktop")) {
+    $("btn-frame-desktop").onclick = () => { $("play-frame").className = "play-iframe"; };
+    $("btn-frame-tablet").onclick = () => { $("play-frame").className = "play-iframe tablet"; };
+    $("btn-frame-mobile").onclick = () => { $("play-frame").className = "play-iframe mobile"; };
+    $("btn-frame-reload").onclick = () => {
+      const f = $("play-frame");
+      if (f && f.src && f.src !== "about:blank") f.src = f.src;
+    };
+  }
+}
+
+function applyTheme(theme) {
+  state.theme = theme;
+  localStorage.setItem("theme", theme);
+  const isLight = theme === "light";
+  if (isLight) {
+    document.documentElement.setAttribute("data-theme", "light");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  const btn = $("btn-theme-toggle");
+  if (btn) {
+    btn.textContent = isLight ? "🌙" : "☀️";
+    btn.title = isLight ? "Переключить на тёмную тему" : "Переключить на светлую тему";
+  }
+}
+
+function toggleTheme() {
+  applyTheme(state.theme === "light" ? "dark" : "light");
 }
 
 function bindCommon() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.onclick = () => showView(btn.dataset.view);
   });
+  if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
   $("btn-save-settings").onclick = saveSettings;
@@ -2422,6 +2502,7 @@ function bindCommon() {
 }
 
 async function boot() {
+  applyTheme(state.theme);
   state.boot = await api("/api/bootstrap");
 
   fillSelect("sel-provider", state.boot.providers, state.boot.settings.default_agent);
@@ -2458,3 +2539,4 @@ async function boot() {
 }
 
 boot();
+

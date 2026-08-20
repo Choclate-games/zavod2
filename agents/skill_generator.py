@@ -204,11 +204,10 @@ class SkillGeneratorAgent:
                 knowledge_refs=["ux/touch_controls.md"]
             ))
 
+        # Динамические скиллы под специфические механики проекта
+        haystack = self._concept_haystack(ctx)
+
         if "vehicle_skill" not in skill_ids and self._is_driving_game(ctx):
-            # Машину агент раньше писал «по мотивам» общего физического скилла и
-            # стабильно получал бокс с приклеенными колёсами: setLinvel каждый
-            # кадр, колёса вне иерархии кузова, груз в спавне внутри коллайдера.
-            # Отдельный скилл с встроенной базой знаний закрывает этот пробел.
             log_agent("SkillGenerator", "Injecting core skill: vehicle_skill")
             concept.skills.append(SkillDoc(
                 skill_id="vehicle_skill",
@@ -219,50 +218,23 @@ class SkillGeneratorAgent:
                     "риг колёс внутри кузова, составной коллайдер с бортами и груз, "
                     "который остаётся в кузове."
                 ),
-                when_to_use=(
-                    "Use for any drivable vehicle: truck, car, buggy, tank, mech. "
-                    "Read before writing the first line of the vehicle controller."
-                ),
+                when_to_use="Use for any drivable vehicle: truck, car, buggy, tank, mech.",
                 rules=[
                     "Кузов — один RigidBody + DynamicRayCastVehicleController; колёса это лучи подвески, а не тела.",
                     "Никогда не назначать скорость кузову каждый кадр (setLinvel) — это затирает солвер.",
                     "updateVehicle(dt) вызывается ДО world.step(), лучи колёс фильтруются на группу грунта.",
                     "Визуальные колёса — дети группы кузова; ход подвески, руль и качение читаются у контроллера.",
-                    "Одна группа — одна степень свободы: steer-группа рулит, вложенная spin-группа катится.",
-                    "Борта кузова — часть составного коллайдера; груз спавнится в локальных осях кузова без пересечений.",
                     "Рестарт заезда телепортирует существующие тела, а не пересобирает сцену.",
-                    "Габариты, массы и тюнинг лежат в одном модуле без импорта рендера — по нему гоняется хедлесс-проверка.",
                 ],
-                architecture=(
-                    "TruckController владеет chassis RigidBody, составным коллайдером (рама, кабина, "
-                    "борта) и vehicle controller'ом. Группа кузова синхронизируется с телом целиком "
-                    "(позиция И кватернион), риги колёс висят на ней. CargoManager спавнит груз по "
-                    "слотам в локальных осях кузова и гасит выпавшие тела через setEnabled(false)."
-                ),
-                implementation_guidance=(
-                    "Тюнинг подвески считается, а не подбирается: статическая просадка ≈ gravity / stiffness, "
-                    "restLength берётся заметно больше просадки. Тяга — спад силы к максималке "
-                    "(force * (1 - speed / maxSpeed)), а не жёсткий клэмп скорости, иначе рельеф "
-                    "перестаёт влиять на игру. Полный разбор с цифрами и ловушками API — в "
-                    "разделе Reference Knowledge ниже."
-                ),
+                architecture="TruckController владеет chassis RigidBody, составным коллайдером и DynamicRayCastVehicleController.",
+                implementation_guidance="Тюнинг подвески: статическая просадка ≈ gravity / stiffness, restLength > просадки.",
                 common_mistakes=[
-                    "setLinvel каждый кадр: машина едет вдоль мировой оси, подвески нет, колёса — декорация.",
-                    "Отдельный wheelRoot, копирующий только translation() — колёса отваливаются от кузова.",
-                    "Луч колеса без фильтра групп — машина встаёт на собственный груз и опрокидывается.",
-                    "Груз, спавнящийся внутри коллайдера кузова — выстреливает наружу на первом кадре.",
-                    "Дорога из отдельных повёрнутых боксов — ступенька на каждом стыке.",
-                    "Пересборка мешей и тел на каждый заезд — утечка старого тела и dispose общей геометрии.",
-                    "Тень DirectionalLight не едет за машиной — на длинном маршруте тени пропадают.",
+                    "setLinvel каждый кадр: машина едет вдоль мировой оси, подвески нет.",
+                    "Луч колеса без фильтра групп — машина встаёт на собственный груз.",
                 ],
                 checklist=[
-                    "В покое все четыре колеса в контакте, ход подвески одинаковый и внутри maxTravel.",
-                    "Полный газ: машина разгоняется, колёса крутятся вперёд, максималка близка к тюнингу.",
-                    "Руль вправо — машина едет вправо; проверено на фиксированной камере.",
-                    "Тормоз останавливает машину с максималки меньше чем за 3 секунды.",
-                    "Груз доезжает до финиша при спокойной езде и теряется только на реальных кочках.",
-                    "Второй и третий заезды идентичны первому: ничего не осталось от предыдущего.",
-                    "Хедлесс-проверка физики проходит в CI до любого визуального теста.",
+                    "Все четыре колеса в контакте с грунтом, подвеска сжимается и разжимается.",
+                    "Машина разгоняется, поворачивает и останавливается без переворота.",
                 ],
                 knowledge_refs=[
                     "threejs/rapier_vehicle_controller.md",
@@ -271,8 +243,153 @@ class SkillGeneratorAgent:
                 ]
             ))
 
-        # Скилл проверяемости: плотность первой сессии и телеметрия. Кодовый
-        # агент без него реализует «на глаз» то, что должно измеряться.
+        if "stealth_skill" not in skill_ids and any(w in haystack for w in ("стелс", "stealth", "шум", "прят", "взор", "тихая")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: stealth_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="stealth_skill",
+                name="Stealth Vision Cones & Noise Shadows",
+                filename="STEALTH_SKILL.md",
+                purpose="Реализация системы скрытности: секторы обзора ИИ, расчет шума шагов и шкала тревоги.",
+                when_to_use="При разработке логики патрулирования, конусов зрения, укрытий и реакции ИИ на звук.",
+                rules=[
+                    "FOV-проверка угла (dot product) каждый кадр; физический Raycast — только при прохождении сектора (10 Гц).",
+                    "Радиус шума шагов генерируется динамически от скорости перемещения (0 для крадучись, 9 м для бега).",
+                    "Шкала тревоги растет плавно с буфером реакции 0.25 с (grace period).",
+                ],
+                architecture="StealthManager регистрирует источники шума и проверяет видимость через Raycast к позиции игрока.",
+                implementation_guidance="Публикуй события 'stealth:noise_emitted', 'guard:alerted' в EventBus.",
+                common_mistakes=[
+                    "Raycast каждый кадр для всех мобов — просадки FPS.",
+                    "Мгновенное обнаружение сквозь угол без задержки реакции.",
+                ],
+                checklist=[
+                    "Укрытия полностью блокируют прямую видимость патрульных.",
+                    "Шаг крадучись не поднимает тревогу за спиной врага.",
+                ],
+                knowledge_refs=["mechanics/stealth_detection.md"]
+            ))
+
+        if "grappling_skill" not in skill_ids and any(w in haystack for w in ("крюк", "grapple", "кошка", "маятник", "трос")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: grappling_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="grappling_skill",
+                name="Elastic Grappling Hook & Pendulum Swing",
+                filename="GRAPPLING_SKILL.md",
+                purpose="Реализация физического крюка-кошки с маятниковым разгоном и сохранением углового момента.",
+                when_to_use="При создании контроллера перемещения на тросе, раскачивания и зацепа за точки.",
+                rules=[
+                    "Трос моделируется как пружинно-демпферная связь (Spring-Damper) с применением импульсов к RigidBody.",
+                    "Никогда не телепортировать тело игрока через setTranslation во время зацепа.",
+                    "При отсоединении троса тангенциальная скорость сохраняется с катапультирующим множителем.",
+                ],
+                architecture="GrappleHookController управляет лучом привязки, расчетом натяжения и синхронизацией меша троса.",
+                implementation_guidance="Используй raycast с угловым допуском 15 градусов для комфортного авто-прицеливания.",
+                common_mistakes=[
+                    "Жесткое притягивание без инерции маятника — механика ощущается деревянной.",
+                ],
+                checklist=[
+                    "Игрок свободно раскачивается вокруг точки крепления и катапультируется в верхней точке дуги.",
+                ],
+                knowledge_refs=["mechanics/grappling_hook.md"]
+            ))
+
+        if "cooking_skill" not in skill_ids and any(w in haystack for w in ("кухн", "повар", "готов", "кафе", "ресторан", "пекарн", "еда", "лапш")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: cooking_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="cooking_skill",
+                name="Multi-Step Culinary Flow & Heat Control",
+                filename="COOKING_SKILL.md",
+                purpose="Реализация кулинарного пайплайна: машина состояний продуктов, контроль жара и очередь заказов.",
+                when_to_use="При программировании разделочных столов, жарки в воке, сборки блюд и таймеров терпения клиентов.",
+                rules=[
+                    "Каждый ингредиент имеет четкие состояния: RAW -> PREPPED -> COOKED -> BURNT.",
+                    "Таймер терпения заказа визуализируется плавным круговым индикатором со сменой цвета.",
+                    "Сдача заказа в зеленой зоне дает множитель комбо чаевых.",
+                ],
+                architecture="OrderManager распределяет билеты заказов, CookingStation обрабатывает таймеры жарки.",
+                implementation_guidance="Используй Web Audio сэмплы шипящего масла и стука ножа для сочного ASMR-отклика.",
+                common_mistakes=[
+                    "Блокировка действий игрока во время анимации жарки.",
+                ],
+                checklist=[
+                    "Блюда сгорают только при превышении лимита передержки с предупреждающим дымом.",
+                ],
+                knowledge_refs=["mechanics/cooking_flow.md"]
+            ))
+
+        if "rhythm_skill" not in skill_ids and any(w in haystack for w in ("ритм", "rhythm", "музык", "оркестр", "барабан", "дирижер", "нот")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: rhythm_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="rhythm_skill",
+                name="Web Audio Beat Sync & Accuracy System",
+                filename="RHYTHM_SKILL.md",
+                purpose="Аппаратная синхронизация игровых действий с тактовой сеткой музыки через AudioContext.currentTime.",
+                when_to_use="При реализации ритм-механик, попадания в долю, окон Perfect/Good и комбо-множителей.",
+                rules=[
+                    "AudioContext.currentTime — единственный источник истины времени (не Date.now() и не performance.now()).",
+                    "Окна точности: Perfect <= 65 мс, Good <= 140 мс, Miss > 140 мс.",
+                    "Учитывать калибровку задержки звукового тракта (audio latency offset).",
+                ],
+                architecture="RhythmClock отслеживает BPM и рассылает события 'rhythm:beat' через EventBus.",
+                implementation_guidance="Пульсируй параметры шейдеров и масштаб элементов UI в такт музыке.",
+                common_mistakes=[
+                    "Синхронизация через requestAnimationFrame приводит к рассинхрону при просадках FPS.",
+                ],
+                checklist=[
+                    "Попадание в такт регистрируется точно независимо от частоты обновления монитора.",
+                ],
+                knowledge_refs=["mechanics/rhythm_sync.md"]
+            ))
+
+        if "mining_skill" not in skill_ids and any(w in haystack for w in ("шахт", "бур", "копа", "бурен", "майнинг", "miner", "drill", "руда")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: mining_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="mining_skill",
+                name="Modular Mining Drill & Geological Layers",
+                filename="MINING_SKILL.md",
+                purpose="Реализация системы бурения: прочность пластов пород, температура бура и сбор минералов.",
+                when_to_use="При программировании разрушаемых воксельных пород, перегрева бура и физики рудных жил.",
+                rules=[
+                    "Прочность пород ранжируется по твердости (глина -> базальт -> гранит -> титан).",
+                    "Непрерывное бурение повышает температуру; перегрев > 100°C клинит бур на 2.0 секунды.",
+                    "Разрушенный блок спавнит физические лут-орбы, притягиваемые магнитным полем.",
+                ],
+                architecture="DrillController отслеживает контакт с блоками сетки и управляет нагревом/охлаждением.",
+                implementation_guidance="Применяй вибрацию камеры пропорционально твердости разрушаемого слоя.",
+                common_mistakes=[
+                    "Создание новых геометрий на каждый разрушенный блок вместо деформации или скрытия инстансов.",
+                ],
+                checklist=[
+                    "Бур плавно охлаждается в покое и клинит при достижении критической температуры.",
+                ],
+                knowledge_refs=["mechanics/mining_drill.md"]
+            ))
+
+        if "building_skill" not in skill_ids and any(w in haystack for w in ("строит", "базостро", "сетка", "building", "баз", "турел", "конвейер")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: building_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="building_skill",
+                name="Grid Modular Base & Power Grid Architecture",
+                filename="BUILDING_SKILL.md",
+                purpose="Реализация строительства по сетке, проверки коллизий и распространения энергии по пилонам.",
+                when_to_use="При создании модульных стен, турелей, генераторов и конвейерных цепочек.",
+                rules=[
+                    "Привязка к сетке (Snap-to-Grid) с полупрозрачным превью-призраком постройки.",
+                    "Граф смежности энергосети обновляется мгновенным поиском в ширину (BFS).",
+                    "Все постройки регистрируются в пространственной хеш-таблице (SpatialHash).",
+                ],
+                architecture="BuildingGridManager хранит матрицу занятости и валидирует условия размещения.",
+                implementation_guidance="Отключай турели при разрыве связи с электрогенератором.",
+                common_mistakes=[
+                    "Разрешение постройки поверх спавнеров врагов или внутри геометрии игрока.",
+                ],
+                checklist=[
+                    "Постройки мгновенно встают по сетке, энергосеть корректно питает подключенные узлы.",
+                ],
+                knowledge_refs=["mechanics/grid_building.md"]
+            ))
+
+        # Скилл проверяемости: плотность первой сессии и телеметрия.
         if "experience_skill" not in skill_ids:
             log_agent("SkillGenerator", "Injecting core skill: experience_skill")
             ed = concept.experience_density
@@ -327,8 +444,22 @@ class SkillGeneratorAgent:
 
         log_agent("SkillGenerator", f"Compiled {len(concept.skills)} reusable skill documents.")
 
-    # Слова те же, что у PromptCompiler._DRIVING_WORDS: профиль управления и
-    # профиль физики у машины всегда совпадают.
+    @classmethod
+    def _concept_haystack(cls, ctx: GenerationContext) -> str:
+        """Собирает полный поисковый текст концепции для анализа механик."""
+        concept = ctx.concept
+        return " ".join([
+            str(concept.genre or ""),
+            str(concept.subgenre or ""),
+            str(concept.title or ""),
+            str(concept.hook or ""),
+            str(concept.player_fantasy or ""),
+            str(ctx.raw_prompt or ""),
+            " ".join(m.name for m in concept.mechanics),
+            " ".join(m.category for m in concept.mechanics),
+            " ".join(d.name for d in concept.core_design.mechanics),
+        ]).lower()
+
     _DRIVING_WORDS = (
         "гонк", "дрифт", "маш", "грузовик", "трак", "racing", "drift",
         "vehicle", "car", "truck", "derby", "driving", "rally",
@@ -337,13 +468,5 @@ class SkillGeneratorAgent:
     @classmethod
     def _is_driving_game(cls, ctx: GenerationContext) -> bool:
         """Есть ли в игре управляемая машина — по жанру, механикам и исходной идее."""
-        concept = ctx.concept
-        haystack = " ".join([
-            str(concept.genre or ""),
-            str(concept.subgenre or ""),
-            str(concept.title or ""),
-            str(ctx.raw_prompt or ""),
-            " ".join(m.name for m in concept.mechanics),
-            " ".join(m.category for m in concept.mechanics),
-        ]).lower()
+        haystack = cls._concept_haystack(ctx)
         return any(word in haystack for word in cls._DRIVING_WORDS)
