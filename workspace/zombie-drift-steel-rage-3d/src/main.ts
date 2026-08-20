@@ -6,5 +6,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   const uiContainer = document.getElementById('ui-layer')!;
 
   const game = new Game(container, uiContainer);
+  (window as any).game = game;
   await game.init();
 });

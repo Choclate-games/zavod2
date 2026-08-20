@@ -2,7 +2,7 @@ import { gameStore } from '../core/Store';
 import { audioManager } from '../core/AudioManager';
 import { bridgeService } from '../platform/BridgeService';
 import { TouchControls } from './TouchControls';
-import { VEHICLES, GARAGE_UPGRADE_COSTS } from '../core/Constants';
+import { GAME_VERSION, VEHICLES, GARAGE_UPGRADE_COSTS } from '../core/Constants';
 import { UpgradeCard, GarageUpgrades } from '../types/game';
 import { eventBus } from '../core/EventBus';
 
@@ -64,6 +64,7 @@ export class UIManager {
           <b>Телефон:</b> слева руль, справа ГАЗ, НАЗАД, НИТРО и ДРИФТ<br/>
           Дрифт заряжает Нитро и умножает урон тарана до <b>4.5x</b>!
         </div>
+        <div class="game-version">ВЕРСИЯ ${GAME_VERSION}</div>
       </div>
 
       <!-- GARAGE -->

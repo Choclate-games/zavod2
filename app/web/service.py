@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from app import chat_store, design_os, notify, sandbox
+from app import chat_store, design_os, notify, sandbox, snapshots
 from app.chat_jobs import ChatJobManager
 from app.config import BASE_DIR, config
 from app.context import GenerationContext
@@ -782,8 +782,31 @@ class FactoryService:
         sessions = chat_store.list_sessions(slug)
         return [self._session_summary(session) for session in sessions]
 
+    def _undo_target(self, session: chat_store.ChatSession) -> Optional[int]:
+        """Индекс последнего запроса, у которого есть снимок проекта."""
+        index = chat_store.last_user_index(session)
+        if index is None:
+            return None
+        return index if session.messages[index].snapshot else None
+
+    def _resolve_undo_index(self, session: chat_store.ChatSession,
+                            index: Optional[int]) -> Optional[int]:
+        """
+        Точка отката: либо конкретный запрос из ленты, либо последний.
+
+        Откатить можно любой запрос пользователя со снимком — вместе с ним
+        уходит и всё, что было в переписке после него.
+        """
+        if index is None:
+            return self._undo_target(session)
+        if not (0 <= index < len(session.messages)):
+            return None
+        message = session.messages[index]
+        return index if message.role == "user" and message.snapshot else None
+
     def _session_summary(self, session: chat_store.ChatSession) -> Dict[str, Any]:
         job = self.chat_jobs.get(session.id)
+        undo_index = self._undo_target(session)
         return {
             "id": session.id,
             "title": session.title,
@@ -794,6 +817,8 @@ class FactoryService:
             "resumable": bool(session.conversation_id),
             "running": self.chat_jobs.is_running(session.id),
             "duration": job.duration_str if job else "",
+            "can_undo": undo_index is not None and not self.chat_jobs.is_running(session.id),
+            "undo_prompt": session.messages[undo_index].text if undo_index is not None else "",
         }
 
     def create_chat(self, slug: str) -> Dict[str, Any]:
@@ -816,9 +841,11 @@ class FactoryService:
             return {"status": "error", "message": "Чат не найден."}
 
         events: List[Dict[str, Any]] = []
-        for message in session.messages:
+        for position, message in enumerate(session.messages):
             if message.role == "user":
-                events.append({"kind": "user", "text": message.text})
+                # index — точка отката этого запроса: кнопка живёт прямо в пузыре.
+                events.append({"kind": "user", "text": message.text,
+                               "index": position, "undoable": bool(message.snapshot)})
             elif message.role == "assistant":
                 events.append({"kind": "assistant_final", "text": message.text})
             else:
@@ -892,18 +919,23 @@ class FactoryService:
 
         session.model = model
         session.agent = agent_key
-        chat_store.append_message(slug, session, "user", prompt)
+
+        # Снимок делаем до запуска агента: он и есть точка отката этого запроса.
+        snapshot = snapshots.create_snapshot(slug, f"{session.id} · {prompt[:60]}")
+        chat_store.append_message(slug, session, "user", prompt, snapshot=snapshot)
 
         session_id = session.id
         answer_chunks: List[str] = []
 
         start_events = [
-            {"kind": "user", "text": prompt},
+            {"kind": "user", "text": prompt,
+             "index": len(session.messages) - 1, "undoable": bool(snapshot)},
             {"kind": "system", "icon": "⚡",
              "text": f"Запуск {AGENT_LABELS.get(agent_key, agent_key)} · проект {slug}"
                      f" · модель {model or 'по умолчанию'}"
                      f" · YOLO: {'вкл' if yolo else 'выкл'}"
-                     + (" · продолжение беседы 🔗" if resume_id else "")},
+                     + (" · продолжение беседы 🔗" if resume_id else "")
+                     + (" · снимок для отката ↩" if snapshot else " · снимок не создан, откат недоступен")},
         ]
 
         def on_conversation_id(conv_id: str) -> None:
@@ -954,6 +986,13 @@ class FactoryService:
         if stored:
             chat_store.append_message(job.slug, stored, "assistant", answer)
 
+        # Ответ агента приходил в ленту потоком «как есть»; теперь отдаём его
+        # целиком, чтобы браузер перерисовал его как Markdown.
+        if job.answer.strip():
+            answer_event = {"kind": "assistant_final", "text": answer, "replaces_stream": True}
+            job.record(answer_event)
+            bus.publish("chat.event", slug=job.slug, session_id=job.session_id, event=answer_event)
+
         status_icon = {"done": "✅", "stopped": "⏹", "failed": "⚠️"}.get(job.status, "ℹ️")
         status_text = {
             "done": "Задача завершена",
@@ -987,6 +1026,75 @@ class FactoryService:
         if notify.notifications_enabled():
             notify.send(f"{status_icon} {status_text}",
                         f"{job.slug} · {job.title} · {job.duration_str}")
+
+    def undo_info(self, slug: str, session_id: str,
+                  index: Optional[int] = None) -> Dict[str, Any]:
+        """Что именно уберёт откат — список файлов для окна подтверждения."""
+        session = chat_store.load_session(slug, session_id)
+        if not session:
+            return {"status": "error", "message": "Чат не найден."}
+        target = self._resolve_undo_index(session, index)
+        if target is None:
+            return {"status": "error", "message": "У этого запроса нет снимка — откатывать нечего."}
+
+        message = session.messages[target]
+        files = snapshots.changed_files(slug, message.snapshot or "")
+        # Сколько сообщений уйдёт из переписки вместе с этим запросом.
+        dropped = len(session.messages) - target
+        return {
+            "status": "success",
+            "index": target,
+            "prompt": message.text,
+            "timestamp": message.timestamp,
+            "files": files,
+            "dropped_messages": dropped,
+            "running": self.chat_jobs.is_running(session_id),
+        }
+
+    def undo_last_chat_task(self, slug: str, session_id: str,
+                            index: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Откатывает запрос: файлы проекта возвращаются к его снимку, а сам
+        запрос и всё, что было в переписке после него, уходят из истории.
+
+        Беседу CLI-агента отмотать нельзя, поэтому `conversation_id` сбрасываем:
+        следующий запрос начнёт новый диалог и агент не будет считать, что
+        откаченные правки всё ещё на диске.
+        """
+        if self.chat_jobs.is_running(session_id):
+            return {"status": "error",
+                    "message": "Сначала остановите агента — он прямо сейчас правит файлы проекта."}
+
+        session = chat_store.load_session(slug, session_id)
+        if not session:
+            return {"status": "error", "message": "Чат не найден."}
+        target = self._resolve_undo_index(session, index)
+        if target is None:
+            return {"status": "error", "message": "У этого запроса нет снимка — откатывать нечего."}
+
+        message = session.messages[target]
+        try:
+            affected = snapshots.restore_snapshot(slug, message.snapshot or "")
+        except snapshots.SnapshotError as exc:
+            return {"status": "error", "message": str(exc)}
+
+        session.conversation_id = None
+        chat_store.truncate_from(slug, session, target)
+
+        short = " ".join(message.text.split())[:60]
+        summary = f"Откат запроса: «{short}»"
+        detail = (f"Возвращено файлов: {len(affected)}" if affected
+                  else "Файлы проекта не менялись — откачена только переписка")
+        event = {"kind": "system", "icon": "↩", "text": f"{summary} · {detail}"}
+        bus.publish("chat.event", slug=slug, session_id=session_id, event=event)
+        bus.publish("chat.undone", slug=slug, session_id=session_id,
+                    prompt=message.text, files=affected)
+        bus.publish("chats.changed", slug=slug)
+        bus.publish("projects.changed")
+
+        return {"status": "success", "message": f"{summary} · {detail}",
+                "files": affected, "prompt": message.text,
+                "session": self._session_summary(session)}
 
     def stop_chat(self, session_id: str) -> Dict[str, Any]:
         if self.chat_jobs.request_stop(session_id):

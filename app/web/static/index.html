@@ -319,6 +319,29 @@
   </div>
 </div>
 
+<!-- ── Модалка отката запроса ─────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="undo-modal">
+  <div class="modal" style="max-width:720px">
+    <div class="row spread">
+      <h2>↩ Откатить запрос</h2>
+      <button class="btn small" id="btn-close-undo">✕</button>
+    </div>
+    <p class="dim">
+      Файлы проекта вернутся к состоянию на момент этого запроса.
+      Следующая задача начнёт новый диалог с агентом.
+      <code>node_modules/</code> и <code>dist/</code> не трогаем.
+    </p>
+    <div class="undo-prompt" id="undo-prompt"></div>
+    <div class="small muted" id="undo-note"></div>
+    <div class="row spread"><strong class="small" id="undo-files-title">Затронутые файлы</strong></div>
+    <div class="undo-files" id="undo-files"></div>
+    <div class="row spread">
+      <span class="small muted">Отменить откат нельзя — снимок берётся только перед запросом.</span>
+      <button class="btn danger" id="btn-confirm-undo">↩ Откатить</button>
+    </div>
+  </div>
+</div>
+
 <div id="toasts"></div>
 
 <script src="/static/app.js"></script>

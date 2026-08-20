@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -285,6 +285,17 @@ async def chats_send(slug: str, request: Request) -> Dict[str, Any]:
 @app.post("/api/chats/{slug}/{session_id}/stop")
 def chats_stop(slug: str, session_id: str) -> Dict[str, Any]:
     return service.stop_chat(session_id)
+
+
+@app.get("/api/chats/{slug}/{session_id}/undo")
+def chats_undo_info(slug: str, session_id: str, index: Optional[int] = None) -> Dict[str, Any]:
+    """Что уберёт откат — для окна подтверждения. `index` — запрос в ленте."""
+    return service.undo_info(_slug(slug), session_id, index)
+
+
+@app.post("/api/chats/{slug}/{session_id}/undo")
+def chats_undo(slug: str, session_id: str, index: Optional[int] = None) -> Dict[str, Any]:
+    return service.undo_last_chat_task(_slug(slug), session_id, index)
 
 
 @app.get("/api/chats-running")

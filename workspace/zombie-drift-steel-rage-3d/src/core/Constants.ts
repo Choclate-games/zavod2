@@ -1,5 +1,8 @@
 import { VehicleConfig } from '../types/game';
 import { ZombieConfig, ZombieType } from '../types/zombie';
+import packageJson from '../../package.json';
+
+export const GAME_VERSION = packageJson.version;
 
 export const ARENA_SIZE = 160; // 160x160 units arena
 export const ARENA_HALF = ARENA_SIZE / 2;

@@ -248,19 +248,48 @@ class AGYProvider(AIProvider):
     Поддерживает режим YOLO (--dangerously-skip-permissions), двухсторонний интерактивный stdin, стриминг и квоты.
     """
 
+    # Сколько агенту разрешено работать над одной задачей (--print-timeout).
+    # По умолчанию сутки: длинные автономные прогоны не должны обрываться посреди
+    # работы. Переопределяется переменной AGY_PRINT_TIMEOUT (формат Go: "90m0s",
+    # "24h0m0s"); пустое значение полностью убирает флаг.
+    DEFAULT_PRINT_TIMEOUT = "24h0m0s"
+    DEFAULT_TIMEOUT_SECONDS = 24 * 60 * 60
+
+    @classmethod
+    def _blocking_timeout(cls) -> Optional[int]:
+        """Потолок для subprocess.run: AGY_TIMEOUT_SECONDS, 0/пусто — без потолка."""
+        raw = (os.getenv("AGY_TIMEOUT_SECONDS") or "").strip()
+        if not raw:
+            return cls.DEFAULT_TIMEOUT_SECONDS
+        try:
+            value = int(raw)
+        except ValueError:
+            return cls.DEFAULT_TIMEOUT_SECONDS
+        return value if value > 0 else None
+
+    @classmethod
+    def _print_timeout(cls) -> Optional[str]:
+        value = os.getenv("AGY_PRINT_TIMEOUT")
+        if value is None:
+            return cls.DEFAULT_PRINT_TIMEOUT
+        value = value.strip()
+        return value or None
+
     def __init__(
         self,
         cli_path: Optional[str] = None,
         model: Optional[str] = None,
         effort: Optional[str] = None,
         yolo: bool = True,
-        timeout_seconds: int = 300
+        timeout_seconds: Optional[int] = None
     ):
         self.cli_path = cli_path or os.getenv("AGY_CLI_PATH", "agy")
         self.model = model or os.getenv("AGY_MODEL", None)
         self.effort = effort or os.getenv("AGY_EFFORT", None)
         self.yolo = yolo
-        self.timeout_seconds = timeout_seconds
+        # Блокирующий прогон живёт столько же, сколько сам агент: обрывать его
+        # раньше --print-timeout нельзя, иначе задача умрёт на середине.
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else self._blocking_timeout()
         self.fallback = LocalAIProvider()
         self.quota_tracker = AGYQuotaTracker()
 
@@ -288,7 +317,6 @@ class AGYProvider(AIProvider):
         prompt: str,
         output_format: str = "text",
         yolo: Optional[bool] = None,
-        print_timeout: Optional[str] = "20m0s",
         with_effort: bool = True,
         conversation_id: Optional[str] = None
     ) -> list[str]:
@@ -298,6 +326,7 @@ class AGYProvider(AIProvider):
         # контекст целиком, а не пересказ из GUI.
         if conversation_id:
             cmd.extend(["--conversation", conversation_id])
+        print_timeout = self._print_timeout()
         if print_timeout:
             cmd.extend(["--print-timeout", print_timeout])
         if use_yolo:
@@ -504,8 +533,7 @@ class AGYProvider(AIProvider):
 
         def attempt(with_effort: bool):
             cmd = self._build_command(
-                prompt, output_format=output_format, yolo=yolo,
-                print_timeout="10m0s", with_effort=with_effort
+                prompt, output_format=output_format, yolo=yolo, with_effort=with_effort
             )
             try:
                 return subprocess.run(
@@ -616,8 +644,7 @@ class AGYProvider(AIProvider):
             """Один прогон CLI. Возвращает (код, вывод, остановлен, отклонён_effort)."""
             cmd = self._build_command(
                 prompt, output_format="stream-json", yolo=yolo,
-                print_timeout="25m0s", with_effort=with_effort,
-                conversation_id=conversation_id
+                with_effort=with_effort, conversation_id=conversation_id
             )
             cmd[0] = cli
             shown_cmd = " ".join(

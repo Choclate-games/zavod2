@@ -28,6 +28,7 @@ class ChatMessage:
     role: str            # "user" | "assistant" | "system"
     text: str
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    snapshot: Optional[str] = None   # хеш снимка проекта перед этим запросом (только у роли user)
 
 
 @dataclass
@@ -126,12 +127,28 @@ def save_session(slug: str, session: ChatSession) -> None:
         pass
 
 
-def append_message(slug: str, session: ChatSession, role: str, text: str) -> None:
-    session.messages.append(ChatMessage(role=role, text=text))
+def append_message(slug: str, session: ChatSession, role: str, text: str,
+                   snapshot: Optional[str] = None) -> None:
+    session.messages.append(ChatMessage(role=role, text=text, snapshot=snapshot))
     # Первое сообщение пользователя даёт чату осмысленное имя в списке.
     if role == "user" and session.title.startswith("Чат от"):
         session.title = _title_from_text(text)
     save_session(slug, session)
+
+
+def last_user_index(session: ChatSession) -> Optional[int]:
+    """Индекс последнего запроса пользователя — точка отката."""
+    for index in range(len(session.messages) - 1, -1, -1):
+        if session.messages[index].role == "user":
+            return index
+    return None
+
+
+def truncate_from(slug: str, session: ChatSession, index: int) -> None:
+    """Отрезает переписку начиная с сообщения `index` (включительно)."""
+    if 0 <= index < len(session.messages):
+        del session.messages[index:]
+        save_session(slug, session)
 
 
 def delete_session(slug: str, session_id: str) -> None:

@@ -12,9 +12,9 @@ export class CameraController {
   private shakeOffset = new THREE.Vector3();
 
   // Camera Settings
-  public height = 22;
-  public distance = 16;
-  public baseFov = 52;
+  public height = 25;
+  public distance = 18;
+  public baseFov = 50;
 
   constructor() {
     const aspect = window.innerWidth / window.innerHeight;
