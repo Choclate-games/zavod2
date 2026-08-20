@@ -57,6 +57,8 @@ export class Game {
   private cameraZ = 5;
   private toastTimer = 0;
   private saveTimer = 0;
+  private userPaused = false;
+  private platformPaused = false;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -101,11 +103,23 @@ export class Game {
     window.addEventListener('pagehide', () => { void this.saveNow(); });
   }
 
-  public start(): void { this.input.touchControls.setVisible(true); this.loop.start(); }
+  public start(): void { this.applyPauseState(); this.loop.start(); }
 
-  public pause(): void { this.loop.setPaused(true); this.input.touchControls.setVisible(false); document.getElementById('pause-panel')?.removeAttribute('hidden'); }
+  public pause(): void {
+    this.userPaused = true;
+    this.applyPauseState();
+  }
 
-  public resume(): void { this.loop.setPaused(false); this.input.touchControls.setVisible(true); document.getElementById('pause-panel')?.setAttribute('hidden', ''); }
+  public resume(): void {
+    this.userPaused = false;
+    this.platformPaused = false;
+    this.applyPauseState();
+  }
+
+  public setPlatformPaused(paused: boolean): void {
+    this.platformPaused = paused;
+    this.applyPauseState();
+  }
 
   public dispose(): void { this.loop.stop(); this.physics.dispose(); this.renderer.dispose(); }
 
@@ -303,8 +317,26 @@ export class Game {
   }
 
   private bindUi(): void {
-    document.getElementById('pause-button')?.addEventListener('click', () => { this.audio.click(); this.pause(); });
-    document.getElementById('resume-button')?.addEventListener('click', () => { this.audio.click(); this.resume(); });
+    document.getElementById('pause-button')?.addEventListener('click', () => { this.pause(); this.audio.click(); });
+    document.getElementById('resume-button')?.addEventListener('click', () => { this.resume(); this.audio.click(); });
+    window.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.repeat || (event.code !== 'KeyP' && event.code !== 'Escape')) return;
+      event.preventDefault();
+      if (this.userPaused) {
+        this.resume();
+      } else {
+        this.pause();
+      }
+      this.audio.click();
+    });
+  }
+
+  private applyPauseState(): void {
+    const paused = this.userPaused || this.platformPaused;
+    this.loop.setPaused(paused);
+    this.input.touchControls.setVisible(!paused);
+    const pausePanel = document.getElementById('pause-panel');
+    if (pausePanel) pausePanel.toggleAttribute('hidden', !paused);
   }
 
   private addRouteVisual(route: RouteState): void {

@@ -50,6 +50,9 @@ export interface LevelConfig {
   boulderCount: number;
   rewardCoins: number;
   parTime: number;
+  /** Optional per-level fog: distance at which fog starts and ends. Defaults: near=90, far=360 */
+  fogNear?: number;
+  fogFar?: number;
 }
 
 export const LEVELS: LevelConfig[] = [
@@ -1991,7 +1994,36 @@ export const LEVELS: LevelConfig[] = [
   }
 ];
 
+/**
+ * Atmospheric fog presets per chapter.
+ * Each entry: [fogNear, fogFar]
+ * Chapter 1 (lv 1-10):   Forest roads  — mild forest haze
+ * Chapter 2 (lv 11-20):  Swamps        — thick misty fog, very short visibility
+ * Chapter 3 (lv 21-30):  Mountain pass — crisp mountain air, long visibility
+ * Chapter 4 (lv 31-40):  Deep Taiga    — dense boreal fog, medium visibility
+ * Chapter 5 (lv 41-50):  Extreme       — very heavy fog for tension and challenge
+ */
+const FOG_PRESETS: [number, number][] = [
+  [110, 300], // Ch.1: Проселки     — лесная дымка
+  [55, 200],  // Ch.2: Топи         — густой туман болот
+  [160, 420], // Ch.3: Перевалы     — горный чистый воздух
+  [75, 230],  // Ch.4: Тайга        — таёжная мгла
+  [40, 160],  // Ch.5: Экстрим      — плотный туман, напряжение
+];
+
+function getFogPreset(id: number): { fogNear: number; fogFar: number } {
+  const chapter = Math.min(4, Math.floor((id - 1) / 10));
+  const [fogNear, fogFar] = FOG_PRESETS[chapter];
+  return { fogNear, fogFar };
+}
+
 export function getLevelConfig(id: number): LevelConfig {
   const index = Math.max(1, Math.min(LEVELS.length, Math.floor(id))) - 1;
-  return LEVELS[index] ?? LEVELS[0];
+  const base = LEVELS[index] ?? LEVELS[0];
+  // Merge fog preset if the level doesn't specify custom fog
+  if (base.fogNear === undefined || base.fogFar === undefined) {
+    const fog = getFogPreset(base.id);
+    return { ...base, fogNear: fog.fogNear, fogFar: fog.fogFar };
+  }
+  return base;
 }

@@ -184,6 +184,19 @@ export class Game implements FixedUpdateTarget {
     const lvl = getLevelConfig(this.currentLevelId);
     this.cargo.build(lvl.cargoPackage);
 
+    // Apply per-level atmospheric fog + chapter sky color
+    const chapter = Math.min(4, Math.floor((this.currentLevelId - 1) / 10));
+    const SKY_COLORS = [
+      0x95ad9e, // Ch.1: Проселки  — таёжный зелено-серый
+      0x7c9e90, // Ch.2: Топи      — болотный холодный туман
+      0xa8b8c5, // Ch.3: Перевалы  — горный светло-голубой
+      0x5e7a6b, // Ch.4: Тайга     — глубокая таёжная мгла
+      0x4a5860, // Ch.5: Экстрим   — темный непогодный серый
+    ];
+    const fogNear = lvl.fogNear ?? 90;
+    const fogFar = lvl.fogFar ?? 360;
+    this.scene.setFog(fogNear, fogFar, SKY_COLORS[chapter]);
+
     this.audio.unlock();
     this.state = 'running';
     this.elapsed = 0;

@@ -143,6 +143,22 @@ export class SceneManager {
     this.camera.position.set(0, 5.2, -11);
   }
 
+  /**
+   * Apply per-level atmospheric fog and matching sky color.
+   * fogColor is sampled from a chapter-appropriate palette (taiga greens / swamp grey-green / mountain blue-grey).
+   */
+  setFog(near: number, far: number, skyHex?: number): void {
+    const color = skyHex !== undefined ? new THREE.Color(skyHex) : this.sky;
+    this.renderer.setClearColor(color, 1);
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.color.copy(color);
+      this.scene.fog.near = near;
+      this.scene.fog.far = far;
+    } else {
+      this.scene.fog = new THREE.Fog(color, near, far);
+    }
+  }
+
   private followSun(target: THREE.Vector3): void {
     const sun = this.sun;
     if (!sun) return;

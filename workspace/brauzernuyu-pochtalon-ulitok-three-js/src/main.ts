@@ -35,7 +35,7 @@ async function boot(): Promise<void> {
   const audio = new AudioService();
   const platform = new PlaygamaService();
   let game: Game | null = null;
-  await platform.initialize((paused) => { if (paused) game?.pause(); else game?.resume(); }, (enabled) => audio.setMuted(!enabled));
+  await platform.initialize((paused) => game?.setPlatformPaused(paused), (enabled) => audio.setMuted(!enabled));
   platform.setLoadingProgress(35);
   const save = await platform.load();
   platform.setLoadingProgress(55);

@@ -32,6 +32,7 @@ export class GameLoop {
   }
 
   public setPaused(paused: boolean): void {
+    if (this.paused === paused) return;
     this.paused = paused;
     this.accumulator = 0;
     this.lastTimestamp = performance.now();

@@ -117,15 +117,22 @@
   },
   "gladiatorskiy-roguelike-arena-ekshen-rag": {
     "rating": 2,
-    "archived": false,
+    "archived": true,
     "created_at": "2026-08-20T19:44:46",
-    "archived_at": "",
+    "archived_at": "2026-08-20T21:26:23",
     "title": ""
   },
   "brauzernuyu-pochtalon-ulitok-three-js": {
+    "rating": 1,
+    "archived": true,
+    "created_at": "2026-08-20T20:08:26",
+    "archived_at": "2026-08-20T21:26:18",
+    "title": ""
+  },
+  "ideya-kick-shoot": {
     "rating": 0,
     "archived": false,
-    "created_at": "2026-08-20T20:08:26",
+    "created_at": "2026-08-20T21:19:08",
     "archived_at": "",
     "title": ""
   }

@@ -63,6 +63,12 @@ export class TruckController {
   private upsideDownFor = 0;
   private prevWheelRotations: number[] = [0, 0, 0, 0, 0, 0];
 
+  // Interpolation state: previous physics-step position/rotation for smooth rendering at any FPS
+  private readonly prevPosition = new THREE.Vector3();
+  private readonly prevRotation = new THREE.Quaternion();
+  private readonly interpPosition = new THREE.Vector3();
+  private readonly interpRotation = new THREE.Quaternion();
+
   private readonly scratchVec = new THREE.Vector3();
   private readonly scratchVec2 = new THREE.Vector3();
   private readonly exhaustLocalPos = new THREE.Vector3();
@@ -154,6 +160,9 @@ export class TruckController {
     this.positionZ = this.spawn.z;
     this.chassis.position.copy(this.spawn);
     this.chassis.quaternion.identity();
+    // Reset interpolation state so we start clean at the spawn point
+    this.prevPosition.copy(this.spawn);
+    this.prevRotation.identity();
 
     if (this.truckMat) this.truckMat.color.copy(this.baseTruckColor);
     if (this.truckDarkMat) this.truckDarkMat.color.copy(this.baseTruckDarkColor);
@@ -182,6 +191,10 @@ export class TruckController {
     const vehicle = this.vehicle;
     const body = this.body;
     if (!vehicle || !body) return;
+
+    // Save previous state BEFORE the physics step for render interpolation
+    this.prevPosition.copy(this.position);
+    this.prevRotation.copy(this.rotation);
 
     const speed = vehicle.currentVehicleSpeed();
     this.applySteering(vehicle, dt, controls, speed, invertSteering);
@@ -394,9 +407,17 @@ export class TruckController {
     }
   }
 
-  render(_alpha: number): void {
+  render(alpha: number): void {
     const vehicle = this.vehicle;
     if (!vehicle) return;
+
+    // Interpolate chassis position and rotation between previous and current physics states.
+    // This makes the truck visually smooth at ANY frame rate, not just 60 FPS.
+    this.interpPosition.lerpVectors(this.prevPosition, this.position, alpha);
+    this.interpRotation.slerpQuaternions(this.prevRotation, this.rotation, alpha);
+    this.chassis.position.copy(this.interpPosition);
+    this.chassis.quaternion.copy(this.interpRotation);
+
     const tireUp = this.currentUpgrades.tires;
     for (let i = 0; i < this.wheels.length; i += 1) {
       const rig = this.wheels[i];
