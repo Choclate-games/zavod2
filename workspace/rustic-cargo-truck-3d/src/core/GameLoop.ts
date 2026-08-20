@@ -37,7 +37,8 @@ export class GameLoop {
     if (this.resetOnResume) {
       this.resetOnResume = false;
     } else {
-      this.accumulator = Math.min(this.accumulator + rawDt, this.fixedStep * 5);
+      // Clamp accumulator to at most 2 fixed steps to prevent physics sub-step cascades on mobile spikes
+      this.accumulator = Math.min(this.accumulator + rawDt, this.fixedStep * 2);
       while (this.accumulator >= this.fixedStep) {
         this.target.fixedUpdate(this.fixedStep);
         this.accumulator -= this.fixedStep;

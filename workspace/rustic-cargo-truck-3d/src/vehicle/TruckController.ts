@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { InputSnapshot, TruckId, TruckUpgrades } from '../core/types';
 import { PhysicsWorld, WHEEL_RAY_GROUPS } from '../physics/PhysicsWorld';
@@ -21,7 +22,6 @@ const SPAWN_Z = 2;
 interface WheelRig {
   steer: THREE.Group;
   spin: THREE.Group;
-  tireGroup: THREE.Group;
   tireMesh: THREE.Mesh;
   isSteering: boolean;
   isDrive: boolean;
@@ -1202,7 +1202,8 @@ export class TruckController {
   }
 
   /**
-   * Detailed Wheel Models with rims, wheel hub caps, and aggressive 3D tread lugs.
+   * High-performance merged wheel models with rims, wheel hub caps, and aggressive 3D tread lugs.
+   * Merges all sub-parts into single geometries per material, eliminating 100+ separate meshes and draw calls.
    */
   private buildWheels(): void {
     const { materials } = this.scene;
@@ -1212,49 +1213,46 @@ export class TruckController {
     const tireTier = this.currentUpgrades.tires;
     const isHeavyKraz = this.config.style === 'heavy-6x6';
 
+    // 1. Build Merged Tire Geometry (cylinder + 3D offroad tread lugs) once for the truck
+    const tireCylinder = new THREE.CylinderGeometry(r, r, hw * 2, 18);
+    tireCylinder.rotateZ(Math.PI / 2);
+    const tireParts: THREE.BufferGeometry[] = [tireCylinder];
+
+    const lugCount = isHeavyKraz ? 16 : 14;
+    const lugHeight = 0.035 + tireTier * 0.015;
+    const lugWidth = hw * 1.85;
+
+    for (let l = 0; l < lugCount; l += 1) {
+      const angle = (l / lugCount) * Math.PI * 2;
+      const lx = 0;
+      const ly = Math.cos(angle) * (r + lugHeight * 0.45);
+      const lz = Math.sin(angle) * (r + lugHeight * 0.45);
+
+      const lugGeom = new THREE.BoxGeometry(lugWidth, lugHeight, 0.08 + tireTier * 0.02);
+      lugGeom.rotateX(-angle);
+      lugGeom.translate(lx, ly, lz);
+      tireParts.push(lugGeom);
+    }
+    const mergedTireGeometry = BufferGeometryUtils.mergeGeometries(tireParts, false);
+
+    // 2. Build Merged Steel Rim Geometry (rim dish + hub + spoke) once for the truck
+    const rimGeom = new THREE.CylinderGeometry(r * 0.62, r * 0.62, hw * 1.95, 14);
+    rimGeom.rotateZ(Math.PI / 2);
+    const hubGeom = new THREE.CylinderGeometry(r * 0.28, r * 0.28, hw * 2.15, 10);
+    hubGeom.rotateZ(Math.PI / 2);
+    const spokeGeom = new THREE.BoxGeometry(hw * 2.05, r * 1.15, 0.09);
+    const mergedRimGeometry = BufferGeometryUtils.mergeGeometries([rimGeom, hubGeom, spokeGeom], false);
+
     for (const w of this.config.wheels) {
       const steer = new THREE.Group();
       const spin = new THREE.Group();
-      const tireGroup = new THREE.Group();
 
-      // 1. Tire Body
-      const tireGeometry = new THREE.CylinderGeometry(r, r, hw * 2, 22);
-      tireGeometry.rotateZ(Math.PI / 2);
-      const tireMesh = new THREE.Mesh(tireGeometry, this.tireMat ?? materials.tire);
+      const tireMesh = new THREE.Mesh(mergedTireGeometry, this.tireMat ?? materials.tire);
       tireMesh.castShadow = true;
-      tireGroup.add(tireMesh);
 
-      // 2. Offroad 3D Tread Knobs / Chevron Lugs
-      const lugCount = isHeavyKraz ? 16 : 14;
-      const lugHeight = 0.035 + tireTier * 0.015;
-      const lugWidth = hw * 1.85;
+      const rimMesh = new THREE.Mesh(mergedRimGeometry, materials.rim);
 
-      for (let l = 0; l < lugCount; l += 1) {
-        const angle = (l / lugCount) * Math.PI * 2;
-        const lx = 0;
-        const ly = Math.cos(angle) * (r + lugHeight * 0.45);
-        const lz = Math.sin(angle) * (r + lugHeight * 0.45);
-
-        const lug = new THREE.Mesh(new THREE.BoxGeometry(lugWidth, lugHeight, 0.08 + tireTier * 0.02), materials.tireTread);
-        lug.position.set(lx, ly, lz);
-        lug.rotateX(-angle);
-        tireGroup.add(lug);
-      }
-
-      // 3. Deep-Dish Steel Rim
-      const rimGeometry = new THREE.CylinderGeometry(r * 0.62, r * 0.62, hw * 1.95, 16);
-      rimGeometry.rotateZ(Math.PI / 2);
-      const rim = new THREE.Mesh(rimGeometry, materials.rim);
-
-      // 4. Central Planetary Reduction Hub & Lug Nuts
-      const hubGeometry = new THREE.CylinderGeometry(r * 0.28, r * 0.28, hw * 2.15, 12);
-      hubGeometry.rotateZ(Math.PI / 2);
-      const hub = new THREE.Mesh(hubGeometry, materials.rimHub);
-
-      // Wheel spoke plate
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(hw * 2.05, r * 1.15, 0.09), materials.rim);
-
-      spin.add(tireGroup, rim, hub, spoke);
+      spin.add(tireMesh, rimMesh);
       steer.add(spin);
       steer.position.set(w.x, susp.connectionY - susp.restLength, w.z);
       this.chassis.add(steer);
@@ -1262,7 +1260,6 @@ export class TruckController {
       this.wheels.push({
         steer,
         spin,
-        tireGroup,
         tireMesh,
         isSteering: w.isSteering,
         isDrive: w.isDrive,

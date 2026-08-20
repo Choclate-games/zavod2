@@ -225,7 +225,8 @@ export class RoadGenerator {
       matrix.compose(pos, quat, sc);
       bushMesh.setMatrixAt(i, matrix);
     }
-    bushMesh.castShadow = true;
+    // Bushes are low ground foliage; disabling shadow casting saves 90+ shadow pass instances on mobile
+    bushMesh.castShadow = false;
     scene.decorationGroup.add(bushMesh);
   }
 
@@ -233,6 +234,22 @@ export class RoadGenerator {
     const rockGeom = new THREE.DodecahedronGeometry(1, 1);
     const routeLen = level.length;
     const count = level.boulderCount;
+    if (count <= 0) return;
+
+    const countRock = Math.ceil(count / 2);
+    const countDark = Math.floor(count / 2);
+
+    const rockMesh = new THREE.InstancedMesh(rockGeom, scene.materials.rock, Math.max(1, countRock));
+    const darkMesh = new THREE.InstancedMesh(rockGeom, scene.materials.rockDark, Math.max(1, countDark));
+
+    const matrix = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const rot = new THREE.Euler();
+    const sc = new THREE.Vector3();
+
+    let idxRock = 0;
+    let idxDark = 0;
 
     for (let i = 0; i < count; i += 1) {
       const fraction = (i + 1) / (count + 1);
@@ -260,13 +277,19 @@ export class RoadGenerator {
       const y = heightAt(x, z);
       const radius = onRoad ? 0.48 + ((i * 7) % 5) * 0.10 : 0.85 + ((i * 5) % 4) * 0.15;
 
-      const mesh = new THREE.Mesh(rockGeom, i % 2 === 0 ? scene.materials.rock : scene.materials.rockDark);
-      mesh.scale.set(radius * 1.15, radius * 0.85, radius * 1.05);
-      mesh.position.set(x, y + radius * 0.45 - 0.12, z);
-      mesh.rotation.set(x * 0.4, z * 0.3, radius + i);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      scene.decorationGroup.add(mesh);
+      sc.set(radius * 1.15, radius * 0.85, radius * 1.05);
+      rot.set(x * 0.4, z * 0.3, radius + i);
+      quat.setFromEuler(rot);
+      pos.set(x, y + radius * 0.45 - 0.12, z);
+      matrix.compose(pos, quat, sc);
+
+      if (i % 2 === 0 && idxRock < countRock) {
+        rockMesh.setMatrixAt(idxRock, matrix);
+        idxRock += 1;
+      } else if (idxDark < countDark) {
+        darkMesh.setMatrixAt(idxDark, matrix);
+        idxDark += 1;
+      }
 
       // Physical rigid collider
       physics.createObstacle(
@@ -274,6 +297,16 @@ export class RoadGenerator {
         radius * 0.88,
       );
     }
+
+    rockMesh.count = idxRock;
+    rockMesh.castShadow = true;
+    rockMesh.receiveShadow = true;
+    darkMesh.count = idxDark;
+    darkMesh.castShadow = true;
+    darkMesh.receiveShadow = true;
+
+    if (idxRock > 0) scene.decorationGroup.add(rockMesh);
+    if (idxDark > 0) scene.decorationGroup.add(darkMesh);
   }
 
   /**
@@ -360,39 +393,34 @@ export class RoadGenerator {
   }
 
   private buildRoadSigns(scene: SceneManager, level: LevelConfig): void {
-    const signs: Array<{ z: number; text: string; side: number }> = [
-      { z: 28, text: 'ОСТОРОЖНО', side: 1 },
+    const signs: Array<{ z: number; side: number }> = [
+      { z: 28, side: 1 },
     ];
 
     for (const zone of level.mudZones) {
-      signs.push({ z: Math.max(30, zone.startZ - 12), text: 'ВЯЗКАЯ ГРЯЗЬ', side: -1 });
+      signs.push({ z: Math.max(30, zone.startZ - 12), side: -1 });
     }
     if (level.tag === 'Кочки' || level.bumpAmp > 0.3) {
-      signs.push({ z: 65, text: 'УХАБЫ', side: 1 });
+      signs.push({ z: 65, side: 1 });
     }
     if (level.tag === 'Экстрим' || level.tag === 'Сложно' || level.tag === 'Камни') {
-      signs.push({ z: Math.round(level.length * 0.5), text: 'СКАЛЫ', side: 1 });
+      signs.push({ z: Math.round(level.length * 0.5), side: 1 });
     }
-    signs.push({ z: level.length - 24, text: 'ПИЛОРАМА', side: 1 });
+    signs.push({ z: level.length - 24, side: 1 });
 
-    const postGeom = new THREE.CylinderGeometry(0.08, 0.1, 2.4, 6);
-    const boardGeom = new THREE.BoxGeometry(1.4, 0.6, 0.08);
+    const postTransforms: Array<{ pos: THREE.Vector3; rotY: number }> = [];
+    const boardTransforms: Array<{ pos: THREE.Vector3; rotY: number; scale?: THREE.Vector3 }> = [];
 
     for (const sign of signs) {
       const roadCX = mainRoadCenterX(sign.z);
       const x = roadCX + sign.side * (TERRAIN.roadHalfWidth + 0.9);
       const y = heightAt(x, sign.z);
 
-      const post = new THREE.Mesh(postGeom, scene.materials.woodPlank);
-      post.position.set(x, y + 1.0, sign.z);
-      post.castShadow = true;
-
-      const board = new THREE.Mesh(boardGeom, scene.materials.signBoard);
-      board.position.set(x, y + 1.8, sign.z);
-      board.rotation.y = sign.side > 0 ? -0.2 : 0.2;
-      board.castShadow = true;
-
-      scene.decorationGroup.add(post, board);
+      postTransforms.push({ pos: new THREE.Vector3(x, y + 1.0, sign.z), rotY: 0 });
+      boardTransforms.push({
+        pos: new THREE.Vector3(x, y + 1.8, sign.z),
+        rotY: sign.side > 0 ? -0.2 : 0.2,
+      });
     }
 
     // Fork Directional Signs & Chevron Island Markers
@@ -407,16 +435,12 @@ export class RoadGenerator {
           const signX = splitCX + side * (TERRAIN.roadHalfWidth + 1.2);
           const signY = heightAt(signX, splitSignZ);
 
-          const post = new THREE.Mesh(postGeom, scene.materials.woodPlank);
-          post.position.set(signX, signY + 1.0, splitSignZ);
-          post.castShadow = true;
-
-          const arrowBoard = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.65, 0.08), scene.materials.signBoard);
-          arrowBoard.position.set(signX, signY + 1.85, splitSignZ);
-          arrowBoard.rotation.y = isLeft ? 0.35 : -0.35;
-          arrowBoard.castShadow = true;
-
-          scene.decorationGroup.add(post, arrowBoard);
+          postTransforms.push({ pos: new THREE.Vector3(signX, signY + 1.0, splitSignZ), rotY: 0 });
+          boardTransforms.push({
+            pos: new THREE.Vector3(signX, signY + 1.85, splitSignZ),
+            rotY: isLeft ? 0.35 : -0.35,
+            scale: new THREE.Vector3(1.14, 1.08, 1.0),
+          });
         }
 
         // 2. Chevron beacon at the tip of the median island
@@ -424,15 +448,12 @@ export class RoadGenerator {
         const islandTipX = mainRoadCenterX(islandTipZ);
         const islandTipY = heightAt(islandTipX, islandTipZ);
 
-        const beaconPost = new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.2, 0.25), scene.materials.trunk);
-        beaconPost.position.set(islandTipX, islandTipY + 0.9, islandTipZ);
-        beaconPost.castShadow = true;
-
-        const chevronBoard = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 0.12), scene.materials.banner);
-        chevronBoard.position.set(islandTipX, islandTipY + 1.8, islandTipZ);
-        chevronBoard.castShadow = true;
-
-        scene.decorationGroup.add(beaconPost, chevronBoard);
+        postTransforms.push({ pos: new THREE.Vector3(islandTipX, islandTipY + 0.9, islandTipZ), rotY: 0 });
+        boardTransforms.push({
+          pos: new THREE.Vector3(islandTipX, islandTipY + 1.8, islandTipZ),
+          rotY: 0,
+          scale: new THREE.Vector3(0.85, 0.85, 1.5),
+        });
 
         // 3. Merge sign at the end of the fork
         const mergeZ = fork.endZ - 4;
@@ -440,18 +461,46 @@ export class RoadGenerator {
         const mergeX = mergeCX + (TERRAIN.roadHalfWidth + 1.0);
         const mergeY = heightAt(mergeX, mergeZ);
 
-        const mergePost = new THREE.Mesh(postGeom, scene.materials.woodPlank);
-        mergePost.position.set(mergeX, mergeY + 1.0, mergeZ);
-        mergePost.castShadow = true;
-
-        const mergeBoard = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.55, 0.08), scene.materials.signBoard);
-        mergeBoard.position.set(mergeX, mergeY + 1.8, mergeZ);
-        mergeBoard.rotation.y = -0.2;
-        mergeBoard.castShadow = true;
-
-        scene.decorationGroup.add(mergePost, mergeBoard);
+        postTransforms.push({ pos: new THREE.Vector3(mergeX, mergeY + 1.0, mergeZ), rotY: 0 });
+        boardTransforms.push({
+          pos: new THREE.Vector3(mergeX, mergeY + 1.8, mergeZ),
+          rotY: -0.2,
+        });
       }
     }
+
+    if (postTransforms.length === 0) return;
+
+    const postGeom = new THREE.CylinderGeometry(0.08, 0.1, 2.4, 6);
+    const boardGeom = new THREE.BoxGeometry(1.4, 0.6, 0.08);
+
+    const postMesh = new THREE.InstancedMesh(postGeom, scene.materials.woodPlank, postTransforms.length);
+    const boardMesh = new THREE.InstancedMesh(boardGeom, scene.materials.signBoard, boardTransforms.length);
+
+    const matrix = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const rot = new THREE.Euler();
+    const defaultSc = new THREE.Vector3(1, 1, 1);
+
+    for (let i = 0; i < postTransforms.length; i += 1) {
+      const pt = postTransforms[i];
+      rot.set(0, pt.rotY, 0);
+      quat.setFromEuler(rot);
+      matrix.compose(pt.pos, quat, defaultSc);
+      postMesh.setMatrixAt(i, matrix);
+    }
+
+    for (let i = 0; i < boardTransforms.length; i += 1) {
+      const bt = boardTransforms[i];
+      rot.set(0, bt.rotY, 0);
+      quat.setFromEuler(rot);
+      matrix.compose(bt.pos, quat, bt.scale || defaultSc);
+      boardMesh.setMatrixAt(i, matrix);
+    }
+
+    postMesh.castShadow = true;
+    boardMesh.castShadow = true;
+    scene.decorationGroup.add(postMesh, boardMesh);
   }
 
   private buildVillage(scene: SceneManager): void {

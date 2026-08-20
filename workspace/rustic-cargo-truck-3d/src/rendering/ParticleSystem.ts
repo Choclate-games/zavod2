@@ -15,10 +15,10 @@ export type ParticleKind =
   | 'confetti';
 
 interface Particle {
-  mesh: THREE.Mesh;
-  material: THREE.Material;
+  position: THREE.Vector3;
   velocity: THREE.Vector3;
   rotVelocity: THREE.Vector3;
+  quaternion: THREE.Quaternion;
   life: number;
   maxLife: number;
   startScale: number;
@@ -30,25 +30,45 @@ interface Particle {
   gravity: number;
   drag: number;
   turbScale: number;
+  color?: THREE.Color;
 }
 
+const KIND_LIMITS: Record<ParticleKind, number> = {
+  exhaust: 24,
+  dust: 24,
+  mud: 30,
+  waterSpray: 24,
+  waterFoam: 20,
+  waterRipple: 12,
+  waterMist: 12,
+  spark: 16,
+  leaf: 16,
+  confetti: 32,
+};
+
 /**
- * High-performance, zero-allocation particle system for realistic tactile vehicle and environment VFX.
- * Features:
- * - Low-height, wide-dispersion fluid water spray droplets (tapered 3D cones oriented along velocity)
- * - Soft translucent white foam clusters & bubbles (low opacity)
- * - Broad circular expanding surface ripple waves
+ * Ultra-fast GPU-instanced particle system with zero memory allocations in the render loop.
+ * Renders all tactical vehicle & environment effects using only 10 InstancedMesh draw calls:
+ * - Fluid water spray droplets (tapered 3D cones oriented along velocity)
+ * - Soft translucent white foam clusters & bubbles
+ * - Expanding surface water ripple rings
  * - Low-altitude ballistic chunky mud splatters
- * - Diesel exhaust smoke (idle light puffs vs dark-grey soot under load)
+ * - Diesel exhaust smoke (idle light puffs vs dark soot under load)
  * - Swirling dry dirt & dust trails
- * - Bottoming out & rock collision sparks
+ * - Chassis bottoming & rock collision sparks
  * - Dynamic autumn leaves swirling in the vehicle wake
- * - Sawmill finish celebration confetti and sawdust burst
+ * - Sawmill finish celebration confetti & sawdust explosion
  */
 export class ParticleSystem {
   private readonly pool: Particle[] = [];
+  private readonly instancedMeshes: Map<ParticleKind, THREE.InstancedMesh> = new Map();
+
   private readonly scratchVec = new THREE.Vector3();
   private readonly scratchVec2 = new THREE.Vector3();
+  private readonly scaleVec = new THREE.Vector3();
+  private readonly transformMatrix = new THREE.Matrix4();
+  private readonly scratchQuat = new THREE.Quaternion();
+  private readonly scratchEuler = new THREE.Euler();
   private readonly upAxis = new THREE.Vector3(0, 1, 0);
   private elapsed = 0;
 
@@ -61,17 +81,28 @@ export class ParticleSystem {
   private readonly dropletGeom: THREE.ConeGeometry;
   private readonly rippleGeom: THREE.RingGeometry;
 
+  // Pre-allocated color objects
+  private readonly leafColors = [new THREE.Color(0xdf9b20), new THREE.Color(0xd95725), new THREE.Color(0xab2328)];
+  private readonly confettiColors = [
+    new THREE.Color(0xffd21f),
+    new THREE.Color(0xff3b69),
+    new THREE.Color(0x22a6f5),
+    new THREE.Color(0x2ec956),
+  ];
+  private readonly exhaustDarkColor = new THREE.Color(0x222224);
+  private readonly exhaustLightColor = new THREE.Color(0xaaaaaa);
+
   constructor(
     private readonly scene: SceneManager,
     private readonly road: RoadGenerator,
   ) {
-    this.puffGeom = new THREE.DodecahedronGeometry(0.45, 0);   // level 0 = 12 tris
+    this.puffGeom = new THREE.DodecahedronGeometry(0.45, 0); // 12 tris
     this.chunkGeom = new THREE.DodecahedronGeometry(0.32, 0);
     this.sparkGeom = new THREE.OctahedronGeometry(0.08, 0);
     this.leafGeom = new THREE.CircleGeometry(0.18, 5);
     this.confettiGeom = new THREE.CircleGeometry(0.14, 4);
-    this.dropletGeom = new THREE.ConeGeometry(0.14, 0.45, 6);  // 6 sides instead of 8
-    this.rippleGeom = new THREE.RingGeometry(0.1, 0.40, 12);   // 12 segments instead of 24
+    this.dropletGeom = new THREE.ConeGeometry(0.14, 0.45, 6);
+    this.rippleGeom = new THREE.RingGeometry(0.1, 0.40, 12);
     this.rippleGeom.rotateX(-Math.PI / 2);
 
     this.initPool();
@@ -80,117 +111,52 @@ export class ParticleSystem {
   private initPool(): void {
     const mats = this.scene.materials;
 
-    // 1. Exhaust smoke particles (18 items)
-    for (let i = 0; i < 18; i += 1) {
-      const mat = mats.smokeParticle.clone();
-      const mesh = new THREE.Mesh(this.puffGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'exhaust'));
-    }
+    const setupKind = (
+      kind: ParticleKind,
+      geom: THREE.BufferGeometry,
+      mat: THREE.Material,
+      capacity: number,
+    ): THREE.InstancedMesh => {
+      const imesh = new THREE.InstancedMesh(geom, mat, capacity);
+      imesh.count = 0;
+      imesh.visible = false;
+      imesh.castShadow = false;
+      imesh.receiveShadow = false;
+      this.scene.particleGroup.add(imesh);
+      this.instancedMeshes.set(kind, imesh);
 
-    // 2. Wheel dust cloud particles (18 items)
-    for (let i = 0; i < 18; i += 1) {
-      const mat = mats.dustParticle.clone();
-      const mesh = new THREE.Mesh(this.puffGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'dust'));
-    }
-
-    // 3. Mud chunks & spray (24 items)
-    for (let i = 0; i < 24; i += 1) {
-      const mat = mats.mudParticle.clone();
-      const mesh = new THREE.Mesh(this.chunkGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'mud'));
-    }
-
-    // 4. Fluid water spray droplets (20 items)
-    for (let i = 0; i < 20; i += 1) {
-      const mat = mats.waterSpray.clone();
-      const mesh = new THREE.Mesh(this.dropletGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'waterSpray'));
-    }
-
-    // 5. White water foam & bubbles (16 items)
-    for (let i = 0; i < 16; i += 1) {
-      const mat = mats.waterFoam.clone();
-      const mesh = new THREE.Mesh(this.puffGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'waterFoam'));
-    }
-
-    // 6. Surface water ripple rings (10 items)
-    for (let i = 0; i < 10; i += 1) {
-      const mat = mats.waterRipple.clone();
-      const mesh = new THREE.Mesh(this.rippleGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'waterRipple'));
-    }
-
-    // 7. Water mist (8 items)
-    for (let i = 0; i < 8; i += 1) {
-      const mat = mats.waterMist.clone();
-      const mesh = new THREE.Mesh(this.puffGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'waterMist'));
-    }
-
-    // 8. Sparks (12 items)
-    for (let i = 0; i < 12; i += 1) {
-      const mat = mats.sparkParticle;
-      const mesh = new THREE.Mesh(this.sparkGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'spark'));
-    }
-
-    // 9. Forest autumn leaves (10 items)
-    const leafMats = [mats.leafGold, mats.leafOrange, mats.leafRed];
-    for (let i = 0; i < 10; i += 1) {
-      const mat = leafMats[i % leafMats.length];
-      const mesh = new THREE.Mesh(this.leafGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'leaf'));
-    }
-
-    // 10. Confetti and sawdust (12 items)
-    const confettiMats = [mats.confettiGold, mats.confettiPink, mats.confettiBlue, mats.confettiGreen];
-    for (let i = 0; i < 12; i += 1) {
-      const mat = confettiMats[i % confettiMats.length];
-      const mesh = new THREE.Mesh(this.confettiGeom, mat);
-      mesh.visible = false;
-      this.scene.particleGroup.add(mesh);
-      this.pool.push(this.createParticleObject(mesh, mat, 'confetti'));
-    }
-  }
-
-  private createParticleObject(mesh: THREE.Mesh, material: THREE.Material, kind: ParticleKind): Particle {
-    return {
-      mesh,
-      material,
-      velocity: new THREE.Vector3(),
-      rotVelocity: new THREE.Vector3(),
-      life: 0,
-      maxLife: 1,
-      startScale: 0.1,
-      endScale: 0.5,
-      startOpacity: 0.5,
-      endOpacity: 0.0,
-      kind,
-      active: false,
-      gravity: -9.8,
-      drag: 0.95,
-      turbScale: 0,
+      for (let i = 0; i < capacity; i += 1) {
+        this.pool.push({
+          position: new THREE.Vector3(),
+          velocity: new THREE.Vector3(),
+          rotVelocity: new THREE.Vector3(),
+          quaternion: new THREE.Quaternion(),
+          life: 0,
+          maxLife: 1,
+          startScale: 0.1,
+          endScale: 0.5,
+          startOpacity: 0.5,
+          endOpacity: 0.0,
+          kind,
+          active: false,
+          gravity: -9.8,
+          drag: 0.95,
+          turbScale: 0,
+        });
+      }
+      return imesh;
     };
+
+    setupKind('exhaust', this.puffGeom, mats.smokeParticle, KIND_LIMITS.exhaust);
+    setupKind('dust', this.puffGeom, mats.dustParticle, KIND_LIMITS.dust);
+    setupKind('mud', this.chunkGeom, mats.mudParticle, KIND_LIMITS.mud);
+    setupKind('waterSpray', this.dropletGeom, mats.waterSpray, KIND_LIMITS.waterSpray);
+    setupKind('waterFoam', this.puffGeom, mats.waterFoam, KIND_LIMITS.waterFoam);
+    setupKind('waterRipple', this.rippleGeom, mats.waterRipple, KIND_LIMITS.waterRipple);
+    setupKind('waterMist', this.puffGeom, mats.waterMist, KIND_LIMITS.waterMist);
+    setupKind('spark', this.sparkGeom, mats.sparkParticle, KIND_LIMITS.spark);
+    setupKind('leaf', this.leafGeom, mats.leafGold, KIND_LIMITS.leaf);
+    setupKind('confetti', this.confettiGeom, mats.confettiGold, KIND_LIMITS.confetti);
   }
 
   private acquire(kind: ParticleKind): Particle | null {
@@ -212,13 +178,15 @@ export class ParticleSystem {
   }
 
   /**
-   * Multi-layered rich water splash VFX:
-   * - Low-altitude, wide-dispersion water droplets shooting outward sideways
-   * - Soft translucent white foam bubbles (low opacity)
-   * - Broad concentric surface ripple rings
-   * - Fine atmospheric wet mist
+   * Multi-layered fluid water splash VFX.
    */
-  emitWaterSplash(pos: THREE.Vector3, forward: THREE.Vector3, speed: number, waterIntensity: number, wheelRadius = 0.6): void {
+  emitWaterSplash(
+    pos: THREE.Vector3,
+    forward: THREE.Vector3,
+    speed: number,
+    waterIntensity: number,
+    wheelRadius = 0.6,
+  ): void {
     const intensity = Math.min(1.0, waterIntensity);
     const speedMag = Math.abs(speed);
     const groundY = pos.y - wheelRadius * 0.92 + 0.02;
@@ -232,13 +200,11 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 0.35 + Math.random() * 0.25;
-      p.mesh.visible = true;
 
       const side = c % 2 === 0 ? 1 : -1;
       const spreadX = side * (0.60 + Math.random() * 0.85);
-      p.mesh.position.set(pos.x + spreadX * 0.5, groundY, pos.z + (Math.random() - 0.5) * 0.4);
+      p.position.set(pos.x + spreadX * 0.5, groundY, pos.z + (Math.random() - 0.5) * 0.4);
 
-      // Wide lateral scatter, low vertical trajectory
       const sideVel = side * (6.5 + Math.random() * 8.0 * intensity);
       const upVel = 1.0 + Math.random() * 2.2 * intensity + speedMag * 0.08;
       const forwardVel = forward.z * (speed * 0.35) + (Math.random() - 0.5) * 2.5;
@@ -246,10 +212,11 @@ export class ParticleSystem {
       p.velocity.set(sideVel, upVel, forwardVel);
       p.rotVelocity.set(0, 0, 0);
 
-      // Orient droplet along velocity vector
       this.scratchVec.copy(p.velocity).normalize();
       if (this.scratchVec.lengthSq() > 0.01) {
-        p.mesh.quaternion.setFromUnitVectors(this.upAxis, this.scratchVec);
+        p.quaternion.setFromUnitVectors(this.upAxis, this.scratchVec);
+      } else {
+        p.quaternion.identity();
       }
 
       p.startScale = 0.42 + Math.random() * 0.30 * intensity;
@@ -270,10 +237,9 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 0.42 + Math.random() * 0.30;
-      p.mesh.visible = true;
 
       const spreadX = (Math.random() - 0.5) * 1.2;
-      p.mesh.position.set(pos.x + spreadX, groundY + 0.01, pos.z + (Math.random() - 0.5) * 0.5);
+      p.position.set(pos.x + spreadX, groundY + 0.01, pos.z + (Math.random() - 0.5) * 0.5);
 
       p.velocity.set(
         spreadX * 4.2,
@@ -281,10 +247,11 @@ export class ParticleSystem {
         -forward.z * (1.0 + Math.random() * 1.8),
       );
       p.rotVelocity.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);
+      p.quaternion.identity();
 
       p.startScale = 0.22 + Math.random() * 0.24;
       p.endScale = p.startScale * 1.8;
-      p.startOpacity = 0.35; // Soft translucent white
+      p.startOpacity = 0.35;
       p.endOpacity = 0.0;
       p.gravity = -2.0;
       p.drag = 0.88;
@@ -298,12 +265,11 @@ export class ParticleSystem {
         p.active = true;
         p.life = 0;
         p.maxLife = 0.70 + Math.random() * 0.35;
-        p.mesh.visible = true;
 
-        p.mesh.position.set(pos.x + (Math.random() - 0.5) * 0.4, groundY + 0.015, pos.z);
+        p.position.set(pos.x + (Math.random() - 0.5) * 0.4, groundY + 0.015, pos.z);
         p.velocity.set(0, 0, 0);
         p.rotVelocity.set(0, 0, 0);
-        p.mesh.rotation.set(-Math.PI / 2, 0, 0);
+        p.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 
         p.startScale = 0.6;
         p.endScale = 3.6 + intensity * 2.2;
@@ -322,15 +288,15 @@ export class ParticleSystem {
         p.active = true;
         p.life = 0;
         p.maxLife = 0.65 + Math.random() * 0.35;
-        p.mesh.visible = true;
 
-        p.mesh.position.set(pos.x + (Math.random() - 0.5) * 0.8, groundY + 0.2, pos.z - 0.3);
+        p.position.set(pos.x + (Math.random() - 0.5) * 0.8, groundY + 0.2, pos.z - 0.3);
         p.velocity.set((Math.random() - 0.5) * 1.8, 0.3 + Math.random() * 0.5, -forward.z * 1.5);
         p.rotVelocity.set((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+        p.quaternion.identity();
 
         p.startScale = 0.45;
         p.endScale = 1.5;
-        p.startOpacity = 0.18; // Soft airy haze
+        p.startOpacity = 0.18;
         p.endOpacity = 0.0;
         p.gravity = 0.15;
         p.drag = 0.90;
@@ -348,7 +314,6 @@ export class ParticleSystem {
 
     p.active = true;
     p.life = 0;
-    p.mesh.visible = true;
 
     const isHeavyLoad = throttle > 0.35 || speed > 12;
     p.maxLife = isHeavyLoad ? 0.80 + Math.random() * 0.40 : 0.50 + Math.random() * 0.30;
@@ -359,8 +324,9 @@ export class ParticleSystem {
     p.gravity = isVerticalStack ? 1.4 : 0.8;
     p.drag = 0.92;
     p.turbScale = 0.8;
+    p.color = isHeavyLoad ? this.exhaustDarkColor : this.exhaustLightColor;
 
-    p.mesh.position.copy(pos).add(
+    p.position.copy(pos).add(
       this.scratchVec.set((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.08),
     );
 
@@ -375,15 +341,7 @@ export class ParticleSystem {
     );
 
     p.rotVelocity.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);
-
-    const mat = p.material as THREE.MeshLambertMaterial;
-    if (mat) {
-      if (isHeavyLoad) {
-        mat.color.setHex(Math.random() > 0.4 ? 0x222224 : 0x3d3835);
-      } else {
-        mat.color.setHex(0xaaaaaa);
-      }
-    }
+    p.quaternion.identity();
   }
 
   /**
@@ -395,7 +353,6 @@ export class ParticleSystem {
 
     p.active = true;
     p.life = 0;
-    p.mesh.visible = true;
 
     p.maxLife = 0.60 + Math.random() * 0.40;
     p.startScale = 0.22;
@@ -408,7 +365,7 @@ export class ParticleSystem {
 
     const spreadX = (Math.random() - 0.5) * 0.45;
     const groundY = pos.y - wheelRadius * 0.92 + 0.02;
-    p.mesh.position.set(pos.x + spreadX, groundY, pos.z - 0.2);
+    p.position.set(pos.x + spreadX, groundY, pos.z - 0.2);
 
     const backSpeed = -Math.sign(speed || 1) * (1.5 + Math.random() * 2.8);
     p.velocity.set(
@@ -418,6 +375,7 @@ export class ParticleSystem {
     );
 
     p.rotVelocity.set((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+    p.quaternion.identity();
   }
 
   /**
@@ -434,13 +392,12 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 0.32 + Math.random() * 0.28;
-      p.mesh.visible = true;
 
       const spreadX = (Math.random() - 0.5) * 0.4;
-      p.mesh.position.set(pos.x + spreadX, groundY, pos.z - 0.2);
+      p.position.set(pos.x + spreadX, groundY, pos.z - 0.2);
 
       const backwardSpeed = -Math.sign(rotSpeed || 1) * (2.8 + Math.random() * 4.6);
-      const upwardSpeed = 0.8 + Math.random() * 1.5 * mud; // Low trajectory!
+      const upwardSpeed = 0.8 + Math.random() * 1.5 * mud;
 
       p.velocity.set(
         spreadX * 4.8,
@@ -449,6 +406,7 @@ export class ParticleSystem {
       );
 
       p.rotVelocity.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);
+      p.quaternion.identity();
 
       p.startScale = 0.12 + Math.random() * 0.20 * mud;
       p.endScale = p.startScale * 0.85;
@@ -472,9 +430,8 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 0.18 + Math.random() * 0.22;
-      p.mesh.visible = true;
 
-      p.mesh.position.copy(pos).add(
+      p.position.copy(pos).add(
         this.scratchVec.set((Math.random() - 0.5) * 0.15, 0.05, (Math.random() - 0.5) * 0.15),
       );
 
@@ -489,6 +446,7 @@ export class ParticleSystem {
       );
 
       p.rotVelocity.set((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
+      p.quaternion.identity();
 
       p.startScale = 0.18 + Math.random() * 0.15;
       p.endScale = 0.02;
@@ -511,9 +469,8 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 1.4 + Math.random() * 0.9;
-      p.mesh.visible = true;
 
-      p.mesh.position.set(
+      p.position.set(
         pos.x + (Math.random() - 0.5) * 2.8,
         pos.y + 1.2 + Math.random() * 1.5,
         pos.z + (Math.random() - 0.5) * 2.0,
@@ -531,6 +488,7 @@ export class ParticleSystem {
         (Math.random() - 0.5) * 8.0,
         (Math.random() - 0.5) * 6.0,
       );
+      p.quaternion.identity();
 
       p.startScale = 0.22 + Math.random() * 0.14;
       p.endScale = p.startScale;
@@ -539,6 +497,7 @@ export class ParticleSystem {
       p.gravity = -1.8;
       p.drag = 0.94;
       p.turbScale = 1.5;
+      p.color = this.leafColors[Math.floor(Math.random() * this.leafColors.length)];
     }
   }
 
@@ -553,9 +512,8 @@ export class ParticleSystem {
       p.active = true;
       p.life = 0;
       p.maxLife = 1.8 + Math.random() * 1.2;
-      p.mesh.visible = true;
 
-      p.mesh.position.set(
+      p.position.set(
         pos.x + (Math.random() - 0.5) * 2.5,
         pos.y + 2.0 + Math.random() * 1.5,
         pos.z + (Math.random() - 0.5) * 2.5,
@@ -575,6 +533,7 @@ export class ParticleSystem {
         (Math.random() - 0.5) * 12.0,
         (Math.random() - 0.5) * 12.0,
       );
+      p.quaternion.identity();
 
       p.startScale = 0.2 + Math.random() * 0.2;
       p.endScale = p.startScale;
@@ -583,71 +542,58 @@ export class ParticleSystem {
       p.gravity = -4.5;
       p.drag = 0.92;
       p.turbScale = 1.8;
+      p.color = this.confettiColors[Math.floor(Math.random() * this.confettiColors.length)];
     }
   }
 
   reset(): void {
     for (const p of this.pool) {
       p.active = false;
-      p.mesh.visible = false;
+    }
+    for (const imesh of this.instancedMeshes.values()) {
+      imesh.count = 0;
+      imesh.visible = false;
     }
   }
 
   update(dt: number): void {
     this.elapsed += dt;
 
+    // 1. Update physics for all active particles
     for (const p of this.pool) {
       if (!p.active) continue;
 
       p.life += dt;
       if (p.life >= p.maxLife) {
         p.active = false;
-        p.mesh.visible = false;
         continue;
       }
 
-      const progress = p.life / p.maxLife;
-
-      // Dynamics: Gravity + Drag + Turbulence
       p.velocity.y += p.gravity * dt;
       p.velocity.x *= Math.pow(p.drag, dt * 60);
       p.velocity.z *= Math.pow(p.drag, dt * 60);
 
-      // Turbulence flutter for smoke, dust, leaves, confetti
       if (p.turbScale > 0) {
-        const freq = this.elapsed * 4.0 + p.mesh.id;
+        const freq = this.elapsed * 4.0 + p.life * 10;
         p.velocity.x += Math.sin(freq) * p.turbScale * dt;
         p.velocity.z += Math.cos(freq * 1.3) * p.turbScale * dt;
       }
 
-      p.mesh.position.addScaledVector(p.velocity, dt);
+      p.position.addScaledVector(p.velocity, dt);
 
-      // Orientation update
       if (p.kind === 'waterSpray') {
         this.scratchVec.copy(p.velocity).normalize();
         if (this.scratchVec.lengthSq() > 0.01) {
-          p.mesh.quaternion.setFromUnitVectors(this.upAxis, this.scratchVec);
+          p.quaternion.setFromUnitVectors(this.upAxis, this.scratchVec);
         }
       } else {
-        p.mesh.rotation.x += p.rotVelocity.x * dt;
-        p.mesh.rotation.y += p.rotVelocity.y * dt;
-        p.mesh.rotation.z += p.rotVelocity.z * dt;
+        this.scratchEuler.set(p.rotVelocity.x * dt, p.rotVelocity.y * dt, p.rotVelocity.z * dt);
+        this.scratchQuat.setFromEuler(this.scratchEuler);
+        p.quaternion.multiply(this.scratchQuat);
       }
 
-      // Dynamic scale interpolation
-      const curScale = THREE.MathUtils.lerp(p.startScale, p.endScale, progress);
-      p.mesh.scale.set(curScale, curScale, curScale);
-
-      // Dynamic opacity interpolation
-      const curOpacity = THREE.MathUtils.lerp(p.startOpacity, p.endOpacity, progress);
-      const mat = p.material as THREE.Material & { opacity?: number; transparent?: boolean };
-      if (mat && mat.opacity !== undefined && mat.transparent) {
-        mat.opacity = curOpacity;
-      }
-
-      // Ground / surface collision cutoff
-      const groundY = this.road.heightAt(p.mesh.position.x, p.mesh.position.z);
-      if (p.mesh.position.y <= groundY - 0.05) {
+      const groundY = this.road.heightAt(p.position.x, p.position.z);
+      if (p.position.y <= groundY - 0.05) {
         if (
           p.kind === 'spark' ||
           p.kind === 'mud' ||
@@ -655,16 +601,62 @@ export class ParticleSystem {
           p.kind === 'waterMist'
         ) {
           p.active = false;
-          p.mesh.visible = false;
         } else if (p.kind === 'waterFoam' || p.kind === 'waterRipple') {
-          // Keep floating on water / ground surface
-          p.mesh.position.y = groundY + 0.02;
+          p.position.y = groundY + 0.02;
           p.velocity.y = 0;
         } else {
-          p.mesh.position.y = groundY + 0.02;
+          p.position.y = groundY + 0.02;
           p.velocity.set(0, 0, 0);
           p.rotVelocity.set(0, 0, 0);
         }
+      }
+    }
+
+    // 2. Build instance matrices and update InstancedMesh counts (10 draw calls max)
+    const activeCounts: Record<ParticleKind, number> = {
+      exhaust: 0,
+      dust: 0,
+      mud: 0,
+      waterSpray: 0,
+      waterFoam: 0,
+      waterRipple: 0,
+      waterMist: 0,
+      spark: 0,
+      leaf: 0,
+      confetti: 0,
+    };
+
+    for (const p of this.pool) {
+      if (!p.active) continue;
+
+      const idx = activeCounts[p.kind];
+      const limit = KIND_LIMITS[p.kind];
+      if (idx >= limit) continue;
+
+      const imesh = this.instancedMeshes.get(p.kind);
+      if (!imesh) continue;
+
+      const progress = p.life / p.maxLife;
+      const curScale = THREE.MathUtils.lerp(p.startScale, p.endScale, progress);
+      this.scaleVec.set(curScale, curScale, curScale);
+
+      this.transformMatrix.compose(p.position, p.quaternion, this.scaleVec);
+      imesh.setMatrixAt(idx, this.transformMatrix);
+
+      if (p.color) {
+        imesh.setColorAt(idx, p.color);
+      }
+
+      activeCounts[p.kind] += 1;
+    }
+
+    for (const [kind, imesh] of this.instancedMeshes.entries()) {
+      const count = activeCounts[kind];
+      imesh.count = count;
+      imesh.visible = count > 0;
+      if (count > 0) {
+        imesh.instanceMatrix.needsUpdate = true;
+        if (imesh.instanceColor) imesh.instanceColor.needsUpdate = true;
       }
     }
   }

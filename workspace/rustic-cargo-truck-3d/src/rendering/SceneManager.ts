@@ -100,11 +100,18 @@ export class SceneManager {
   private garageOrbitAngle = 0;
 
   constructor() {
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: false,
+      powerPreference: 'high-performance',
+      precision: 'mediump',
+      stencil: false,
+      depth: true,
+    });
     this.renderer.shadowMap.enabled = true;
-    // PCFSoftShadowMap at 1024px gives visually acceptable soft shadows.
-    // BasicShadowMap was too pixelated/aliased for this style of game.
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFShadowMap uses hardware 2x2 bilinear PCF filtering.
+    // It gives clean, smooth, non-pixelated antialiased shadow edges without
+    // the heavy 9-tap Poisson shader loop of PCFSoftShadowMap that drops mobile FPS.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setClearColor(this.sky, 1);
   }
@@ -121,12 +128,15 @@ export class SceneManager {
     sun.position.set(-35, 50, -25);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -32;
-    sun.shadow.camera.right = 32;
-    sun.shadow.camera.top = 32;
-    sun.shadow.camera.bottom = -32;
-    sun.shadow.camera.far = 160;
-    sun.shadow.bias = -0.0012;
+    // Tighter shadow bounds concentrate texels directly around the truck and nearby terrain/trees,
+    // maximizing sharpness while culling distant non-visible objects from the shadow pass.
+    sun.shadow.camera.left = -26;
+    sun.shadow.camera.right = 26;
+    sun.shadow.camera.top = 26;
+    sun.shadow.camera.bottom = -26;
+    sun.shadow.camera.near = 12;
+    sun.shadow.camera.far = 130;
+    sun.shadow.bias = -0.0008;
     this.scene.add(sun, sun.target);
     this.sun = sun;
 
@@ -158,9 +168,10 @@ export class SceneManager {
     }
 
     this.camera.updateProjectionMatrix();
-    // Cap at 1.0 DPR: on retina/mobile screens 1.5+ DPR doubles GPU fillrate cost
-    // with minimal visual improvement in a fast 3D game.
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+    // Cap at 1.0 DPR on mobile/retina screens to eliminate GPU fillrate bottleneck.
+    const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 || width < 900;
+    const maxDpr = isMobile ? Math.min(window.devicePixelRatio, 1.0) : Math.min(window.devicePixelRatio, 1.25);
+    this.renderer.setPixelRatio(maxDpr);
     this.renderer.setSize(width, height, false);
   };
 
