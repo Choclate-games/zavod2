@@ -76,9 +76,14 @@ export class PhysicsWorld {
     const clampedDelta = Math.min(deltaTime, 0.1);
     this.accumulator += clampedDelta;
 
-    while (this.accumulator >= this.fixedTimeStep) {
+    let steps = 0;
+    while (this.accumulator >= this.fixedTimeStep && steps < 2) {
       this.world.step();
       this.accumulator -= this.fixedTimeStep;
+      steps++;
+    }
+    if (this.accumulator >= this.fixedTimeStep) {
+      this.accumulator = 0; // Prevent spiral of death
     }
   }
 }

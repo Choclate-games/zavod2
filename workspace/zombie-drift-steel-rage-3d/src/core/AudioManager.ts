@@ -174,8 +174,21 @@ export class AudioManager {
     }
   }
 
+  // SFX Throttling timers to prevent WebAudio audio-thread stalls
+  private lastRamTime = 0;
+  private lastSplatterTime = 0;
+  private lastMinigunTime = 0;
+  private lastFlameTime = 0;
+  private lastZapTime = 0;
+  private lastExplosionTime = 0;
+  private lastScrapTime = 0;
+
   public playRamImpact(intensity = 1.0): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastRamTime < 90) return;
+    this.lastRamTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -196,6 +209,10 @@ export class AudioManager {
 
   public playSplatter(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastSplatterTime < 70) return;
+    this.lastSplatterTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -216,6 +233,10 @@ export class AudioManager {
 
   public playMinigunShot(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastMinigunTime < 60) return;
+    this.lastMinigunTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -236,6 +257,10 @@ export class AudioManager {
 
   public playFlamethrower(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastFlameTime < 100) return;
+    this.lastFlameTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -256,6 +281,10 @@ export class AudioManager {
 
   public playShockZap(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastZapTime < 110) return;
+    this.lastZapTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -276,6 +305,10 @@ export class AudioManager {
 
   public playExplosion(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastExplosionTime < 120) return;
+    this.lastExplosionTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -316,6 +349,10 @@ export class AudioManager {
 
   public playScrapPickup(): void {
     if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastScrapTime < 45) return;
+    this.lastScrapTime = now;
+
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -356,6 +393,107 @@ export class AudioManager {
       osc.start(startTime);
       osc.stop(startTime + 0.25);
     });
+  }
+
+  private lastCrateTime = 0;
+  private lastBoostTime = 0;
+  private lastObstacleHitTime = 0;
+  private lastAcidTime = 0;
+
+  public playObstacleHit(intensity = 1.0): void {
+    if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastObstacleHitTime < 80) return;
+    this.lastObstacleHitTime = now;
+
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(160, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(35, ctx.currentTime + 0.12);
+
+    gain.gain.setValueAtTime(Math.min(0.7, 0.35 * intensity), ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.14);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain!);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.14);
+  }
+
+  public playCrateSmash(): void {
+    if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastCrateTime < 80) return;
+    this.lastCrateTime = now;
+
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(240, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.16);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain!);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.16);
+  }
+
+  public playBoostPad(): void {
+    if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastBoostTime < 300) return;
+    this.lastBoostTime = now;
+
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.28);
+
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.32);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain!);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.32);
+  }
+
+  public playAcidSizzle(): void {
+    if (!this.canPlaySfx()) return;
+    const now = performance.now();
+    if (now - this.lastAcidTime < 150) return;
+    this.lastAcidTime = now;
+
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(550 + Math.random() * 200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.1);
+
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain!);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
   }
 
   public playButtonClick(): void {

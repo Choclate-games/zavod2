@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 export class SkidmarkSystem {
   public group = new THREE.Group();
-  private maxMarks = 400;
+  private maxMarks = 300;
   private markIndex = 0;
   private positions: Float32Array;
   private alphas: Float32Array;
@@ -10,8 +10,10 @@ export class SkidmarkSystem {
   private material: THREE.ShaderMaterial;
   private mesh: THREE.Mesh;
 
-  private lastLeftPos: THREE.Vector3 | null = null;
-  private lastRightPos: THREE.Vector3 | null = null;
+  private lastLeftPos = new THREE.Vector3();
+  private lastRightPos = new THREE.Vector3();
+  private hasLastPos = false;
+  private fadeTimer = 0;
 
   constructor() {
     this.positions = new Float32Array(this.maxMarks * 6 * 3); // 2 triangles per quad segment
@@ -57,20 +59,20 @@ export class SkidmarkSystem {
     rightWheelPos: THREE.Vector3,
     intensity: number
   ): void {
-    if (!this.lastLeftPos || !this.lastRightPos) {
-      this.lastLeftPos = leftWheelPos.clone();
-      this.lastRightPos = rightWheelPos.clone();
+    if (!this.hasLastPos) {
+      this.lastLeftPos.copy(leftWheelPos);
+      this.lastRightPos.copy(rightWheelPos);
+      this.hasLastPos = true;
       return;
     }
 
     const dist = this.lastLeftPos.distanceTo(leftWheelPos);
-    if (dist < 0.4) return; // Don't generate too densely
+    if (dist < 0.45) return; // Don't generate too densely
 
-    const yOffset = 0.03; // Slightly above ground
-    const idx = (this.markIndex % this.maxMarks) * 18; // 6 vertices * 3 coords
+    const yOffset = 0.03;
+    const idx = (this.markIndex % this.maxMarks) * 18;
     const aIdx = (this.markIndex % this.maxMarks) * 6;
 
-    // Quad: P0(lastL), P1(lastR), P2(currR), P3(currL)
     const p0 = this.lastLeftPos;
     const p1 = this.lastRightPos;
     const p2 = rightWheelPos;
@@ -116,16 +118,19 @@ export class SkidmarkSystem {
   }
 
   public breakSkidmark(): void {
-    this.lastLeftPos = null;
-    this.lastRightPos = null;
+    this.hasLastPos = false;
   }
 
   public update(dt: number): void {
-    // Slowly fade skidmarks
+    this.fadeTimer += dt;
+    if (this.fadeTimer < 0.08) return; // Throttle fade updates to 12.5Hz to save GPU uploads
+    const elapsed = this.fadeTimer;
+    this.fadeTimer = 0;
+
     let updated = false;
     for (let i = 0; i < this.alphas.length; i++) {
       if (this.alphas[i] > 0) {
-        this.alphas[i] = Math.max(0, this.alphas[i] - dt * 0.02);
+        this.alphas[i] = Math.max(0, this.alphas[i] - elapsed * 0.02);
         updated = true;
       }
     }

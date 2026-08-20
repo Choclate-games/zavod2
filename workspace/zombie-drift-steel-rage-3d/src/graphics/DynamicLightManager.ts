@@ -11,7 +11,7 @@ interface PooledLight {
 export class DynamicLightManager {
   public group = new THREE.Group();
   private pool: PooledLight[] = [];
-  private readonly poolSize = 8;
+  private readonly poolSize = 4;
 
   constructor() {
     for (let i = 0; i < this.poolSize; i++) {

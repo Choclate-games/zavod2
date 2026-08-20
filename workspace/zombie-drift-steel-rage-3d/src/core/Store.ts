@@ -45,6 +45,9 @@ export class GameStore {
     waveTotalTime: number;
     stats: RunStats;
     magnetRadius: number;
+    weaponCooldownMultiplier: number;
+    weaponDamageMultiplier: number;
+    turretSpeedMultiplier: number;
   } = {
     active: false,
     health: 200,
@@ -72,7 +75,10 @@ export class GameStore {
       survivedTimeSeconds: 0,
       waveReached: 1,
     },
-    magnetRadius: 6,
+    magnetRadius: 7.5,
+    weaponCooldownMultiplier: 1.0,
+    weaponDamageMultiplier: 1.0,
+    turretSpeedMultiplier: 1.0,
   };
 
   private constructor() {}
@@ -113,15 +119,15 @@ export class GameStore {
     const g = this.save.garageUpgrades;
 
     return {
-      maxHealth: base.maxHealth + g.hullLevel * 30,
-      topSpeed: base.topSpeed + g.engineLevel * 2.5,
-      acceleration: base.acceleration + g.engineLevel * 4.0,
-      handling: base.handling + g.driftLevel * 0.35,
-      driftGrip: Math.max(0.65, base.driftGrip - g.driftLevel * 0.02),
-      ramDamage: base.ramDamage + g.ramLevel * 25,
-      nitroDuration: base.nitroDuration + g.nitroLevel * 0.6,
-      nitroRefillRate: base.nitroRefillRate + g.nitroLevel * 0.08,
-      magnetRadius: 6.0 + g.magnetLevel * 2.5,
+      maxHealth: base.maxHealth + g.hullLevel * 10,
+      topSpeed: base.topSpeed + g.engineLevel * 0.8,
+      acceleration: base.acceleration + g.engineLevel * 1.5,
+      handling: base.handling + g.driftLevel * 0.15,
+      driftGrip: Math.max(0.68, base.driftGrip - g.driftLevel * 0.015),
+      ramDamage: base.ramDamage + g.ramLevel * 5,
+      nitroDuration: base.nitroDuration + g.nitroLevel * 0.2,
+      nitroRefillRate: base.nitroRefillRate + g.nitroLevel * 0.025,
+      magnetRadius: 3.5 + g.magnetLevel * 0.9,
     };
   }
 
@@ -180,11 +186,11 @@ export class GameStore {
       driftScore: 0,
       driftCombo: 0,
       xp: 0,
-      xpToNextLevel: 50,
+      xpToNextLevel: 270,
       level: 1,
       wave: 1,
-      waveTimeRemaining: 45,
-      waveTotalTime: 45,
+      waveTimeRemaining: 42,
+      waveTotalTime: 42,
       stats: {
         zombiesKilled: 0,
         bossesDefeated: 0,
@@ -196,6 +202,9 @@ export class GameStore {
         waveReached: 1,
       },
       magnetRadius: stats.magnetRadius,
+      weaponCooldownMultiplier: 1.0,
+      weaponDamageMultiplier: 1.0,
+      turretSpeedMultiplier: 1.0,
     };
     eventBus.emit('RUN_STARTED');
   }
@@ -205,7 +214,7 @@ export class GameStore {
     if (this.run.xp >= this.run.xpToNextLevel) {
       this.run.xp -= this.run.xpToNextLevel;
       this.run.level += 1;
-      this.run.xpToNextLevel = Math.floor(50 * Math.pow(1.32, this.run.level - 1));
+      this.run.xpToNextLevel = Math.floor(270 * Math.pow(1.28, this.run.level - 1));
       eventBus.emit('LEVEL_UP', this.run.level);
       return true;
     }

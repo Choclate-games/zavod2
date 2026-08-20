@@ -6,6 +6,8 @@ import { eventBus } from '../core/EventBus';
 
 export type BossPhase = 'CHASE' | 'CHARGE' | 'SLAM' | 'ENRAGED';
 
+const _scratchSlamPos = new THREE.Vector3();
+
 export class BossZombie {
   public config: ZombieConfig;
   public position: THREE.Vector3 = new THREE.Vector3();
@@ -21,8 +23,7 @@ export class BossZombie {
   public flashTimer = 0;
   public isDead = false;
   public chargeDir = new THREE.Vector3();
-
-  private flashMaterials: THREE.MeshStandardMaterial[] = [];
+  private isFlashing = false;
 
   constructor(spawnPos: THREE.Vector3) {
     this.config = ZOMBIE_CONFIGS.BOSS_GOLIATH;
@@ -33,15 +34,6 @@ export class BossZombie {
 
     this.meshResult = ZombieBuilder.buildZombie('BOSS_GOLIATH');
     this.meshResult.root.position.copy(this.position);
-
-    this.meshResult.damageFlashMeshes.forEach((mesh) => {
-      if (mesh.material && (mesh.material as any).isMaterial) {
-        mesh.material = (mesh.material as THREE.Material).clone();
-        if ((mesh.material as any).emissive) {
-          this.flashMaterials.push(mesh.material as THREE.MeshStandardMaterial);
-        }
-      }
-    });
 
     eventBus.emit('BOSS_SPAWNED', {
       name: this.config.nameRu,
@@ -57,7 +49,9 @@ export class BossZombie {
     this.flashTimer = 0.1;
 
     if (knockback) {
-      this.velocity.add(knockback.multiplyScalar(0.15)); // High mass resistance
+      this.velocity.x += knockback.x * 0.15;
+      this.velocity.y += knockback.y * 0.15;
+      this.velocity.z += knockback.z * 0.15;
     }
 
     eventBus.emit('BOSS_DAMAGED', { health: this.health, maxHealth: this.maxHealth });
@@ -86,13 +80,18 @@ export class BossZombie {
     // Flash hit effect
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;
-      for (let i = 0; i < this.flashMaterials.length; i++) {
-        this.flashMaterials[i].emissive.setHex(0xffffff);
+      if (!this.isFlashing) {
+        this.isFlashing = true;
+        const entries = this.meshResult.flashEntries;
+        for (let i = 0; i < entries.length; i++) {
+          entries[i].mesh.material = ZombieBuilder.flashMaterial;
+        }
       }
-    } else {
-      const rageHex = isEnraged ? 0x8b0000 : 0x000000;
-      for (let i = 0; i < this.flashMaterials.length; i++) {
-        this.flashMaterials[i].emissive.setHex(rageHex);
+    } else if (this.isFlashing) {
+      this.isFlashing = false;
+      const entries = this.meshResult.flashEntries;
+      for (let i = 0; i < entries.length; i++) {
+        entries[i].mesh.material = entries[i].originalMaterial;
       }
     }
 
@@ -106,23 +105,33 @@ export class BossZombie {
       }
     }
 
-    this.velocity.multiplyScalar(Math.pow(0.1, dt));
-    this.position.addScaledVector(this.velocity, dt);
+    this.velocity.x *= Math.pow(0.1, dt);
+    this.velocity.y *= Math.pow(0.1, dt);
+    this.velocity.z *= Math.pow(0.1, dt);
 
-    const toPlayer = playerPos.clone().sub(this.position);
-    const dist = toPlayer.length();
+    this.position.x += this.velocity.x * dt;
+    this.position.y += this.velocity.y * dt;
+    this.position.z += this.velocity.z * dt;
+
+    const dx = playerPos.x - this.position.x;
+    const dz = playerPos.z - this.position.z;
+    const distSq = dx * dx + dz * dz;
+    const dist = Math.sqrt(distSq);
+
+    const dirX = dist > 0.001 ? dx / dist : 0;
+    const dirZ = dist > 0.001 ? dz / dist : 0;
 
     // State Machine
     if (this.phase === 'CHASE') {
-      toPlayer.normalize();
       const moveSpeed = this.config.speed * (isEnraged ? 1.35 : 1.0);
-      this.position.addScaledVector(toPlayer, moveSpeed * dt);
+      this.position.x += dirX * moveSpeed * dt;
+      this.position.z += dirZ * moveSpeed * dt;
 
       if (this.phaseTimer > 5.0 && dist > 12) {
         // Start Heavy Charge
         this.phase = 'CHARGE';
         this.phaseTimer = 0;
-        this.chargeDir.copy(toPlayer);
+        this.chargeDir.set(dirX, 0, dirZ);
       } else if (this.phaseTimer > 4.0 && dist <= 7) {
         // Ground Slam
         this.phase = 'SLAM';
@@ -130,7 +139,8 @@ export class BossZombie {
       }
     } else if (this.phase === 'CHARGE') {
       // Sprint forward at triple speed!
-      this.position.addScaledVector(this.chargeDir, this.config.speed * 2.6 * dt);
+      this.position.x += this.chargeDir.x * this.config.speed * 2.6 * dt;
+      this.position.z += this.chargeDir.z * this.config.speed * 2.6 * dt;
       if (this.phaseTimer > 1.8) {
         this.phase = 'CHASE';
         this.phaseTimer = 0;
@@ -145,7 +155,8 @@ export class BossZombie {
         // Slam down!
         this.meshResult.leftArm.rotation.x = 0.5;
         this.meshResult.rightArm.rotation.x = 0.5;
-        onShockwave?.(this.position.clone());
+        _scratchSlamPos.copy(this.position);
+        onShockwave?.(_scratchSlamPos);
       } else if (this.phaseTimer > 1.2) {
         this.phase = 'CHASE';
         this.phaseTimer = 0;
@@ -154,7 +165,7 @@ export class BossZombie {
 
     this.meshResult.root.position.copy(this.position);
     if (this.phase !== 'CHARGE') {
-      this.meshResult.root.lookAt(new THREE.Vector3(playerPos.x, this.position.y, playerPos.z));
+      this.meshResult.root.rotation.y = Math.atan2(dx, dz);
     }
 
     // Walking animation

@@ -3,6 +3,8 @@ import { ZombieConfig, ZombieState, ZombieType } from '../types/zombie';
 import { ZOMBIE_CONFIGS } from '../core/Constants';
 import { ZombieBuilder, ZombieMeshResult } from '../graphics/ZombieBuilder';
 
+const _scratchOrigin = new THREE.Vector3();
+
 export class Zombie {
   public type: ZombieType;
   public config: ZombieConfig;
@@ -17,8 +19,7 @@ export class Zombie {
   public walkCycle = Math.random() * Math.PI * 2;
   public flashTimer = 0;
   public isDead = false;
-
-  private flashMaterials: THREE.MeshStandardMaterial[] = [];
+  private isFlashing = false;
 
   constructor(type: ZombieType, spawnPos: THREE.Vector3) {
     this.type = type;
@@ -30,23 +31,13 @@ export class Zombie {
 
     this.meshResult = ZombieBuilder.buildZombie(type);
     this.meshResult.root.position.copy(this.position);
-
-    // Clone materials for damage flash meshes to avoid shared state mutations
-    this.meshResult.damageFlashMeshes.forEach((mesh) => {
-      if (mesh.material && (mesh.material as any).isMaterial) {
-        mesh.material = (mesh.material as THREE.Material).clone();
-        if ((mesh.material as any).emissive) {
-          this.flashMaterials.push(mesh.material as THREE.MeshStandardMaterial);
-        }
-      }
-    });
   }
 
   public takeDamage(amount: number, knockback?: THREE.Vector3): boolean {
     if (this.isDead) return false;
 
     this.health -= amount;
-    this.flashTimer = 0.12;
+    this.flashTimer = 0.1;
 
     if (knockback) {
       this.velocity.add(knockback);
@@ -56,7 +47,7 @@ export class Zombie {
       this.health = 0;
       this.isDead = true;
       this.state = 'DEAD';
-      return true; // Just died
+      return true; // Died
     }
     return false;
   }
@@ -71,60 +62,67 @@ export class Zombie {
     this.attackTimer -= dt;
     this.walkCycle += dt * (this.config.speed * 1.4);
 
-    // Damage flash hit effect
+    // Damage flash hit effect (zero allocations, fast material swap)
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;
-      for (let i = 0; i < this.flashMaterials.length; i++) {
-        this.flashMaterials[i].emissive.setHex(0xffffff);
+      if (!this.isFlashing) {
+        this.isFlashing = true;
+        const entries = this.meshResult.flashEntries;
+        for (let i = 0; i < entries.length; i++) {
+          entries[i].mesh.material = ZombieBuilder.flashMaterial;
+        }
       }
-    } else {
-      for (let i = 0; i < this.flashMaterials.length; i++) {
-        this.flashMaterials[i].emissive.setHex(0x000000);
-      }
-    }
-
-    // Spitter pulsing toxic belly light
-    if (this.type === 'SPITTER' && this.meshResult.toxicBelly) {
-      const time = performance.now() * 0.005;
-      const bellyMat = this.meshResult.toxicBelly.material as THREE.MeshStandardMaterial;
-      if (bellyMat && bellyMat.emissive) {
-        bellyMat.emissiveIntensity = 0.8 + 0.6 * Math.sin(time * 3 + this.walkCycle);
+    } else if (this.isFlashing) {
+      this.isFlashing = false;
+      const entries = this.meshResult.flashEntries;
+      for (let i = 0; i < entries.length; i++) {
+        entries[i].mesh.material = entries[i].originalMaterial;
       }
     }
 
     // Decay knockback velocity
-    this.velocity.multiplyScalar(Math.pow(0.1, dt));
-    this.position.addScaledVector(this.velocity, dt);
+    this.velocity.x *= Math.pow(0.1, dt);
+    this.velocity.y *= Math.pow(0.1, dt);
+    this.velocity.z *= Math.pow(0.1, dt);
 
-    const toPlayer = playerPos.clone().sub(this.position);
-    const distToPlayer = toPlayer.length();
+    this.position.x += this.velocity.x * dt;
+    this.position.y += this.velocity.y * dt;
+    this.position.z += this.velocity.z * dt;
+
+    const dx = playerPos.x - this.position.x;
+    const dz = playerPos.z - this.position.z;
+    const distSq = dx * dx + dz * dz;
+    const dist = Math.sqrt(distSq);
+
+    // Movement direction towards player
+    let moveDirX = dist > 0.001 ? dx / dist : 0;
+    let moveDirZ = dist > 0.001 ? dz / dist : 0;
 
     // Spitter Ranged Behavior
     if (this.type === 'SPITTER') {
-      if (distToPlayer > 18) {
-        toPlayer.normalize();
-        this.position.addScaledVector(toPlayer, this.config.speed * dt);
-      } else if (distToPlayer < 9) {
-        toPlayer.normalize();
-        this.position.addScaledVector(toPlayer, -this.config.speed * 0.8 * dt);
+      if (dist > 18) {
+        this.position.x += moveDirX * this.config.speed * dt;
+        this.position.z += moveDirZ * this.config.speed * dt;
+      } else if (dist < 9) {
+        this.position.x -= moveDirX * this.config.speed * 0.8 * dt;
+        this.position.z -= moveDirZ * this.config.speed * 0.8 * dt;
       }
 
       // Spit projectile
-      if (this.attackTimer <= 0 && distToPlayer <= this.config.attackRange) {
+      if (this.attackTimer <= 0 && dist <= this.config.attackRange) {
         this.attackTimer = this.config.attackCooldown;
-        const origin = this.position.clone().add(new THREE.Vector3(0, 1.2, 0));
-        onSpitAttack?.(origin, playerPos, this.config.damage);
+        _scratchOrigin.set(this.position.x, this.position.y + 1.2, this.position.z);
+        onSpitAttack?.(_scratchOrigin, playerPos, this.config.damage);
       }
     } else {
       // Melee Chasers
-      toPlayer.normalize();
-      this.position.addScaledVector(toPlayer, this.config.speed * dt);
+      this.position.x += moveDirX * this.config.speed * dt;
+      this.position.z += moveDirZ * this.config.speed * dt;
     }
 
-    // Look at player
+    // Sync mesh position and heading (fast Math.atan2 without full matrix lookAt)
     this.meshResult.root.position.copy(this.position);
-    const targetLook = new THREE.Vector3(playerPos.x, this.position.y, playerPos.z);
-    this.meshResult.root.lookAt(targetLook);
+    this.meshResult.root.rotation.y = Math.atan2(dx, dz);
 
     // Procedural walk animation
     const swing = Math.sin(this.walkCycle);
