@@ -117,7 +117,7 @@ export class ShredderSystem {
     this.currentModel.updateDescent(baseFeedSpeed, dt, isTurbo, nipY);
     const bitePower = this.roller.getDamageMultiplier();
     const contactHalfHeight = 0.38;
-    const baseDps = 28.0;
+    const baseDps = 5.6; // 5x debuff (28.0 / 5)
     const damageThisFrame = baseDps * dt * sharpnessMult * Math.max(1.0, bitePower);
 
     // Slice voxels passing through contact nip
