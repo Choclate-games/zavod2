@@ -1748,14 +1748,14 @@ function startPlay() {
  * Запрос держится до конца сборки, поэтому ход виден в логе dev-сервера,
  * а кнопка блокируется, чтобы не запустить вторую сборку поверх первой.
  */
-async function buildAndDownloadZip() {
-  const slug = $("play-project").value;
+async function buildAndDownloadZip(slug, btn, waitLabel = "⏳ Сборка...") {
   if (!slug) { toast("Сборка", "Сначала выберите проект.", "warn"); return; }
 
-  const btn = $("btn-play-build-zip");
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "⏳ Сборка...";
+  const label = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = waitLabel;
+  }
   toast("Сборка", `${slug}: npm run build, это может занять пару минут...`);
   try {
     const res = await fetch(`/api/play/${encodeURIComponent(slug)}/build-zip`, { method: "POST" });
@@ -1778,8 +1778,10 @@ async function buildAndDownloadZip() {
   } catch (err) {
     toast("Сборка", String(err), "err");
   } finally {
-    btn.disabled = false;
-    btn.textContent = label;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
   }
 }
 
@@ -2248,6 +2250,8 @@ function bindProjects() {
     if (!state.project) return;
     window.location.href = `/api/projects/${encodeURIComponent(state.project)}/export`;
   };
+  $("btn-project-build-zip").onclick = () =>
+    buildAndDownloadZip(state.project, $("btn-project-build-zip"));
   $("btn-validate").onclick = async () => {
     const btn = $("btn-validate");
     btn.disabled = true; btn.textContent = "⏳ Проверка...";
@@ -2373,7 +2377,8 @@ function bindPlay() {
     if (res.status === "error") toast("Окно предпросмотра", res.message, "err");
   };
   $("btn-play-build").onclick = () => api(`/api/play/${encodeURIComponent($("play-project").value)}/build`, { method: "POST" });
-  $("btn-play-build-zip").onclick = buildAndDownloadZip;
+  $("btn-play-build-zip").onclick = () =>
+    buildAndDownloadZip($("play-project").value, $("btn-play-build-zip"));
   $("btn-play-stop").onclick = async () => {
     await api(`/api/play/${encodeURIComponent($("play-project").value)}/stop`, { method: "POST" });
     loadPlayState();
