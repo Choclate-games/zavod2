@@ -1,17 +1,11 @@
 import { inputManager } from '../core/InputManager';
+import { eventBus } from '../core/EventBus';
 
 /**
- * Мобильное управление машиной.
- *
- * Раскладка «руль + педали», а не один стик: для дрифт-аркады важно давить газ
- * и одновременно доворачивать руль, чего один джойстик не позволяет.
- *
- *   слева  — плавающий джойстик поворота (берётся вся левая половина экрана,
- *            стик появляется под пальцем);
- *   справа — ГАЗ / НАЗАД, НИТРО и ДРИФТ (ручник).
- *
- * Всё построено на Pointer Events, поэтому работает и мышью — управление можно
- * проверить на десктопе, не открывая эмулятор устройства.
+ * Переработанное мобильное управление:
+ * Игрок тянет пальцем в любую сторону — машина плавно поворачивает и едет в указанную сторону!
+ * Справа — кнопки НИТРО и ДРИФТ.
+ * Сверху справа — кнопка ПАУЗА.
  */
 export class TouchControls {
   private root: HTMLElement;
@@ -22,9 +16,9 @@ export class TouchControls {
   private steerPointerId: number | null = null;
   private originX = 0;
   private originY = 0;
-  private readonly maxRadius = 64;
+  private readonly maxRadius = 60;
 
-  /** Кнопка -> указатели, которые её сейчас держат (мультитач: газ + нитро). */
+  /** Кнопка -> указатели, которые её сейчас держат (мультитач) */
   private buttonPointers = new Map<HTMLElement, Set<number>>();
 
   private visible = false;
@@ -40,19 +34,17 @@ export class TouchControls {
         <div id="touch-stick-base" class="touch-stick-base">
           <div id="touch-stick-knob" class="touch-stick-knob"></div>
         </div>
-        <div class="touch-hint">РУЛЬ</div>
+        <div class="touch-hint">ТЯНИ ДЛЯ ДВИЖЕНИЯ</div>
       </div>
 
       <div class="touch-zone touch-zone-right">
         <div class="touch-btn-column">
-          <div class="touch-btn touch-btn-drift" data-action="handbrake">ДРИФТ</div>
-          <div class="touch-btn touch-btn-reverse" data-action="reverse">НАЗАД</div>
-        </div>
-        <div class="touch-btn-column">
           <div class="touch-btn touch-btn-nitro" data-action="nitro">НИТРО</div>
-          <div class="touch-btn touch-btn-gas" data-action="throttle">ГАЗ</div>
+          <div class="touch-btn touch-btn-drift" data-action="handbrake">ДРИФТ</div>
         </div>
       </div>
+
+      <button id="touch-pause-btn" class="touch-pause-btn" aria-label="Пауза" type="button">II</button>
     `;
     container.appendChild(this.root);
 
@@ -60,88 +52,81 @@ export class TouchControls {
     this.stickBase = this.root.querySelector('#touch-stick-base') as HTMLElement;
     this.stickKnob = this.root.querySelector('#touch-stick-knob') as HTMLElement;
 
-    this.bindSteering();
+    this.bindDirectionalStick();
     this.bindButtons();
+    this.bindPause();
     this.bindGlobalGuards();
     this.setVisible(false);
   }
 
-  /**
-   * Тач-управление включаем на сенсорных устройствах, на узких экранах и по
-   * явному флагу `?touch=1` — последнее нужно для отладки во внутреннем браузере.
-   */
   private static shouldEnable(): boolean {
     const forced = new URLSearchParams(location.search).get('touch');
     if (forced === '1') return true;
     if (forced === '0') return false;
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-    return inputManager.isTouchDevice || coarse || window.innerWidth < 900;
+    return inputManager.isTouchDevice || coarse || window.innerWidth < 960;
   }
 
-  // ── Руль ────────────────────────────────────────────────────────────────
+  // ── Направленный джойстик (в ту сторону, куда тянут) ────────────────────
 
-  private bindSteering(): void {
+  private bindDirectionalStick(): void {
     this.stickZone.addEventListener('pointerdown', (e: PointerEvent) => {
       if (this.steerPointerId !== null) return;
       e.preventDefault();
       this.steerPointerId = e.pointerId;
       this.stickZone.setPointerCapture(e.pointerId);
 
-      // Плавающий стик: центр там, где палец коснулся экрана.
       this.originX = e.clientX;
       this.originY = e.clientY;
       this.stickBase.style.left = `${e.clientX}px`;
       this.stickBase.style.top = `${e.clientY}px`;
       this.stickBase.classList.add('active');
-      this.updateSteering(e.clientX, e.clientY);
+      this.updateDirection(e.clientX, e.clientY);
     });
 
     this.stickZone.addEventListener('pointermove', (e: PointerEvent) => {
       if (e.pointerId !== this.steerPointerId) return;
       e.preventDefault();
-      this.updateSteering(e.clientX, e.clientY);
+      this.updateDirection(e.clientX, e.clientY);
     });
 
     const release = (e: PointerEvent) => {
       if (e.pointerId !== this.steerPointerId) return;
-      this.releaseSteering();
+      this.releaseStick();
     };
     this.stickZone.addEventListener('pointerup', release);
     this.stickZone.addEventListener('pointercancel', release);
     this.stickZone.addEventListener('lostpointercapture', release);
   }
 
-  private updateSteering(x: number, y: number): void {
+  private updateDirection(x: number, y: number): void {
     const dx = x - this.originX;
     const dy = y - this.originY;
     const dist = Math.hypot(dx, dy);
-    const clamped = Math.min(dist, this.maxRadius);
-    const angle = Math.atan2(dy, dx);
 
-    const knobX = Math.cos(angle) * clamped;
-    const knobY = Math.sin(angle) * clamped;
+    if (dist < 6) {
+      this.stickKnob.style.transform = 'translate(-50%, -50%)';
+      inputManager.setTouchDirection(null, 0);
+      return;
+    }
+
+    const clampedDist = Math.min(dist, this.maxRadius);
+    const knobX = (dx / dist) * clampedDist;
+    const knobY = (dy / dist) * clampedDist;
     this.stickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
 
-    // Мёртвая зона убирает дрожание руля от микродвижений пальца.
-    const raw = dx / this.maxRadius;
-    const dead = 0.08;
-    const steer = Math.abs(raw) < dead ? 0 : Math.sign(raw) * Math.min(1, (Math.abs(raw) - dead) / (1 - dead));
-    inputManager.setTouchSteering(steer);
+    // Вычисляем целевой угол направления и силу тяги
+    const targetAngle = Math.atan2(dx, dy);
+    const magnitude = Math.min(1.0, (dist - 6) / (this.maxRadius - 6));
 
-    // Вертикаль руля работает только «в помощь»: резкий рывок вниз тормозит.
-    if (dy / this.maxRadius > 0.75) {
-      inputManager.setTouchBrake(true);
-    } else {
-      inputManager.setTouchBrake(false);
-    }
+    inputManager.setTouchDirection(targetAngle, magnitude);
   }
 
-  private releaseSteering(): void {
+  private releaseStick(): void {
     this.steerPointerId = null;
     this.stickBase.classList.remove('active');
     this.stickKnob.style.transform = 'translate(-50%, -50%)';
-    inputManager.setTouchSteering(0);
-    inputManager.setTouchBrake(false);
+    inputManager.setTouchDirection(null, 0);
   }
 
   // ── Кнопки ──────────────────────────────────────────────────────────────
@@ -175,14 +160,18 @@ export class TouchControls {
     }
   }
 
+  private bindPause(): void {
+    const pauseBtn = this.root.querySelector('#touch-pause-btn') as HTMLElement;
+    const trigger = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      eventBus.emit('TOGGLE_PAUSE');
+    };
+    pauseBtn.addEventListener('pointerdown', trigger);
+  }
+
   private applyAction(action: string, pressed: boolean): void {
     switch (action) {
-      case 'throttle':
-        inputManager.setTouchThrottle(pressed ? 1 : 0);
-        break;
-      case 'reverse':
-        inputManager.setTouchThrottle(pressed ? -1 : 0);
-        break;
       case 'nitro':
         inputManager.setTouchNitro(pressed);
         break;
@@ -192,17 +181,11 @@ export class TouchControls {
     }
   }
 
-  // ── Защита от «браузерных» жестов поверх игры ────────────────────────────
-
   private bindGlobalGuards(): void {
-    // Долгое нажатие на кнопку не должно открывать контекстное меню,
-    // а свайп по холсту — тянуть страницу или запускать pull-to-refresh.
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
     this.root.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     this.root.addEventListener('dragstart', (e) => e.preventDefault());
 
-    // Ушли со вкладки / потеряли фокус — отпускаем все кнопки, иначе машина
-    // уедет с зажатым газом.
     window.addEventListener('blur', () => this.releaseAll());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.releaseAll();
@@ -210,19 +193,15 @@ export class TouchControls {
   }
 
   public releaseAll(): void {
-    this.releaseSteering();
+    this.releaseStick();
     for (const [btn, held] of this.buttonPointers) {
       held.clear();
       btn.classList.remove('pressed');
     }
-    inputManager.setTouchThrottle(0);
     inputManager.setTouchNitro(false);
     inputManager.setTouchHandbrake(false);
   }
 
-  // ── Видимость ───────────────────────────────────────────────────────────
-
-  /** Управление показывается только во время заезда, но не поверх меню и паузы. */
   public setVisible(visible: boolean): void {
     this.visible = visible && this.enabled;
     this.root.style.display = this.visible ? 'flex' : 'none';

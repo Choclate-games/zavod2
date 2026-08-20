@@ -61,7 +61,7 @@ export class UIManager {
 
         <div style="font-size: 12px; color: #9e8e84; text-align: center; line-height: 1.5;">
           <b>ПК:</b> WASD / Стрелки — вождение | <b>SPACE</b> — нитро | <b>SHIFT</b> — дрифт<br/>
-          <b>Телефон:</b> слева руль, справа ГАЗ, НАЗАД, НИТРО и ДРИФТ<br/>
+          <b>Телефон:</b> слева стик — руль и газ/назад, справа НИТРО и ДРИФТ<br/>
           Дрифт заряжает Нитро и умножает урон тарана до <b>4.5x</b>!
         </div>
         <div class="game-version">ВЕРСИЯ ${GAME_VERSION}</div>

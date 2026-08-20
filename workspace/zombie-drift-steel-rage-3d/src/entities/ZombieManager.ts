@@ -26,7 +26,12 @@ export class ZombieManager {
   // Max active zombies for massive horde battles
   public maxConcurrentZombies = 180;
 
-  public spawnZombie(type: ZombieType, playerPos: THREE.Vector3): void {
+  public spawnZombie(
+    type: ZombieType,
+    playerPos: THREE.Vector3,
+    hpMultiplier = 1.0,
+    speedMultiplier = 1.0
+  ): void {
     if (this.zombies.length >= this.maxConcurrentZombies) return;
 
     // Spawn at arena edge or off-screen radius
@@ -36,12 +41,18 @@ export class ZombieManager {
     const sz = Math.max(-ARENA_HALF + 6, Math.min(ARENA_HALF - 6, playerPos.z + Math.cos(angle) * distance));
 
     _scratchSpawnPos.set(sx, 0, sz);
-    const zombie = new Zombie(type, _scratchSpawnPos);
+    const zombie = new Zombie(type, _scratchSpawnPos, hpMultiplier, speedMultiplier);
     this.zombies.push(zombie);
     this.group.add(zombie.meshResult.root);
   }
 
-  public spawnZombieBatch(type: ZombieType, playerPos: THREE.Vector3, count: number): void {
+  public spawnZombieBatch(
+    type: ZombieType,
+    playerPos: THREE.Vector3,
+    count: number,
+    hpMultiplier = 1.0,
+    speedMultiplier = 1.0
+  ): void {
     const baseAngle = Math.random() * Math.PI * 2;
     const distance = 32 + Math.random() * 18;
 
@@ -53,13 +64,18 @@ export class ZombieManager {
       const sz = Math.max(-ARENA_HALF + 6, Math.min(ARENA_HALF - 6, playerPos.z + Math.cos(angle) * d));
 
       _scratchSpawnPos.set(sx, 0, sz);
-      const zombie = new Zombie(type, _scratchSpawnPos);
+      const zombie = new Zombie(type, _scratchSpawnPos, hpMultiplier, speedMultiplier);
       this.zombies.push(zombie);
       this.group.add(zombie.meshResult.root);
     }
   }
 
-  public spawnBoss(playerPos: THREE.Vector3): void {
+  public spawnBoss(
+    playerPos: THREE.Vector3,
+    hpMultiplier = 1.0,
+    speedMultiplier = 1.0,
+    customName?: string
+  ): void {
     if (this.boss && !this.boss.isDead) return;
 
     const angle = Math.random() * Math.PI * 2;
@@ -69,7 +85,7 @@ export class ZombieManager {
       playerPos.z + Math.cos(angle) * 32
     );
 
-    this.boss = new BossZombie(_scratchSpawnPos);
+    this.boss = new BossZombie(_scratchSpawnPos, hpMultiplier, speedMultiplier, customName);
     this.group.add(this.boss.meshResult.root);
   }
 
@@ -238,7 +254,7 @@ export class ZombieManager {
         projectileManager.spawnAcidGlob(origin, target, dmg);
       });
 
-      // Zombie vs Arena Solid Obstacles Collision Resolution (prevent walking through props)
+      // Zombie vs Arena Solid Obstacles Collision Resolution
       if (arena) {
         const zRadius = 0.55 * z.config.scale;
         for (let oi = 0; oi < arena.obstacles.length; oi++) {

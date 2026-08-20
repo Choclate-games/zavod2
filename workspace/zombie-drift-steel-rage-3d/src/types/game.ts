@@ -1,4 +1,15 @@
-export type GameState = 'MENU' | 'GARAGE' | 'PLAYING' | 'LEVEL_UP' | 'PAUSED' | 'GAME_OVER' | 'VICTORY';
+export type GameState =
+  | 'MENU'
+  | 'LEVEL_SELECT'
+  | 'GARAGE'
+  | 'PLAYING'
+  | 'LEVEL_UP'
+  | 'PAUSED'
+  | 'GAME_OVER'
+  | 'VICTORY'
+  | 'LEVEL_VICTORY';
+
+export type GameMode = 'CAMPAIGN' | 'SURVIVAL';
 
 export interface VehicleConfig {
   id: string;
@@ -53,6 +64,22 @@ export interface GarageUpgrades {
   magnetLevel: number;
 }
 
+export interface LevelConfig {
+  id: number;
+  nameRu: string;
+  subtitleRu: string;
+  descriptionRu: string;
+  totalWaves: number;
+  waveDuration: number;
+  hpMultiplier: number;
+  speedMultiplier: number;
+  countMultiplier: number;
+  bossWave?: number;
+  rewardScrap: number;
+  targetKills: number;
+  minHealthPercentStar: number;
+}
+
 export interface SaveData {
   scrap: number;
   selectedVehicleId: string;
@@ -60,6 +87,12 @@ export interface SaveData {
   garageUpgrades: GarageUpgrades;
   highScore: number;
   maxWave: number;
+  unlockedLevel: number;
+  completedLevels: number[];
+  levelStars: Record<number, number>;
+  survivalHighScore: number;
+  survivalMaxWave: number;
+  survivalMaxTime: number;
   soundEnabled: boolean;
   musicEnabled: boolean;
 }

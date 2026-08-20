@@ -82,6 +82,7 @@ export class CargoManager {
       item.mesh.visible = false;
       item.body.setEnabled(false);
       this.remaining = Math.max(0, this.remaining - 1);
+      this.truck.particles.emitDustCloud(this.scratch.set(p.x, p.y, p.z), this.truck.forward, 6, 1.2);
       events.emit('cargo:lost', { remaining: this.remaining, total: this.total, kind: item.kind });
     }
   }

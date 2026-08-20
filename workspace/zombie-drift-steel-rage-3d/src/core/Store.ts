@@ -1,10 +1,10 @@
-import { SaveData, GarageUpgrades, RunStats } from '../types/game';
-import { VEHICLES, GARAGE_UPGRADE_COSTS } from './Constants';
+import { SaveData, GarageUpgrades, RunStats, GameMode } from '../types/game';
+import { VEHICLES, GARAGE_UPGRADE_COSTS, CAMPAIGN_LEVELS } from './Constants';
 import { bridgeService } from '../platform/BridgeService';
 import { eventBus } from './EventBus';
 
 const DEFAULT_SAVE: SaveData = {
-  scrap: 100, // Initial starting scrap to buy first upgrade
+  scrap: 120, // Initial starting scrap for garage experimentation
   selectedVehicleId: 'iron_fang',
   unlockedVehicles: ['iron_fang'],
   garageUpgrades: {
@@ -17,6 +17,12 @@ const DEFAULT_SAVE: SaveData = {
   },
   highScore: 0,
   maxWave: 1,
+  unlockedLevel: 1,
+  completedLevels: [],
+  levelStars: {},
+  survivalHighScore: 0,
+  survivalMaxWave: 1,
+  survivalMaxTime: 0,
   soundEnabled: true,
   musicEnabled: true,
 };
@@ -25,9 +31,14 @@ export class GameStore {
   private static instance: GameStore;
   public save: SaveData = { ...DEFAULT_SAVE };
 
+  public mode: GameMode = 'CAMPAIGN';
+  public currentLevelId = 1;
+
   // Current Active Run State
   public run: {
     active: boolean;
+    mode: GameMode;
+    levelId: number;
     health: number;
     maxHealth: number;
     nitro: number; // 0..1
@@ -50,8 +61,10 @@ export class GameStore {
     turretSpeedMultiplier: number;
   } = {
     active: false,
-    health: 200,
-    maxHealth: 200,
+    mode: 'CAMPAIGN',
+    levelId: 1,
+    health: 60,
+    maxHealth: 60,
     nitro: 1,
     maxNitro: 1,
     isNitroActive: false,
@@ -60,11 +73,11 @@ export class GameStore {
     driftScore: 0,
     driftCombo: 0,
     xp: 0,
-    xpToNextLevel: 50,
+    xpToNextLevel: 270,
     level: 1,
     wave: 1,
-    waveTimeRemaining: 45,
-    waveTotalTime: 45,
+    waveTimeRemaining: 30,
+    waveTotalTime: 30,
     stats: {
       zombiesKilled: 0,
       bossesDefeated: 0,
@@ -101,6 +114,9 @@ export class GameStore {
           ...(loaded.garageUpgrades || {}),
         },
         unlockedVehicles: loaded.unlockedVehicles || ['iron_fang'],
+        completedLevels: loaded.completedLevels || [],
+        levelStars: loaded.levelStars || {},
+        unlockedLevel: Math.max(1, loaded.unlockedLevel || 1),
       };
     }
     this.saveData();
@@ -172,10 +188,21 @@ export class GameStore {
     return false;
   }
 
-  public startRun(): void {
+  public getCampaignLevelConfig(levelId: number) {
+    return CAMPAIGN_LEVELS.find((l) => l.id === levelId) || CAMPAIGN_LEVELS[0];
+  }
+
+  public startRun(mode: GameMode = 'CAMPAIGN', levelId = 1): void {
+    this.mode = mode;
+    this.currentLevelId = levelId;
     const stats = this.getEffectiveVehicleStats();
+    const levelCfg = mode === 'CAMPAIGN' ? this.getCampaignLevelConfig(levelId) : null;
+    const duration = levelCfg ? levelCfg.waveDuration : 45;
+
     this.run = {
       active: true,
+      mode,
+      levelId,
       health: stats.maxHealth,
       maxHealth: stats.maxHealth,
       nitro: 1.0,
@@ -189,8 +216,8 @@ export class GameStore {
       xpToNextLevel: 270,
       level: 1,
       wave: 1,
-      waveTimeRemaining: 42,
-      waveTotalTime: 42,
+      waveTimeRemaining: duration,
+      waveTotalTime: duration,
       stats: {
         zombiesKilled: 0,
         bossesDefeated: 0,
@@ -227,6 +254,39 @@ export class GameStore {
     eventBus.emit('SCRAP_CHANGED', { runScrap: this.run.stats.scrapCollected, totalScrap: this.save.scrap });
   }
 
+  public completeLevelVictory(levelId: number): { stars: number; scrapBonus: number } {
+    const levelCfg = this.getCampaignLevelConfig(levelId);
+    let stars = 1; // Completed level
+
+    if (this.run.stats.zombiesKilled >= levelCfg.targetKills) {
+      stars++;
+    }
+    const hpPercent = (this.run.health / this.run.maxHealth) * 100;
+    if (hpPercent >= levelCfg.minHealthPercentStar) {
+      stars++;
+    }
+
+    // Save progression
+    if (!this.save.completedLevels.includes(levelId)) {
+      this.save.completedLevels.push(levelId);
+    }
+    const currentStars = this.save.levelStars[levelId] || 0;
+    if (stars > currentStars) {
+      this.save.levelStars[levelId] = stars;
+    }
+
+    const nextLevelId = levelId + 1;
+    if (nextLevelId <= CAMPAIGN_LEVELS.length && nextLevelId > this.save.unlockedLevel) {
+      this.save.unlockedLevel = nextLevelId;
+    }
+
+    const scrapBonus = levelCfg.rewardScrap;
+    this.addScrap(scrapBonus);
+    this.saveData();
+
+    return { stars, scrapBonus };
+  }
+
   public finishRun(victory: boolean): void {
     this.run.active = false;
     const finalScore = Math.floor(
@@ -235,6 +295,18 @@ export class GameStore {
       this.run.stats.scrapCollected * 5 +
       this.run.stats.driftTimeSeconds * 20
     );
+
+    if (this.mode === 'SURVIVAL') {
+      if (finalScore > this.save.survivalHighScore) {
+        this.save.survivalHighScore = finalScore;
+      }
+      if (this.run.wave > this.save.survivalMaxWave) {
+        this.save.survivalMaxWave = this.run.wave;
+      }
+      if (this.run.stats.survivedTimeSeconds > this.save.survivalMaxTime) {
+        this.save.survivalMaxTime = Math.floor(this.run.stats.survivedTimeSeconds);
+      }
+    }
 
     if (finalScore > this.save.highScore) {
       this.save.highScore = finalScore;

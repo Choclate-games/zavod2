@@ -15,9 +15,11 @@ export class CameraController {
   public height = 25;
   public distance = 18;
   public baseFov = 50;
+  public isGarageMode = false;
 
   constructor() {
     const aspect = window.innerWidth / window.innerHeight;
+    this.baseFov = aspect < 1.0 ? 62 : 50;
     this.camera = new THREE.PerspectiveCamera(this.baseFov, aspect, 0.5, 300);
     this.camera.position.set(0, this.height, this.distance);
     this.currentPos.copy(this.camera.position);
@@ -25,12 +27,20 @@ export class CameraController {
   }
 
   public resize(width: number, height: number): void {
-    this.camera.aspect = width / height;
+    const aspect = width / height;
+    this.camera.aspect = aspect;
+    // Adapt FOV for portrait phones vs landscape
+    this.baseFov = aspect < 1.0 ? 64 : 50;
+    this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
   }
 
   public addTrauma(amount: number): void {
     this.trauma = Math.min(1.0, this.trauma + amount);
+  }
+
+  public setGarageMode(enabled: boolean): void {
+    this.isGarageMode = enabled;
   }
 
   public update(
@@ -40,15 +50,39 @@ export class CameraController {
     isNitro: boolean,
     speed: number
   ): void {
-    // Lead camera ahead of vehicle velocity
+    if (this.isGarageMode) {
+      // Cinematic Garage Showroom View
+      const isPortrait = this.camera.aspect < 1.0;
+      const garageDist = isPortrait ? 6.2 : 5.0;
+      const garageHeight = isPortrait ? 2.6 : 2.0;
+
+      this.target.set(0, garageHeight, garageDist);
+      this.lookTarget.set(0, 0.6, 0);
+
+      const followLerp = 1 - Math.exp(-dt * 5.0);
+      this.currentPos.lerp(this.target, followLerp);
+      this.currentLook.lerp(this.lookTarget, followLerp);
+
+      this.camera.position.copy(this.currentPos);
+      this.camera.lookAt(this.currentLook);
+      this.camera.fov = isPortrait ? 52 : 45;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+
+    // Gameplay Dynamic Follow Camera
+    const isPortrait = this.camera.aspect < 1.0;
+    const effHeight = isPortrait ? this.height * 1.15 : this.height;
+    const effDist = isPortrait ? this.distance * 1.15 : this.distance;
+
     const leadFactor = 0.35;
     const leadX = playerVelocity.x * leadFactor;
     const leadZ = playerVelocity.z * leadFactor;
 
     this.target.set(
       playerPos.x + leadX * 0.4,
-      this.height + (isNitro ? 2.0 : 0),
-      playerPos.z + this.distance + leadZ * 0.4
+      effHeight + (isNitro ? 2.0 : 0),
+      playerPos.z + effDist + leadZ * 0.4
     );
 
     this.lookTarget.set(playerPos.x + leadX * 0.8, 0, playerPos.z + leadZ * 0.8);

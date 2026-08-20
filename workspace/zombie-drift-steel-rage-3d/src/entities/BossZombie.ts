@@ -25,10 +25,15 @@ export class BossZombie {
   public chargeDir = new THREE.Vector3();
   private isFlashing = false;
 
-  constructor(spawnPos: THREE.Vector3) {
-    this.config = ZOMBIE_CONFIGS.BOSS_GOLIATH;
-    this.health = this.config.maxHealth;
-    this.maxHealth = this.config.maxHealth;
+  constructor(spawnPos: THREE.Vector3, hpMultiplier = 1.0, speedMultiplier = 1.0, customName?: string) {
+    const baseCfg = ZOMBIE_CONFIGS.BOSS_GOLIATH;
+    this.config = {
+      ...baseCfg,
+      speed: baseCfg.speed * speedMultiplier,
+      nameRu: customName || baseCfg.nameRu,
+    };
+    this.health = Math.round(this.config.maxHealth * hpMultiplier);
+    this.maxHealth = this.health;
     this.position.copy(spawnPos);
     this.position.y = 0;
 

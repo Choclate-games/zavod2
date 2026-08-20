@@ -7,18 +7,35 @@ import { eventBus } from '../core/EventBus';
 export class WaveManager {
   private spawnTimer = 0;
   private isWaveActive = false;
-  public totalWaves = 10;
+  public totalWaves = 3;
 
   public startWave(waveNumber: number): void {
     this.isWaveActive = true;
     gameStore.run.wave = waveNumber;
-    gameStore.run.waveTotalTime = waveNumber === 5 || waveNumber === 10 ? 60 : 42;
-    gameStore.run.waveTimeRemaining = gameStore.run.waveTotalTime;
+
+    if (gameStore.run.mode === 'CAMPAIGN') {
+      const levelCfg = gameStore.getCampaignLevelConfig(gameStore.run.levelId);
+      this.totalWaves = levelCfg.totalWaves;
+      gameStore.run.waveTotalTime = levelCfg.bossWave === waveNumber ? levelCfg.waveDuration + 15 : levelCfg.waveDuration;
+      gameStore.run.waveTimeRemaining = gameStore.run.waveTotalTime;
+    } else {
+      // SURVIVAL
+      this.totalWaves = 9999;
+      const isBossWave = waveNumber % 5 === 0;
+      gameStore.run.waveTotalTime = isBossWave ? 55 : 45;
+      gameStore.run.waveTimeRemaining = gameStore.run.waveTotalTime;
+    }
+
     this.spawnTimer = 0;
+
+    const isBoss = gameStore.run.mode === 'CAMPAIGN'
+      ? gameStore.getCampaignLevelConfig(gameStore.run.levelId).bossWave === waveNumber
+      : waveNumber % 5 === 0;
 
     eventBus.emit('WAVE_STARTED', {
       wave: waveNumber,
-      isBossWave: waveNumber === 5 || waveNumber === 10,
+      isBossWave: isBoss,
+      mode: gameStore.run.mode,
     });
   }
 
@@ -29,31 +46,53 @@ export class WaveManager {
     gameStore.run.stats.survivedTimeSeconds += dt;
 
     const wave = gameStore.run.wave;
-    const isBossWave = wave === 5 || wave === 10;
+    const mode = gameStore.run.mode;
+
+    let hpMult = 1.0;
+    let speedMult = 1.0;
+    let countMult = 1.0;
+    let isBossWave = false;
+
+    if (mode === 'CAMPAIGN') {
+      const levelCfg = gameStore.getCampaignLevelConfig(gameStore.run.levelId);
+      hpMult = levelCfg.hpMultiplier;
+      speedMult = levelCfg.speedMultiplier;
+      countMult = levelCfg.countMultiplier;
+      isBossWave = levelCfg.bossWave === wave;
+    } else {
+      // SURVIVAL SCALING
+      hpMult = 1.0 + (wave - 1) * 0.08;
+      speedMult = Math.min(1.4, 1.0 + (wave - 1) * 0.025);
+      countMult = Math.min(2.5, 1.0 + (wave - 1) * 0.12);
+      isBossWave = wave % 5 === 0;
+    }
 
     // Spawn Boss on Boss Wave
     if (isBossWave && !zombieManager.boss) {
-      zombieManager.spawnBoss(playerPos);
+      const bossHpMult = mode === 'CAMPAIGN' ? hpMult : 1.0 + (Math.floor(wave / 5) - 1) * 0.35;
+      zombieManager.spawnBoss(playerPos, bossHpMult, speedMult);
     }
 
     // Spawn regular hordes in dynamic packs
     this.spawnTimer -= dt;
-    const spawnInterval = Math.max(0.35, 1.2 - wave * 0.08);
+    const baseInterval = Math.max(0.28, (1.2 - wave * 0.06) / countMult);
 
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = spawnInterval;
+      this.spawnTimer = baseInterval;
 
-      // Pack size increases with wave
-      const packSize = wave <= 2 ? (Math.random() < 0.6 ? 2 : 3) : wave <= 5 ? (2 + Math.floor(Math.random() * 3)) : (3 + Math.floor(Math.random() * 4));
-      const mainType = this.pickZombieTypeForWave(wave);
-      zombieManager.spawnZombieBatch(mainType, playerPos, packSize);
+      // Pack size increases with wave & multiplier
+      const basePack = wave <= 2 ? 2 : wave <= 5 ? 3 : 4;
+      const packSize = Math.min(8, Math.round(basePack * countMult));
+      const mainType = this.pickZombieType(wave, mode);
 
-      // Extra walker/runner flankers
-      if (wave >= 3 && Math.random() < 0.5) {
-        zombieManager.spawnZombieBatch('WALKER', playerPos, 2);
+      zombieManager.spawnZombieBatch(mainType, playerPos, packSize, hpMult, speedMult);
+
+      // Extra flankers
+      if (wave >= 2 && Math.random() < 0.45) {
+        zombieManager.spawnZombieBatch('WALKER', playerPos, 2, hpMult, speedMult);
       }
-      if (wave >= 5 && Math.random() < 0.45) {
-        zombieManager.spawnZombieBatch('RUNNER', playerPos, 2);
+      if (wave >= 4 && Math.random() < 0.4) {
+        zombieManager.spawnZombieBatch('RUNNER', playerPos, 2, hpMult, speedMult);
       }
     }
 
@@ -68,20 +107,20 @@ export class WaveManager {
     }
   }
 
-  private pickZombieTypeForWave(wave: number): ZombieType {
+  private pickZombieType(wave: number, mode: string): ZombieType {
     const r = Math.random();
 
     if (wave === 1) {
-      return r < 0.85 ? 'WALKER' : 'RUNNER';
+      return r < 0.8 ? 'WALKER' : 'RUNNER';
     } else if (wave === 2) {
-      return r < 0.6 ? 'WALKER' : 'RUNNER';
+      return r < 0.55 ? 'WALKER' : 'RUNNER';
     } else if (wave === 3) {
-      return r < 0.45 ? 'WALKER' : r < 0.75 ? 'RUNNER' : 'SPITTER';
+      return r < 0.4 ? 'WALKER' : r < 0.75 ? 'RUNNER' : 'SPITTER';
     } else if (wave === 4) {
-      return r < 0.35 ? 'WALKER' : r < 0.65 ? 'RUNNER' : r < 0.85 ? 'SPITTER' : 'TANK';
+      return r < 0.3 ? 'WALKER' : r < 0.6 ? 'RUNNER' : r < 0.85 ? 'SPITTER' : 'TANK';
     } else {
       // Wave 5+
-      return r < 0.3 ? 'WALKER' : r < 0.6 ? 'RUNNER' : r < 0.8 ? 'SPITTER' : 'TANK';
+      return r < 0.25 ? 'WALKER' : r < 0.55 ? 'RUNNER' : r < 0.8 ? 'SPITTER' : 'TANK';
     }
   }
 
@@ -89,15 +128,15 @@ export class WaveManager {
     this.isWaveActive = false;
     const nextWave = gameStore.run.wave + 1;
 
-    if (nextWave > this.totalWaves) {
-      // VICTORY!
+    if (gameStore.run.mode === 'CAMPAIGN' && nextWave > this.totalWaves) {
+      // Level Victory!
       eventBus.emit('ALL_WAVES_CLEARED');
     } else {
       eventBus.emit('WAVE_COMPLETED', { completedWave: gameStore.run.wave });
       // Short breath before next wave
       setTimeout(() => {
         this.startWave(nextWave);
-      }, 2000);
+      }, 1800);
     }
   }
 }

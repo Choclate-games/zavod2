@@ -29,6 +29,21 @@ export class RoadGenerator {
   getActiveFork = getActiveFork;
   getRoadProximity = getRoadProximity;
 
+  getDeformedHeightAt(worldX: number, worldZ: number): number {
+    if (!this.positionAttr || worldZ < TERRAIN.startZ || worldZ > TERRAIN.endZ) {
+      return heightAt(worldX, worldZ);
+    }
+    const gridX = ((worldX + TERRAIN.halfWidth) / (TERRAIN.halfWidth * 2)) * TERRAIN.segmentsX;
+    const gridZ = ((worldZ - TERRAIN.startZ) / (TERRAIN.endZ - TERRAIN.startZ)) * this.segmentsZ;
+    const ix = Math.round(gridX);
+    const iz = Math.round(gridZ);
+    if (ix < 0 || ix > TERRAIN.segmentsX || iz < 0 || iz > this.segmentsZ) {
+      return heightAt(worldX, worldZ);
+    }
+    const idx = iz * (TERRAIN.segmentsX + 1) + ix;
+    return this.positionAttr.getY(idx);
+  }
+
   private terrainGeometry: THREE.BufferGeometry | null = null;
   private positionAttr: THREE.BufferAttribute | null = null;
   private colorAttr: THREE.BufferAttribute | null = null;
@@ -68,55 +83,88 @@ export class RoadGenerator {
   }
 
   /**
-   * Real-time terrain and mud deformation under heavy spinning wheels.
-   * Depresses the road surface, pushes a small mud ridge on the edges, and stains the ground dark wet brown.
+   * Real-time SnowRunner-style terrain and mud deformation under rolling and spinning wheels.
+   * - Carves continuous deep tire ruts directly under the contact patch
+   * - Pushes displaced mud outwards into raised lateral berms along the rut edges
+   * - Progressively churns deeper under wheelspin
+   * - Stains soil to dark wet peat mud in the trench and clumpy textured mud on berms
    */
-  deformRoad(worldX: number, worldZ: number, depth: number): void {
+  deformRoad(worldX: number, worldZ: number, depth: number, isSpinning = false): void {
     if (!this.positionAttr || !this.colorAttr || !this.terrainGeometry) return;
     if (worldZ < TERRAIN.startZ || worldZ > TERRAIN.endZ) return;
     const prox = getRoadProximity(worldX, worldZ);
-    if (prox.distToRoad > TERRAIN.roadHalfWidth + 1.2) return;
+    if (prox.distToRoad > TERRAIN.roadHalfWidth + 3.0) return;
 
     const gridX = ((worldX + TERRAIN.halfWidth) / (TERRAIN.halfWidth * 2)) * TERRAIN.segmentsX;
     const gridZ = ((worldZ - TERRAIN.startZ) / (TERRAIN.endZ - TERRAIN.startZ)) * this.segmentsZ;
 
-    const ix = Math.round(gridX);
-    const iz = Math.round(gridZ);
+    const cx = Math.round(gridX);
+    const cz = Math.round(gridZ);
 
-    if (ix < 1 || ix >= TERRAIN.segmentsX || iz < 1 || iz >= this.segmentsZ) return;
+    if (cx < 3 || cx >= TERRAIN.segmentsX - 2 || cz < 3 || cz >= this.segmentsZ - 2) return;
 
     const rowStride = TERRAIN.segmentsX + 1;
-    const centerIdx = iz * rowStride + ix;
+    const maxRutDepth = isSpinning ? 0.38 : 0.28;
+    const effectiveDepth = Math.min(depth * (isSpinning ? 1.8 : 1.2), 0.08);
 
-    const currentY = this.positionAttr.getY(centerIdx);
-    const originalY = heightAt(this.positionAttr.getX(centerIdx), this.positionAttr.getZ(centerIdx));
-    const maxRutDepth = 0.22;
+    const rutRadius = 0.95;
+    const bermRadius = 2.10;
 
-    if (currentY > originalY - maxRutDepth) {
-      const applyDepth = Math.min(depth, 0.05);
-      this.positionAttr.setY(centerIdx, currentY - applyDepth);
+    // 2D kernel over 7x7 vertex neighborhood
+    for (let dz = -3; dz <= 3; dz += 1) {
+      const iz = cz + dz;
+      if (iz < 0 || iz >= this.segmentsZ) continue;
 
-      // Darken to wet mud color
-      this.colorAttr.setXYZ(centerIdx, 0.22, 0.14, 0.09);
+      for (let dx = -3; dx <= 3; dx += 1) {
+        const ix = cx + dx;
+        if (ix < 0 || ix >= TERRAIN.segmentsX) continue;
 
-      // Displace neighbor vertices slightly upwards to create realistic displacement berms
-      for (const dx of [-1, 1]) {
-        const nIdx = iz * rowStride + (ix + dx);
-        if (nIdx >= 0 && nIdx < this.positionAttr.count) {
-          const nY = this.positionAttr.getY(nIdx);
-          this.positionAttr.setY(nIdx, nY + applyDepth * 0.28);
-          this.colorAttr.setXYZ(nIdx, 0.28, 0.18, 0.11);
+        const idx = iz * rowStride + ix;
+        const vx = this.positionAttr.getX(idx);
+        const vz = this.positionAttr.getZ(idx);
+        const curY = this.positionAttr.getY(idx);
+        const origY = heightAt(vx, vz);
+
+        const dist = Math.sqrt((vx - worldX) * (vx - worldX) + (vz - worldZ) * (vz - worldZ));
+
+        if (dist <= rutRadius) {
+          // Central rut trough: depress soil
+          const weight = Math.cos((dist / rutRadius) * (Math.PI / 2));
+          const sink = effectiveDepth * weight;
+
+          if (curY > origY - maxRutDepth) {
+            const newY = Math.max(origY - maxRutDepth, curY - sink);
+            this.positionAttr.setY(idx, newY);
+
+            // Dark wet peat mud color
+            const mudFactor = Math.min(1.0, (origY - newY) / (maxRutDepth * 0.7));
+            const r = THREE.MathUtils.lerp(0.24, 0.10, mudFactor);
+            const g = THREE.MathUtils.lerp(0.16, 0.06, mudFactor);
+            const b = THREE.MathUtils.lerp(0.10, 0.03, mudFactor);
+            this.colorAttr.setXYZ(idx, r, g, b);
+            this.modifiedVertices = true;
+          }
+        } else if (dist <= bermRadius) {
+          // Outer perimeter berm: push displaced soil upwards
+          const bermWeight = Math.sin(((dist - rutRadius) / (bermRadius - rutRadius)) * Math.PI);
+          const rise = effectiveDepth * 0.42 * bermWeight;
+
+          if (curY < origY + 0.18) {
+            this.positionAttr.setY(idx, curY + rise);
+            // Clumpy textured mud color
+            this.colorAttr.setXYZ(idx, 0.30, 0.20, 0.12);
+            this.modifiedVertices = true;
+          }
         }
       }
-
-      this.modifiedVertices = true;
     }
   }
 
   flushDeformations(): void {
-    if (this.modifiedVertices && this.positionAttr && this.colorAttr) {
+    if (this.modifiedVertices && this.positionAttr && this.colorAttr && this.terrainGeometry) {
       this.positionAttr.needsUpdate = true;
       this.colorAttr.needsUpdate = true;
+      this.terrainGeometry.computeVertexNormals();
       this.modifiedVertices = false;
     }
   }

@@ -13,12 +13,11 @@ export class InputManager {
   private keys: Record<string, boolean> = {};
   public isTouchDevice = false;
 
-  // Touch virtual inputs
-  private touchThrottle = 0;
-  private touchSteering = 0;
+  // Touch Directional Drag State
+  private touchTargetAngle: number | null = null;
+  private touchMagnitude = 0;
   private touchHandbrake = false;
   private touchNitro = false;
-  private touchBrake = false;
 
   private constructor() {
     this.isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -62,12 +61,9 @@ export class InputManager {
     });
   }
 
-  public setTouchSteering(val: number): void {
-    this.touchSteering = Math.max(-1, Math.min(1, val));
-  }
-
-  public setTouchThrottle(val: number): void {
-    this.touchThrottle = Math.max(-1, Math.min(1, val));
+  public setTouchDirection(targetAngle: number | null, magnitude: number): void {
+    this.touchTargetAngle = targetAngle;
+    this.touchMagnitude = Math.max(0, Math.min(1, magnitude));
   }
 
   public setTouchHandbrake(val: boolean): void {
@@ -78,18 +74,12 @@ export class InputManager {
     this.touchNitro = val;
   }
 
-  /** Резкий рывок руля вниз = торможение, без отдельной педали. */
-  public setTouchBrake(val: boolean): void {
-    this.touchBrake = val;
-  }
-
   public reset(): void {
     this.keys = {};
-    this.touchThrottle = 0;
-    this.touchSteering = 0;
+    this.touchTargetAngle = null;
+    this.touchMagnitude = 0;
     this.touchHandbrake = false;
     this.touchNitro = false;
-    this.touchBrake = false;
     this.controls = {
       throttle: 0,
       steering: 0,
@@ -98,7 +88,7 @@ export class InputManager {
     };
   }
 
-  public update(): VehicleControls {
+  public update(currentVehicleHeading = 0): VehicleControls {
     // Keyboard inputs
     let forward = 0;
     if (this.keys['KeyW'] || this.keys['ArrowUp']) forward += 1;
@@ -111,11 +101,22 @@ export class InputManager {
     const handbrakeKey = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.keys['KeyF']);
     const nitroKey = !!(this.keys['Space'] || this.keys['KeyE']);
 
-    // Клавиатура и тач живут параллельно: активен тот источник, которым
-    // сейчас действительно управляют, поэтому отладка мышью не блокирует WASD.
-    let finalThrottle = Math.abs(this.touchThrottle) > 0.05 ? this.touchThrottle : forward;
-    if (this.touchBrake) finalThrottle = -1;
-    const finalSteer = Math.abs(this.touchSteering) > 0.01 ? this.touchSteering : steer;
+    let finalThrottle = forward;
+    let finalSteer = steer;
+
+    // Direct Directional Touch Input: Player drags finger towards desired direction
+    if (this.touchTargetAngle !== null && this.touchMagnitude > 0.05) {
+      let diff = this.touchTargetAngle - currentVehicleHeading;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+
+      // Turning: Steer smoothly into target direction
+      // When diff > 0 (target is clockwise), steer < 0 increases heading towards target
+      finalSteer = -Math.max(-1, Math.min(1, diff * 1.8));
+
+      // Throttle: Accelerate towards dragged direction
+      finalThrottle = this.touchMagnitude;
+    }
 
     this.controls.throttle = finalThrottle;
     this.controls.steering = finalSteer;

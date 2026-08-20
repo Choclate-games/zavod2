@@ -113,6 +113,8 @@ export class Game implements FixedUpdateTarget {
 
       const unlockedNext = (this.currentLevelId === this.save.unlockedLevels && this.save.unlockedLevels < 50 && delivered > 0);
 
+      this.truck.particles.emitFinishCelebration(this.truck.position);
+
       const result: RunResult = {
         levelId: this.currentLevelId,
         cargoPackage: lvl.cargoPackage || 'logs',

@@ -417,11 +417,14 @@ body, html {
   padding: 0 0 calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
 }
 
+/* Правая зона сама НЕ ловит тапы: иначе перекрывает HUD-кнопку паузы (правый
+   верхний угол). Ловят только сами кнопки — остальное пропускает к интерфейсу. */
 .touch-zone-right {
   width: 45%;
   justify-content: flex-end;
   align-items: flex-end;
   gap: 14px;
+  pointer-events: none;
   padding: 0 calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) 0;
 }
 
@@ -472,7 +475,7 @@ body, html {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .touch-btn {
@@ -490,28 +493,13 @@ body, html {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   touch-action: none;
   user-select: none;
+  pointer-events: auto;
   transition: transform 0.06s ease-out, filter 0.06s ease-out;
 }
 
 .touch-btn.pressed {
   transform: scale(0.92);
   filter: brightness(1.35);
-}
-
-.touch-btn-gas {
-  width: 104px;
-  height: 104px;
-  font-size: 15px;
-  background: radial-gradient(circle at 35% 30%, #7ae582 0%, #06d6a0 55%, #048a67 100%);
-  box-shadow: 0 0 18px rgba(6, 214, 160, 0.5);
-}
-
-.touch-btn-reverse {
-  width: 66px;
-  height: 66px;
-  font-size: 11px;
-  background: radial-gradient(circle at 35% 30%, #8d99ae 0%, #5c6672 60%, #333b45 100%);
-  box-shadow: 0 0 12px rgba(141, 153, 174, 0.35);
 }
 
 .touch-btn-nitro {
@@ -524,11 +512,37 @@ body, html {
   box-shadow: 0 0 18px rgba(247, 127, 0, 0.5);
 }
 
+/* Кнопка паузы поверх управления — всегда достижима пальцем */
+.touch-pause-btn {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: rgba(15, 13, 12, 0.6);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  z-index: 26;
+}
+
+.touch-pause-btn:active {
+  filter: brightness(1.4);
+}
+
 /* Низкие экраны в ландшафте: кнопки не должны съедать поле зрения */
 @media (max-height: 460px) {
   .touch-btn { width: 68px; height: 68px; font-size: 11px; }
-  .touch-btn-gas { width: 86px; height: 86px; font-size: 13px; }
-  .touch-btn-reverse { width: 56px; height: 56px; font-size: 10px; }
+  .touch-pause-btn { width: 42px; height: 42px; font-size: 15px; }
 }
 
 /* Responsive adjustments */
@@ -545,5 +559,71 @@ body, html {
   }
   .garage-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ── Адаптация интерфейса под мобильные устройства ──────────────────────────
+   Модалки должны влезать в экран (в т.ч. в ландшафте с малой высотой),
+   иметь большие тач-цели и не обрезаться системными жестами/чёлкой. */
+.ui-modal {
+  width: min(440px, 94vw);
+  max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: clamp(16px, 4vw, 28px);
+  margin: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 8px)
+          calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 8px);
+}
+
+/* Крупные тач-цели для всех кнопок */
+.btn-primary,
+.btn-secondary,
+.btn-gold {
+  min-height: 48px;
+  font-size: 15px;
+  padding: 14px 22px;
+}
+
+#modal-garage {
+  width: min(750px, 94vw);
+}
+
+.garage-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.upgrade-card {
+  width: 100%;
+  max-width: 240px;
+}
+
+/* На узких/низких экранах ещё компактнее */
+@media (max-width: 520px), (max-height: 460px) {
+  .ui-modal h1 {
+    font-size: 24px !important;
+  }
+  .ui-modal h2 {
+    font-size: 16px !important;
+  }
+  .btn-primary,
+  .btn-secondary,
+  .btn-gold {
+    min-height: 44px;
+    font-size: 14px;
+    padding: 12px 18px;
+  }
+  .hud-bars-container {
+    width: 150px;
+  }
+  .hud-badge {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+  .upgrade-card {
+    max-width: 200px;
+  }
+  .garage-grid {
+    grid-template-columns: 1fr;
   }
 }

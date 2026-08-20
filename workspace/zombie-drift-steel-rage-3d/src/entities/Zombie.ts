@@ -21,11 +21,15 @@ export class Zombie {
   public isDead = false;
   private isFlashing = false;
 
-  constructor(type: ZombieType, spawnPos: THREE.Vector3) {
+  constructor(type: ZombieType, spawnPos: THREE.Vector3, hpMultiplier = 1.0, speedMultiplier = 1.0) {
     this.type = type;
-    this.config = ZOMBIE_CONFIGS[type];
-    this.health = this.config.maxHealth;
-    this.maxHealth = this.config.maxHealth;
+    const baseCfg = ZOMBIE_CONFIGS[type];
+    this.config = {
+      ...baseCfg,
+      speed: baseCfg.speed * speedMultiplier,
+    };
+    this.health = Math.round(this.config.maxHealth * hpMultiplier);
+    this.maxHealth = this.health;
     this.position.copy(spawnPos);
     this.position.y = 0;
 
