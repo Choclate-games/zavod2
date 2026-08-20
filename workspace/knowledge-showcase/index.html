@@ -3,182 +3,169 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🎮 Factory Knowledge Base - Ultimate Showcase</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-        body {
-            background: #0d1117;
-            color: #ecf0f1;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            overflow: hidden;
-            width: 100vw;
-            height: 100vh;
-        }
-        #game-root {
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-        #ui-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: 14px;
-            z-index: 10;
-        }
-        .interactive { pointer-events: auto; }
-        .header {
-            background: rgba(13, 17, 23, 0.94);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 12px;
-            padding: 10px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            max-width: 1100px;
-            margin: 0 auto;
-            width: 100%;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-        }
-        .tabs {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-        .tab-btn {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            color: #bdc3c7;
-            padding: 7px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 12px;
-            transition: all 0.15s;
-        }
-        .tab-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
-        .tab-btn.active {
-            background: #e65c00;
-            border-color: #ff771a;
-            color: #fff;
-            box-shadow: 0 0 14px rgba(230, 92, 0, 0.6);
-        }
-        .hud-card {
-            background: rgba(13, 17, 23, 0.94);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 10px;
-            padding: 12px 16px;
-            font-size: 13px;
-            line-height: 1.5;
-            color: #dcdde1;
-            max-width: 480px;
-            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-        }
-        .hud-card b { color: #f39c12; }
-        .hud-card kbd {
-            background: #2f3640;
-            padding: 2px 6px;
-            border-radius: 4px;
-            border: 1px solid #718093;
-            font-family: monospace;
-            font-size: 12px;
-            color: #fff;
-        }
-        .crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 16px;
-            height: 16px;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            display: none;
-            z-index: 5;
-        }
-        .crosshair::before, .crosshair::after {
-            content: '';
-            position: absolute;
-            background: rgba(255, 255, 255, 0.95);
-            box-shadow: 0 0 4px #000;
-        }
-        .crosshair::before { top: 7px; left: -8px; width: 32px; height: 2px; }
-        .crosshair::after { top: -8px; left: 7px; width: 2px; height: 32px; }
-        #damage-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            overflow: hidden;
-        }
-        #2d-canvas-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: auto;
-            display: none;
-            z-index: 2;
-        }
-        #speedometer {
-            position: absolute;
-            bottom: 24px;
-            right: 24px;
-            background: rgba(13, 17, 23, 0.9);
-            border: 2px solid rgba(230, 92, 0, 0.8);
-            border-radius: 12px;
-            padding: 12px 18px;
-            text-align: center;
-            font-family: monospace;
-            display: block;
-            pointer-events: none;
-        }
-        #speed-val { font-size: 32px; font-weight: 900; color: #ff771a; }
-    </style>
+    <title>🎮 Factory Knowledge Base - Ultimate Interactive Showcase</title>
+    <link rel="stylesheet" href="/src/styles.css">
 </head>
 <body>
     <div id="game-root"></div>
-    <canvas id="2d-canvas-overlay"></canvas>
+    <canvas id="canvas-2d-overlay"></canvas>
     <div id="damage-container"></div>
 
     <div id="ui-overlay">
+        <!-- TOP HEADER BAR -->
         <div class="header interactive">
-            <div style="font-weight: bold; font-size: 14px; color: #f1c40f;">⚡ Factory Knowledge Showcase</div>
+            <div class="header-left">
+                <div id="title-text" style="font-weight: 800; font-size: 14px; color: #f1c40f; white-space: nowrap;">
+                    ⚡ Factory Knowledge Showcase
+                </div>
+            </div>
+
+            <!-- 12 SHOWCASE TABS -->
             <div class="tabs">
-                <button class="tab-btn active" onclick="window.switchMode('truck')">🚚 ЗиЛ-130 (Rapier 3D 1:1)</button>
-                <button class="tab-btn" onclick="window.switchMode('fps')">🔫 FPS & Кик (PointerLock)</button>
-                <button class="tab-btn" onclick="window.switchMode('melee')">⚔️ Слэшер & Комбо</button>
-                <button class="tab-btn" onclick="window.switchMode('models')">🎨 3D Модели</button>
-                <button class="tab-btn" onclick="window.switchMode('gestures')">👆 Свайпы & Жесты</button>
+                <button class="tab-btn active" id="tab-truck" onclick="window.switchMode('truck')">🚚 ЗиЛ-130 (Rapier 3D)</button>
+                <button class="tab-btn" id="tab-fps" onclick="window.switchMode('fps')">🔫 FPS & Пинок</button>
+                <button class="tab-btn" id="tab-melee" onclick="window.switchMode('melee')">⚔️ Слэшер & Парирование</button>
+                <button class="tab-btn" id="tab-physics" onclick="window.switchMode('physics_sandbox')">🧲 Трос, Время & Дэш</button>
+                <button class="tab-btn" id="tab-fluid" onclick="window.switchMode('fluid_destruction')">🌊 Вода & Разрушения</button>
+                <button class="tab-btn" id="tab-swarm" onclick="window.switchMode('swarm_survivor')">🐦 Рой & Выживание</button>
+                <button class="tab-btn" id="tab-grid" onclick="window.switchMode('grid_building')">🏗️ Сетка & База</button>
+                <button class="tab-btn" id="tab-stealth" onclick="window.switchMode('stealth')">👁️ Стелс & Конусы</button>
+                <button class="tab-btn" id="tab-models" onclick="window.switchMode('models')">🎨 3D Showroom</button>
+                <button class="tab-btn" id="tab-pixi" onclick="window.switchMode('pixijs_2d')">👆 2D Сплайны & Доска</button>
+                <button class="tab-btn" id="tab-vfx" onclick="window.switchMode('vfx')">✨ VFX & Шейдеры</button>
+                <button class="tab-btn" id="tab-sound" onclick="window.switchMode('soundboard')">🔊 Синтезатор & Ритм</button>
+            </div>
+
+            <!-- HEADER UTILITIES -->
+            <div class="header-right">
+                <button class="utility-btn" id="lang-toggle-btn" onclick="window.toggleLanguage()">🌐 RU</button>
+                <button class="utility-btn" id="mute-toggle-btn" onclick="window.toggleMute()">🔊 Звук: ВКЛ</button>
             </div>
         </div>
 
         <div class="crosshair" id="fps-crosshair"></div>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-end; width: 100%;">
+        <!-- BOTTOM INTERACTIVE PANELS -->
+        <div class="bottom-panel-container">
+            <!-- HUD Description Card -->
             <div class="hud-card interactive" id="hud-info">
                 <div style="font-weight:bold; color:#e67e22; margin-bottom:4px;">🚚 ЗиЛ-130: 100% честная физика Rapier 3D (WASM)</div>
-                <div>Управление: <kbd>W</kbd>/<kbd>S</kbd> Газ / Тормоз, <kbd>A</kbd>/<kbd>D</kbd> Руль</div>
-                <div>Настоящая динамическая подвеска с лучевым прощупыванием рельефа (Raycast Vehicle)!</div>
+                <div>Управление: <kbd>W</kbd>/<kbd>S</kbd> Газ / Тормоз, <kbd>A</kbd>/<kbd>D</kbd> Руль, <kbd>Space</kbd> Ручник (Дрифт)</div>
+                <div>Динамическая лучевая подвеска, крен рамы, следы шин на грунте, брызги воды, синтез мотора.</div>
             </div>
 
+            <!-- Speedometer for Truck -->
             <div id="speedometer">
                 <div style="font-size: 11px; color: #bdc3c7;">СКОРОСТЬ</div>
                 <div id="speed-val">0</div>
                 <div style="font-size: 10px; color: #7f8c8d;">КМ/Ч</div>
+            </div>
+
+            <!-- VFX Trigger Controls -->
+            <div id="vfx-controls" class="action-panel interactive" style="display: none;">
+                <button class="action-btn red" onclick="window.emitVfx('explosion')">💥 Взрыв</button>
+                <button class="action-btn gold" onclick="window.emitVfx('sparks')">⚡ Искры</button>
+                <button class="action-btn green" onclick="window.emitVfx('confetti')">🎊 Конфетти</button>
+                <button class="action-btn blue" onclick="window.emitVfx('water')">💧 Вода</button>
+                <button class="action-btn grey" onclick="window.emitVfx('smoke')">💨 Дым</button>
+            </div>
+
+            <!-- 3D Showroom Controls -->
+            <div id="models-controls" class="action-panel interactive" style="display: none;">
+                <button class="action-btn active" onclick="window.selectModel(0)">🚗 Авто</button>
+                <button class="action-btn" onclick="window.selectModel(1)">🚶 Человек</button>
+                <button class="action-btn" onclick="window.selectModel(2)">🌲 Дерево</button>
+                <button class="action-btn" onclick="window.selectModel(3)">📦 Ящик</button>
+                <button class="action-btn" onclick="window.selectModel(4)">💰 Монета</button>
+                <button class="action-btn" onclick="window.selectModel(5)">💎 Кристалл</button>
+                <button class="action-btn" onclick="window.selectModel(6)">🛡️ Рыцарь</button>
+                <button class="action-btn" onclick="window.selectModel(7)">🛢️ Бочка</button>
+                <button class="action-btn wireframe-btn" onclick="window.toggleWireframe()">🕸️ Сетка</button>
+            </div>
+
+            <!-- Building Controls -->
+            <div id="building-controls" class="action-panel interactive" style="display: none;">
+                <button class="action-btn build-btn active" onclick="window.selectBuildingType('extractor')">⛏️ Бур-экстрактор</button>
+                <button class="action-btn build-btn" onclick="window.selectBuildingType('conveyor')">➡️ Конвейер</button>
+                <button class="action-btn build-btn" onclick="window.selectBuildingType('turret')">🎯 Турель</button>
+            </div>
+
+            <!-- Fluid & Destruction Controls -->
+            <div id="fluid-controls" class="action-panel interactive" style="display: none;">
+                <button class="action-btn red" onclick="window.smashPillar()">🔨 Разбить колонну</button>
+                <button class="action-btn gold" onclick="window.drillVoxel()">⛏️ Бурить породу</button>
+            </div>
+
+            <!-- Pixi 2D Sub-mode Controls -->
+            <div id="pixi-controls" class="action-panel interactive" style="display: none;">
+                <button class="action-btn pixi-sub-btn active" onclick="window.selectPixiSubMode('spline')">〰️ Catmull-Rom Сплайн</button>
+                <button class="action-btn pixi-sub-btn" onclick="window.selectPixiSubMode('slicer')">⚔️ Fruit Slicer</button>
+                <button class="action-btn pixi-sub-btn" onclick="window.selectPixiSubMode('evidence')">📌 Доска улик</button>
+            </div>
+        </div>
+
+        <!-- SOUNDBOARD & SYNTHESIZER OVERLAY PANEL -->
+        <div id="soundboard-panel" class="interactive" style="display: none;">
+            <div class="soundboard-header">
+                <div>🔊 Web Audio API Procedural Sound Synthesizer</div>
+                <div style="font-size: 11px; color: #bdc3c7;">Zero MP3 • Чистый синтез Web Audio</div>
+            </div>
+
+            <div class="soundboard-grid">
+                <button class="sound-btn" onclick="window.playSound('gunshot')">🔫 Выстрел</button>
+                <button class="sound-btn" onclick="window.playSound('explosion')">💥 Взрыв</button>
+                <button class="sound-btn" onclick="window.playSound('parry')">⚔️ Парирование</button>
+                <button class="sound-btn" onclick="window.playSound('slash')">🗡️ Взмах меча</button>
+                <button class="sound-btn" onclick="window.playSound('kick')">🦶 Пинок</button>
+                <button class="sound-btn" onclick="window.playSound('coin')">🪙 Монета</button>
+                <button class="sound-btn" onclick="window.playSound('click')">🖱️ UI Клик</button>
+                <button class="sound-btn" onclick="window.playSound('drift')">🏎️ Визг шин</button>
+                <button class="sound-btn" onclick="window.playSound('dash')">💨 Дэш-свист</button>
+                <button class="sound-btn" onclick="window.playSound('laser')">⚡ Лазер</button>
+                <button class="sound-btn" onclick="window.playSound('levelup')">🌟 Победный фанфар</button>
+                <button class="sound-btn" onclick="window.playSound('alarm')">🚨 Сирена тревоги</button>
+            </div>
+
+            <div class="soundboard-row">
+                <div class="engine-slider-group">
+                    <label>🚗 Обороты двигателя (Engine RPM):</label>
+                    <input type="range" min="0" max="1" step="0.01" value="0.2" oninput="window.onEngineRpmChange(parseFloat(this.value))">
+                </div>
+
+                <div class="rhythm-game-group">
+                    <div id="rhythm-indicator" class="rhythm-box"></div>
+                    <button class="rhythm-btn" onclick="window.triggerRhythmHit()">🎵 Попадание в бит (<kbd>Space</kbd>)</button>
+                    <div id="rhythm-feedback" style="font-size: 11px; font-weight: bold; min-width: 110px;"></div>
+                    <div style="font-size: 12px; color:#f1c40f;">ОЧКИ: <span id="rhythm-score">0</span></div>
+                </div>
+            </div>
+
+            <div class="oscilloscope-wrapper">
+                <canvas id="audio-analyser-canvas" width="680" height="90"></canvas>
+            </div>
+        </div>
+
+        <!-- ROGUELIKE UPGRADE MODAL -->
+        <div id="upgrade-modal" class="modal-backdrop interactive" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-title">⭐ НОВЫЙ УРОВЕНЬ! ВЫБЕРИТЕ УЛУЧШЕНИЕ:</div>
+                <div class="cards-row">
+                    <div class="upgrade-card" onclick="window.choosePerk('blades')">
+                        <div class="card-icon">⚔️</div>
+                        <div class="card-name">Радиус лезвий</div>
+                        <div class="card-desc">+40% к радиусу вращения орбитальных щитов</div>
+                    </div>
+                    <div class="upgrade-card" onclick="window.choosePerk('speed')">
+                        <div class="card-icon">💨</div>
+                        <div class="card-name">Скорость дронов</div>
+                        <div class="card-desc">+30% к скорости роя миньонов</div>
+                    </div>
+                    <div class="upgrade-card" onclick="window.choosePerk('magnet')">
+                        <div class="card-icon">🧲</div>
+                        <div class="card-name">Магнит кристаллов</div>
+                        <div class="card-desc">Притягивает кристаллы опыта на всей карте</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
