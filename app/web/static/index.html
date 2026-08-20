@@ -22,7 +22,10 @@
     <div class="activity">
       <div class="activity-head">
         <span>⚡ Активные чаты</span>
-        <span class="conn-dot" id="sidebar-status" title="Связь с фабрикой">●</span>
+        <span class="row" style="gap:6px">
+          <button class="act-clear" id="btn-activity-clear" title="Убрать из панели все завершённые темы">🧹</button>
+          <span class="conn-dot" id="sidebar-status" title="Связь с фабрикой">●</span>
+        </span>
       </div>
       <div class="activity-list" id="sidebar-activity"></div>
       <div class="act-servers hidden" id="sidebar-servers"></div>
@@ -139,6 +142,7 @@
               <button class="btn primary small" id="btn-copy-prompt">📋 Скопировать Master Prompt</button>
               <button class="btn ok small" id="btn-play-project">🌐 Запустить игру</button>
               <button class="btn small" id="btn-continue-agent">⚡ Продолжить в агенте</button>
+              <button class="btn small" id="btn-rename-project">✏️ Переименовать</button>
               <button class="btn small" id="btn-open-project-folder">📂 Папка проекта</button>
               <button class="btn small" id="btn-export-zip">📦 Экспорт ZIP</button>
               <button class="btn small" id="btn-validate">✅ Валидация</button>
@@ -210,14 +214,20 @@
 
           <div class="feed" id="chat-feed"></div>
 
-          <div class="composer" style="margin-top:8px">
-            <textarea id="chat-input" class="grow" placeholder="Опишите задачу агенту. Enter — отправить, Shift+Enter — новая строка."></textarea>
+          <!-- Прикреплённые файлы и скриншоты: ложатся во временную папку
+               проекта и уходят агенту ссылками прямо в задаче -->
+          <div class="attach-bar hidden" id="chat-attachments"></div>
+
+          <div class="composer" id="chat-composer" style="margin-top:8px">
+            <textarea id="chat-input" class="grow" placeholder="Опишите задачу агенту. Enter — отправить, Shift+Enter — новая строка. Скриншот можно вставить из буфера (Ctrl+V) или перетащить файл сюда."></textarea>
             <div class="composer-actions">
               <button class="btn primary" id="btn-chat-send">⚡ Отправить</button>
+              <button class="btn small" id="btn-chat-attach">📎 Файл / скриншот</button>
               <button class="btn small" id="btn-chat-terminal">🚀 Внешний терминал</button>
             </div>
+            <input type="file" id="chat-file-input" multiple hidden />
           </div>
-          <div class="dim">Enter — отправить · Shift+Enter — новая строка</div>
+          <div class="dim" id="composer-hint">Enter — отправить · Shift+Enter — новая строка · Ctrl+V вставляет скриншот · перетащите файлы в поле ввода</div>
         </div>
       </div>
     </section>
@@ -309,8 +319,31 @@
 
           <label class="check"><input type="checkbox" id="set-notify" /> 🔔 Уведомления Windows о завершении чатов</label>
 
+          <label class="check"><input type="checkbox" id="set-reset-launch" /> ♻️ Сбрасывать кеш и прогресс игры при каждом запуске</label>
+          <div class="dim">
+            Перед стартом сносятся <code>node_modules/.vite</code>, <code>dist</code> и прочие кеши сборщика,
+            Vite поднимается с <code>--force</code>, а игра открывается на новом порту — значит с пустым
+            <code>localStorage</code>, то есть без прошлого прогресса и сохранений.
+          </div>
+
           <button class="btn ok big" id="btn-save-settings">💾 СОХРАНИТЬ НАСТРОЙКИ В .ENV</button>
           <div class="small" style="color:var(--ok)" id="settings-msg"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🔊 Fish Audio — озвучка голосов</h3>
+          <div class="dim">
+            Ключ берётся на <code>fish.audio</code> → API Keys. Генерацию запускает только человек,
+            во вкладке проекта «🔊 Озвучка» — агенты фабрики к TTS не обращаются.
+          </div>
+          <label class="field">API-ключ
+            <input type="password" id="set-fish-key" placeholder="ключ Fish Audio" />
+          </label>
+          <label class="field">Модель синтеза<select id="set-fish-model"></select></label>
+          <div class="row">
+            <button class="btn small" id="btn-fish-test">🔌 Проверить Fish Audio</button>
+            <span class="small" id="fish-msg"></span>
+          </div>
         </div>
       </div>
     </section>

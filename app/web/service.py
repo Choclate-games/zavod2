@@ -13,6 +13,7 @@ HTTP-запросы и отдаёт события браузеру через �
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from app import chat_store, design_os, notify, project_meta, sandbox, snapshots
+from app import chat_store, design_os, notify, project_meta, sandbox, snapshots, uploads
 from app.chat_jobs import ChatJobManager
 from app.config import BASE_DIR, DESIGN_OS_ENABLED, config
 from app.context import GenerationContext
@@ -37,6 +38,8 @@ from app.web.bus import bus
 
 from providers.agent_usage import AgentUsageTracker
 from providers.agy import AGYProvider, AGYQuotaTracker
+from providers.fish_audio import FishAudioClient, FishAudioError, FORMATS as TTS_FORMATS, \
+    FREE_MODEL as TTS_FREE_MODEL, MODELS as TTS_MODELS
 from providers.cli_agents import AGENT_CLASSES, make_cli_agent
 from providers.factory import ProviderFactory
 from providers.quota_probe import read_live_quota
@@ -186,7 +189,11 @@ MAX_STUDIO_LOG_LINES = 3000
 MAX_PLAY_LOG_LINES = 1500
 
 # Сколько времени завершённый чат ещё висит в панели активности сайдбара.
+# Раньше — если пользователь сам не убрал тему крестиком (см. dismiss_activity).
 RECENT_CHAT_WINDOW_SECONDS = 15 * 60
+
+# Куда складываются реплики, озвученные через Fish Audio.
+TTS_DIRNAME = Path("assets") / "audio" / "voice"
 
 
 def _epoch(iso: str) -> float:
@@ -244,8 +251,14 @@ class FactoryService:
         self._live_quota: Optional[Dict[str, Any]] = None
         self._quota_probe_running = False
 
+        # Порт прошлого запуска игры: следующий раз поднимаем её на другом, чтобы
+        # localStorage (а с ним и прогресс) стартовал пустым.
+        self._last_ports: Dict[str, int] = {}
+
         self.append_log("Система готова к разработке. Опишите идею и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ».")
         register_log_listener(self._on_global_log_event)
+        # Вложения чата живут неделю — подметаем просроченные при старте фабрики.
+        uploads.cleanup_async()
 
     # =====================================================================
     # Студия: журнал и прогресс
@@ -648,7 +661,7 @@ class FactoryService:
             created_at = meta.get("created_at") or ""
             projects.append({
                 "slug": slug,
-                "title": data.get("title", slug),
+                "title": meta.get("title") or data.get("title", slug),
                 "genre": data.get("genre", "Проект без спецификации"),
                 "renderer": str(data.get("renderer", "")).upper() or "—",
                 "score": (data.get("scores") or {}).get("overall_score", "-"),
@@ -702,6 +715,54 @@ class FactoryService:
             "message": "📦 Игра убрана в архив" if archived else "↩️ Игра возвращена из архива",
         }
 
+    def project_title(self, slug: str) -> str:
+        """Как игра называется сейчас: имя от пользователя важнее имени из спеки."""
+        meta = project_meta.get(slug)
+        data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
+        return meta.get("title") or data.get("title") or slug
+
+    def rename_project(self, slug: str, title: str) -> Dict[str, Any]:
+        """
+        Меняет название игры.
+
+        Слаг (имя каталога) остаётся прежним: на него завязаны чаты, снимки для
+        отката, dev-серверы и ссылки в документах — переименование папки под
+        работающим агентом сломало бы всё это разом. Меняется отображаемое имя:
+        оно ложится в реестр проектов и, если спека существует, в GAME_DATA.yaml —
+        чтобы агент видел то же название, что и пользователь.
+        """
+        title = " ".join((title or "").split())
+        if len(title) > 120:
+            return {"status": "error", "message": "Название длиннее 120 символов."}
+
+        try:
+            data_path = sandbox.docs_dir(slug) / "GAME_DATA.yaml"
+        except sandbox.SandboxViolation as exc:
+            return {"status": "error", "message": str(exc)}
+
+        meta = project_meta.set_title(slug, title)
+        spec_title = ""
+        if data_path.exists():
+            data = self._read_yaml(data_path)
+            spec_title = data.get("title") or slug
+            if title and data.get("title") != title:
+                data["title"] = title
+                try:
+                    with open(data_path, "w", encoding="utf-8") as f:
+                        yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+                except OSError as exc:
+                    self.append_log(f"⚠️ Название сохранено в реестре, но не в GAME_DATA.yaml: {exc}")
+
+        final = meta.get("title") or spec_title or slug
+        bus.publish("projects.changed")
+        self.append_log(f"✏️ Проект {slug} переименован в «{final}»")
+        return {
+            "status": "success",
+            "title": final,
+            "message": (f"✏️ Игра переименована: «{final}»" if title
+                        else f"↩️ Возвращено название из спецификации: «{final}»"),
+        }
+
     def delete_project(self, slug: str) -> Dict[str, Any]:
         """Полное удаление игры: код, спецификация и запись в реестре."""
         try:
@@ -737,7 +798,9 @@ class FactoryService:
         meta = project_meta.get(slug)
         return {
             "slug": slug,
-            "title": data.get("title", slug),
+            "title": meta.get("title") or data.get("title", slug),
+            "spec_title": data.get("title", slug),
+            "renamed": bool(meta.get("title")),
             "genre": data.get("genre", ""),
             "renderer": str(data.get("renderer", "")).upper(),
             "score": (data.get("scores") or {}).get("overall_score", "N/A"),
@@ -996,13 +1059,57 @@ class FactoryService:
                 return candidate
         return chat_store.create_session(slug)
 
+    # ── Вложения чата: скриншоты и файлы во временной папке проекта ────────
+
+    def _resolve_attachments(self, slug: str, names: Optional[List[str]]) -> List[Dict[str, Any]]:
+        """Оставляет только те вложения, которые реально лежат на диске."""
+        resolved: List[Dict[str, Any]] = []
+        known = {item["name"]: item for item in uploads.list_files(slug)}
+        for name in names or []:
+            item = known.get(str(name))
+            if item:
+                resolved.append(item)
+        return resolved
+
+    def save_upload(self, slug: str, filename: str, payload: str) -> Dict[str, Any]:
+        try:
+            sandbox.project_dir(slug)
+        except sandbox.SandboxViolation as exc:
+            return {"status": "error", "message": str(exc)}
+        try:
+            item = uploads.save(slug, filename, payload)
+        except uploads.UploadError as exc:
+            return {"status": "error", "message": str(exc)}
+        except OSError as exc:
+            return {"status": "error", "message": f"Не удалось сохранить файл: {exc}"}
+        return {"status": "success", "file": item}
+
+    def list_uploads(self, slug: str) -> Dict[str, Any]:
+        return {
+            "files": uploads.list_files(slug),
+            "dir": uploads.relative_path("").rstrip("/"),
+            "max_age_days": uploads.MAX_AGE_DAYS,
+        }
+
+    def delete_upload(self, slug: str, name: str) -> Dict[str, Any]:
+        if uploads.delete(slug, name):
+            return {"status": "success", "message": "🗑 Вложение удалено"}
+        return {"status": "error", "message": "Вложение не найдено."}
+
+    def upload_path(self, slug: str, name: str) -> Optional[Path]:
+        return uploads.resolve(slug, name)
+
     def send_chat_task(self, slug: str, session_id: Optional[str], prompt: str, *,
                        agent_key: str, model: Optional[str], yolo: bool,
-                       continue_dialog: bool) -> Dict[str, Any]:
+                       continue_dialog: bool,
+                       attachments: Optional[List[str]] = None) -> Dict[str, Any]:
         """Запускает задачу агента в чате проекта (аналог «⚡ Отправить»)."""
         prompt = (prompt or "").strip()
-        if not prompt:
+        attached = self._resolve_attachments(slug, attachments)
+        if not prompt and not attached:
             return {"status": "error", "message": "Пустая задача."}
+        if not prompt:
+            prompt = "Посмотри приложенные файлы и скажи, что с ними делать."
         try:
             proj_dir = sandbox.project_dir(slug)
         except sandbox.SandboxViolation as exc:
@@ -1016,8 +1123,7 @@ class FactoryService:
                     "message": "В этом чате агент ещё работает. Создайте новый чат — "
                                "несколько чатов спокойно идут параллельно."}
 
-        data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
-        title = data.get("title", slug)
+        title = self.project_title(slug)
 
         # ID беседы принадлежит конкретному CLI: возобновлять можно только чат,
         # который вёл тот же агент.
@@ -1028,11 +1134,17 @@ class FactoryService:
         else:
             resume_id, history = None, None
 
-        spec_file = self.resolve_doc_path(slug, "AI_DEVELOPER_PROMPT.md")
         task_text = prompt
+        # Ссылки на вложения идут сразу после задачи — до выдержки из спеки,
+        # чтобы агент увидел их раньше, чем длинный кусок документации.
+        attachment_block = uploads.prompt_block(attached)
+        if attachment_block:
+            task_text = f"{task_text}\n\n{attachment_block}"
+
+        spec_file = self.resolve_doc_path(slug, "AI_DEVELOPER_PROMPT.md")
         if spec_file.exists():
             spec = spec_file.read_text(encoding="utf-8")[:2500]
-            task_text = f"{prompt}\n\n[ВЫДЕРЖКА ИЗ СПЕЦИФИКАЦИИ AI_DEVELOPER_PROMPT.md]\n{spec}"
+            task_text = f"{task_text}\n\n[ВЫДЕРЖКА ИЗ СПЕЦИФИКАЦИИ AI_DEVELOPER_PROMPT.md]\n{spec}"
 
         full_prompt = sandbox.build_agent_prompt(
             task=task_text, directory=proj_dir, title=title, history=history
@@ -1041,20 +1153,25 @@ class FactoryService:
         session.model = model
         session.agent = agent_key
 
+        # В ленте чата запрос остаётся вместе со ссылками на вложения: иначе
+        # через неделю непонятно, какой скриншот обсуждали.
+        visible_prompt = prompt + uploads.links_note(attached)
+
         # Снимок делаем до запуска агента: он и есть точка отката этого запроса.
         snapshot = snapshots.create_snapshot(slug, f"{session.id} · {prompt[:60]}")
-        chat_store.append_message(slug, session, "user", prompt, snapshot=snapshot)
+        chat_store.append_message(slug, session, "user", visible_prompt, snapshot=snapshot)
 
         session_id = session.id
         answer_chunks: List[str] = []
 
         start_events = [
-            {"kind": "user", "text": prompt,
+            {"kind": "user", "text": visible_prompt,
              "index": len(session.messages) - 1, "undoable": bool(snapshot)},
             {"kind": "system", "icon": "⚡",
              "text": f"Запуск {AGENT_LABELS.get(agent_key, agent_key)} · проект {slug}"
                      f" · модель {model or 'по умолчанию'}"
                      f" · YOLO: {'вкл' if yolo else 'выкл'}"
+                     + (f" · вложений {len(attached)} 📎" if attached else "")
                      + (" · продолжение беседы 🔗" if resume_id else "")
                      + (" · снимок для отката ↩" if snapshot else " · снимок не создан, откат недоступен")},
         ]
@@ -1298,6 +1415,33 @@ class FactoryService:
     def activity(self) -> Dict[str, Any]:
         return {"chats": self.activity_chats(), "servers": self.running_servers()}
 
+    def dismiss_activity(self, session_id: str) -> Dict[str, Any]:
+        """
+        Убирает завершённую тему из панели активности.
+
+        Сам чат остаётся на месте — уходит только запись о запуске, поэтому
+        панель показывает то, что интересно пользователю, а не всё подряд.
+        """
+        outcome = self.chat_jobs.dismiss(session_id)
+        if outcome == "running":
+            return {"status": "error",
+                    "message": "В этой теме агент ещё работает — сначала нажмите «⏹ Стоп»."}
+        if not outcome:
+            return {"status": "error", "message": "Такой темы в панели уже нет."}
+        bus.publish("activity.changed")
+        return {"status": "success", "message": "Тема убрана из панели активности."}
+
+    def clear_activity(self) -> Dict[str, Any]:
+        """Чистит панель разом: работающие темы остаются."""
+        removed = self.chat_jobs.dismiss_finished()
+        bus.publish("activity.changed")
+        return {
+            "status": "success",
+            "removed": removed,
+            "message": (f"Убрано тем: {removed}" if removed
+                        else "Убирать нечего — все темы ещё в работе."),
+        }
+
     # =====================================================================
     # Терминальные агенты
     # =====================================================================
@@ -1399,6 +1543,7 @@ class FactoryService:
             "url": entry["url"],
             "logs": "".join(entry["logs"]),
             "playable": self.project_is_playable(slug),
+            "reset_on_launch": bool(config.reset_game_on_launch),
         }
 
     def start_play(self, slug: str) -> Dict[str, Any]:
@@ -1423,9 +1568,25 @@ class FactoryService:
 
         def on_url(url: str) -> None:
             entry["url"] = url
+            port = _port_of(url)
+            if port:
+                self._last_ports[slug] = port
             bus.publish("play.url", slug=slug, url=url)
 
-        server = DevServer(proj_dir, on_log=lambda m: self._play_log(slug, m), on_url=on_url)
+        # Чистый лист при каждом запуске: сносим кеш сборщика и просим другой
+        # порт. Порт входит в origin, а к origin привязано хранилище браузера —
+        # значит игра стартует и без старого кеша, и без старого прогресса.
+        reset = bool(config.reset_game_on_launch)
+        if reset:
+            self._play_log(slug, "♻️ Запуск с чистого листа: сброс кеша сборки и прогресса игры.")
+
+        server = DevServer(
+            proj_dir,
+            on_log=lambda m: self._play_log(slug, m),
+            on_url=on_url,
+            reset_state=reset,
+            avoid_port=self._last_ports.get(slug),
+        )
         entry["server"] = server
         entry["url"] = None
         entry["starting"] = True
@@ -1689,6 +1850,116 @@ class FactoryService:
         threading.Thread(target=run, daemon=True).start()
 
     # =====================================================================
+    # Озвучка: Fish Audio TTS
+    #
+    # Ни один агент фабрики сюда не ходит. Синтез запускается только из вкладки
+    # «🔊 Озвучка» — то есть по прямому действию пользователя.
+    # =====================================================================
+
+    def tts_client(self) -> FishAudioClient:
+        return FishAudioClient(api_key=config.fish_audio_api_key,
+                               model=config.fish_audio_model)
+
+    def tts_state(self) -> Dict[str, Any]:
+        return {
+            "configured": bool((config.fish_audio_api_key or "").strip()),
+            "model": config.fish_audio_model or TTS_FREE_MODEL,
+            "free_model": TTS_FREE_MODEL,
+            "models": TTS_MODELS,
+            "formats": TTS_FORMATS,
+            "dir": TTS_DIRNAME.as_posix(),
+        }
+
+    def tts_voices(self, query: str = "", limit: int = 24) -> Dict[str, Any]:
+        try:
+            return {"status": "success", "voices": self.tts_client().list_voices(query, limit)}
+        except FishAudioError as exc:
+            return {"status": "error", "message": str(exc), "voices": []}
+
+    def _tts_dir(self, slug: str) -> Path:
+        directory = sandbox.ensure_inside_workspace(sandbox.project_dir(slug) / TTS_DIRNAME)
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def tts_files(self, slug: str) -> List[Dict[str, Any]]:
+        try:
+            directory = self._tts_dir(slug)
+        except (sandbox.SandboxViolation, OSError):
+            return []
+        rows: List[Dict[str, Any]] = []
+        for path in directory.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            rows.append({
+                "name": path.name,
+                "rel": f"{TTS_DIRNAME.as_posix()}/{path.name}",
+                "size_label": f"{stat.st_size / 1024:.0f} КБ",
+                "created": datetime.fromtimestamp(stat.st_mtime).strftime("%d.%m %H:%M"),
+                "created_ts": stat.st_mtime,
+            })
+        return sorted(rows, key=lambda row: row["created_ts"], reverse=True)
+
+    def tts_generate(self, slug: str, text: str, *, voice_id: str = "",
+                     name: str = "", fmt: str = "mp3") -> Dict[str, Any]:
+        """Озвучивает реплику и кладёт файл в assets/audio/voice/ проекта."""
+        try:
+            directory = self._tts_dir(slug)
+        except sandbox.SandboxViolation as exc:
+            return {"status": "error", "message": str(exc)}
+
+        try:
+            audio = self.tts_client().synthesize(
+                text, reference_id=(voice_id or "").strip() or None, fmt=fmt
+            )
+        except FishAudioError as exc:
+            self.append_log(f"❌ Fish Audio: {exc}")
+            return {"status": "error", "message": str(exc)}
+
+        fmt = fmt if fmt in TTS_FORMATS else "mp3"
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "-", (name or "").strip()).strip("-")
+        if not stem:
+            stem = re.sub(r"[^A-Za-z0-9]+", "-", " ".join(text.split())[:32]).strip("-").lower() or "voice"
+        filename = f"{stem}-{datetime.now().strftime('%H%M%S')}.{fmt}"
+
+        try:
+            (directory / filename).write_bytes(audio)
+        except OSError as exc:
+            return {"status": "error", "message": f"Не удалось сохранить аудио: {exc}"}
+
+        rel = f"{TTS_DIRNAME.as_posix()}/{filename}"
+        self.append_log(f"🔊 Fish Audio: озвучена реплика для {slug} → {rel}")
+        bus.publish("projects.changed")
+        return {"status": "success", "name": filename, "rel": rel,
+                "message": f"🔊 Готово: {rel}"}
+
+    def tts_delete(self, slug: str, name: str) -> Dict[str, Any]:
+        safe = re.sub(r"[^A-Za-z0-9._-]", "", name or "")
+        if not safe or safe != (name or "").strip():
+            return {"status": "error", "message": "Некорректное имя файла."}
+        path = self._tts_dir(slug) / safe
+        if not path.is_file():
+            return {"status": "error", "message": "Файл не найден."}
+        try:
+            path.unlink()
+        except OSError as exc:
+            return {"status": "error", "message": str(exc)}
+        return {"status": "success", "message": "🗑 Реплика удалена"}
+
+    def tts_file_path(self, slug: str, name: str) -> Optional[Path]:
+        safe = re.sub(r"[^A-Za-z0-9._-]", "", name or "")
+        if not safe or safe != (name or "").strip():
+            return None
+        path = self._tts_dir(slug) / safe
+        return path if path.is_file() else None
+
+    def tts_test(self) -> Dict[str, Any]:
+        return self.tts_client().test_connection()
+
+    # =====================================================================
     # Настройки
     # =====================================================================
 
@@ -1716,6 +1987,13 @@ class FactoryService:
             "workspace_dir": str(config.output_dir),
             "notifications": notify.notifications_enabled(),
             "sandbox_root": str(sandbox.workspace_root()),
+            "reset_game_on_launch": bool(config.reset_game_on_launch),
+            "fish_audio": {
+                "api_key": config.fish_audio_api_key or "",
+                "model": config.fish_audio_model or TTS_FREE_MODEL,
+                "models": TTS_MODELS,
+                "free_model": TTS_FREE_MODEL,
+            },
         }
 
     def save_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1765,6 +2043,23 @@ class FactoryService:
             enabled = bool(payload["notifications"])
             notify.set_notifications_enabled(enabled)
             env_lines[notify.ENV_KEY] = "1" if enabled else "0"
+
+        if "reset_game_on_launch" in payload:
+            reset = bool(payload["reset_game_on_launch"])
+            config.reset_game_on_launch = reset
+            env_lines["RESET_GAME_ON_LAUNCH"] = "1" if reset else "0"
+
+        fish = payload.get("fish_audio") or {}
+        if "api_key" in fish:
+            key = (fish.get("api_key") or "").strip()
+            config.fish_audio_api_key = key
+            env_lines["FISH_AUDIO_API_KEY"] = key
+        if "model" in fish:
+            model = (fish.get("model") or "").strip() or TTS_FREE_MODEL
+            known = {item["key"] for item in TTS_MODELS}
+            model = model if model in known else TTS_FREE_MODEL
+            config.fish_audio_model = model
+            env_lines["FISH_AUDIO_MODEL"] = model
 
         for key, value in env_lines.items():
             os.environ[key] = value
@@ -1828,6 +2123,10 @@ class FactoryService:
             "doc_tabs": DOC_TABS,
             "rebuild_sections": REBUILD_SECTIONS,
             "model_default": MODEL_DEFAULT,
+            "tts": self.tts_state(),
+            "uploads": {"max_age_days": uploads.MAX_AGE_DAYS,
+                        "max_mb": uploads.MAX_BYTES // (1024 * 1024),
+                        "dir": uploads.UPLOADS_DIRNAME.as_posix()},
             "settings": self.settings_payload(),
             "studio": self.studio_state(),
             "running_chats": self.running_chats(),

@@ -25,7 +25,15 @@ REGISTRY_NAME = Path(".factory") / "projects.json"
 
 _lock = threading.Lock()
 
-DEFAULT_META: Dict[str, Any] = {"rating": 0, "archived": False, "created_at": "", "archived_at": ""}
+DEFAULT_META: Dict[str, Any] = {
+    "rating": 0,
+    "archived": False,
+    "created_at": "",
+    "archived_at": "",
+    # Название, которое дал игре пользователь. Пустое — берём title из
+    # GAME_DATA.yaml. Хранится здесь, потому что спеку переписывают агенты.
+    "title": "",
+}
 
 
 def _registry_path() -> Path:
@@ -90,6 +98,11 @@ def update(slug: str, **fields: Any) -> Dict[str, Any]:
 
 def set_rating(slug: str, rating: int) -> Dict[str, Any]:
     return update(slug, rating=max(0, min(5, int(rating))))
+
+
+def set_title(slug: str, title: str) -> Dict[str, Any]:
+    """Пользовательское имя игры. Пустая строка возвращает название из спеки."""
+    return update(slug, title=(title or "").strip())
 
 
 def set_archived(slug: str, archived: bool) -> Dict[str, Any]:

@@ -40,6 +40,9 @@ const state = {
   docRaw: false,
   docContent: "",
   ideas: [],
+  attachments: [],    // вложения, готовые уйти со следующим сообщением агенту
+  ttsVoices: [],
+  ttsVoice: localStorage.getItem("ttsVoice") || "",
   playSlug: null,
   gameTabs: {},        // slug → вкладка браузера, которая ждёт URL dev-сервера
   servers: [],
@@ -271,6 +274,28 @@ async function toggleArchive(project) {
   refreshProjectViews();
 }
 
+/* Переименование игры: меняется отображаемое имя, слаг каталога остаётся —
+   на него завязаны чаты, снимки для отката и запущенные dev-серверы. */
+async function renameProject(project) {
+  const current = project.title || project.slug;
+  const next = prompt(
+    `Новое название игры «${current}»\n\n`
+    + `Папка проекта (${project.slug}) не переименовывается: на неё ссылаются чаты,\n`
+    + `снимки для отката и запущенные серверы.\n`
+    + `Новое имя попадёт и в GAME_DATA.yaml — агент увидит игру так же, как вы.`,
+    current);
+  if (next === null) return;
+
+  const res = await api(`/api/projects/${encodeURIComponent(project.slug)}/rename`,
+    { body: { title: next } });
+  if (res.status === "error") { toast("Переименование", res.message, "err"); return; }
+  project.title = res.title;
+  if (state.detail && state.detail.slug === project.slug) state.detail.title = res.title;
+  toast("Переименование", res.message, "ok");
+  refreshProjectViews();
+  loadChats();
+}
+
 async function deleteProject(project) {
   const ok = confirm(
     `Удалить игру «${project.title}» безвозвратно?
@@ -346,13 +371,16 @@ async function loadGallery() {
     play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
     const open = el("button", "btn small", "📄 ТЗ");
     open.onclick = (e) => { e.stopPropagation(); selectProject(p.slug); };
-    const archive = el("button", "btn small", p.archived ? "↩️" : "📦");
+    const rename = el("button", "btn small icon-only", "✏️");
+    rename.title = "Переименовать игру";
+    rename.onclick = (e) => { e.stopPropagation(); renameProject(p); };
+    const archive = el("button", "btn small icon-only", p.archived ? "↩️" : "📦");
     archive.title = p.archived ? "Вернуть из архива" : "Убрать в архив (игра останется на диске)";
     archive.onclick = (e) => { e.stopPropagation(); toggleArchive(p); };
     const remove = el("button", "btn small danger", "🗑");
     remove.title = "Удалить игру безвозвратно";
     remove.onclick = (e) => { e.stopPropagation(); deleteProject(p); };
-    actions.append(play, open, archive, remove);
+    actions.append(play, open, rename, archive, remove);
     card.appendChild(actions);
 
     card.onclick = () => selectProject(p.slug);
@@ -491,6 +519,7 @@ function renderProjectBanner() {
 }
 
 async function selectProject(slug) {
+  if (state.project !== slug) clearAttachments();
   state.project = slug;
   localStorage.setItem("project", slug);
   state.session = null;
@@ -512,6 +541,7 @@ function docTabButtons() {
     ...(state.boot.design_os_enabled ? [{ key: "__designos", label: "🧠 Design OS" }] : []),
     ...state.boot.doc_tabs,
     { key: "__preview", label: "🎨 Превью" },
+    { key: "__tts", label: "🔊 Озвучка" },
     { key: "__rebuild", label: "🔄 Ребилд" },
   ];
   tabs.forEach((tab) => {
@@ -533,6 +563,7 @@ async function openDoc(key) {
     return;
   }
   if (key === "__preview") { renderPreviewPane(); return; }
+  if (key === "__tts") { renderTtsPane(); return; }
   if (key === "__rebuild") { renderRebuildPane(); return; }
 
   $("doc-actions").classList.remove("hidden");
@@ -751,6 +782,148 @@ async function renderPreviewPane() {
   pane.appendChild(box);
 
   view.appendChild(pane);
+}
+
+/* ── Озвучка: Fish Audio TTS ──────────────────────────────────────────────
+ *
+ * Синтез запускается только отсюда, кнопкой пользователя: озвучка тратит квоту
+ * аккаунта, поэтому агентам фабрики она недоступна. Готовые реплики ложатся
+ * в assets/audio/voice/ проекта — агент подключит уже существующие файлы.
+ */
+
+async function renderTtsPane() {
+  $("doc-actions").classList.add("hidden");
+  const view = $("doc-view");
+  view.className = "doc-view grow";
+  view.innerHTML = "";
+
+  const tts = state.boot.tts || {};
+  const pane = el("div", "tts-pane");
+
+  pane.appendChild(el("div", "small dim",
+    `Голоса синтезирует Fish Audio, модель ${esc(tts.model || tts.free_model)}`
+    + (tts.model === tts.free_model ? " (бесплатная)" : " (платная)")
+    + `. Файлы сохраняются в ${esc(tts.dir)} проекта. `
+    + "Генерацию запускаете только вы — агенты фабрики TTS не вызывают."));
+
+  if (!tts.configured) {
+    const warn = el("div", "dos-warn",
+      "⚠ Не задан ключ Fish Audio. Откройте «⚙️ Настройки → 🔊 Fish Audio» и вставьте ключ с fish.audio.");
+    pane.appendChild(warn);
+    const go = el("button", "btn", "⚙️ Перейти в настройки");
+    go.onclick = () => showView("settings");
+    pane.appendChild(go);
+    view.appendChild(pane);
+    return;
+  }
+
+  // ── Текст реплики ──
+  const text = el("textarea");
+  text.rows = 4;
+  text.placeholder = "Текст реплики: «Внимание! Волна боссов через десять секунд.»";
+  pane.appendChild(el("div", "small muted", "Текст для озвучки"));
+  pane.appendChild(text);
+
+  // ── Голос ──
+  const voiceRow = el("div", "row");
+  const voice = el("select");
+  voice.style.flex = "1";
+  const fillVoices = () => {
+    voice.innerHTML = "";
+    voice.appendChild(new Option("🎙 голос по умолчанию (без reference_id)", ""));
+    state.ttsVoices.forEach((v) => voice.appendChild(new Option(
+      `${v.title}${v.languages && v.languages.length ? " · " + v.languages.join("/") : ""}`, v.id)));
+    if (state.ttsVoice && [...voice.options].some((o) => o.value === state.ttsVoice)) {
+      voice.value = state.ttsVoice;
+    }
+  };
+  fillVoices();
+  voice.onchange = () => {
+    state.ttsVoice = voice.value;
+    localStorage.setItem("ttsVoice", state.ttsVoice);
+  };
+
+  const search = el("input");
+  search.type = "text";
+  search.placeholder = "поиск голоса: russian, narrator, anime…";
+  search.style.flex = "0 0 220px";
+  const loadVoices = async () => {
+    const res = await api(`/api/tts/voices?query=${encodeURIComponent(search.value.trim())}`);
+    if (res.status === "error") { toast("Голоса", res.message, "err"); return; }
+    state.ttsVoices = res.voices || [];
+    fillVoices();
+    toast("Голоса", `Найдено: ${state.ttsVoices.length}`, state.ttsVoices.length ? "ok" : "warn");
+  };
+  const find = el("button", "btn small", "🔎 Найти голоса");
+  find.onclick = loadVoices;
+  voiceRow.append(voice, search, find);
+  pane.appendChild(el("div", "small muted", "Голос из каталога Fish Audio"));
+  pane.appendChild(voiceRow);
+
+  // ── Имя файла и формат ──
+  const metaRow = el("div", "row");
+  const name = el("input");
+  name.type = "text";
+  name.placeholder = "имя файла, напр. boss-warning";
+  name.style.flex = "1";
+  const format = el("select");
+  format.style.flex = "0 0 120px";
+  (tts.formats || ["mp3"]).forEach((f) => format.appendChild(new Option(f, f)));
+  metaRow.append(name, format);
+  pane.appendChild(el("div", "small muted", "Имя файла и формат"));
+  pane.appendChild(metaRow);
+
+  const status = el("div", "small", "");
+  const files = el("div", "tts-files");
+
+  const loadFiles = async () => {
+    const res = await api(`/api/tts/${encodeURIComponent(state.project)}/files`);
+    files.innerHTML = "";
+    if (!(res.files || []).length) {
+      files.appendChild(el("div", "muted small", "Озвученных реплик пока нет."));
+      return;
+    }
+    res.files.forEach((f) => {
+      const row = el("div", "tts-row");
+      row.appendChild(el("div", "grow small", `🔊 ${esc(f.name)} · ${esc(f.size_label)} · ${esc(f.created)}`));
+      const audio = el("audio");
+      audio.controls = true;
+      audio.preload = "none";
+      audio.src = `/api/tts/${encodeURIComponent(state.project)}/file/${encodeURIComponent(f.name)}`;
+      row.appendChild(audio);
+      const del = el("button", "btn small danger", "🗑");
+      del.onclick = async () => {
+        const res = await api(`/api/tts/${encodeURIComponent(state.project)}/file/${encodeURIComponent(f.name)}`,
+          { method: "DELETE" });
+        toast("Озвучка", res.message || "", res.status === "success" ? "ok" : "err");
+        loadFiles();
+      };
+      row.appendChild(del);
+      files.appendChild(row);
+    });
+  };
+
+  const generate = el("button", "btn primary big", "🔊 Озвучить реплику");
+  generate.onclick = async () => {
+    if (!text.value.trim()) { toast("Озвучка", "Введите текст реплики.", "warn"); return; }
+    generate.disabled = true;
+    generate.textContent = "⏳ Синтезирую…";
+    status.style.color = "var(--accent)";
+    status.textContent = "Fish Audio генерирует аудио…";
+    const res = await api(`/api/tts/${encodeURIComponent(state.project)}/generate`, {
+      body: { text: text.value, voice_id: voice.value, name: name.value, format: format.value },
+    });
+    generate.disabled = false;
+    generate.textContent = "🔊 Озвучить реплику";
+    status.style.color = res.status === "success" ? "var(--ok)" : "var(--err)";
+    status.textContent = res.message || "";
+    if (res.status === "success") loadFiles();
+  };
+  pane.append(generate, status, el("h3", "", "🎧 Готовые реплики проекта"), files);
+
+  view.appendChild(pane);
+  loadFiles();
+  if (!state.ttsVoices.length) loadVoices();
 }
 
 function renderRebuildPane() {
@@ -1132,9 +1305,86 @@ function toggleAllBlocks() {
   $("btn-chat-expand").textContent = expand ? "↕ Свернуть всё" : "↕ Развернуть всё";
 }
 
+/* ── Вложения чата: скриншоты и файлы ─────────────────────────────────────
+ *
+ * Файл уезжает на бэкенд сразу при выборе и ложится во временную папку игры
+ * (.factory/uploads). В момент отправки задачи агенту уходят только имена —
+ * бэкенд подставит в промпт относительные пути, по которым агент их прочитает.
+ * Папка временная: всё старше недели фабрика убирает сама.
+ */
+
+function renderAttachments() {
+  const bar = $("chat-attachments");
+  bar.innerHTML = "";
+  bar.classList.toggle("hidden", !state.attachments.length);
+  if (!state.attachments.length) return;
+
+  state.attachments.forEach((file) => {
+    const chip = el("div", "attach-chip");
+    if (file.is_image) {
+      const img = el("img");
+      img.src = `/api/uploads/${encodeURIComponent(state.project)}/file/${encodeURIComponent(file.name)}`;
+      img.loading = "lazy";
+      chip.appendChild(img);
+    } else chip.appendChild(el("span", "attach-icon", "📄"));
+
+    const info = el("div", "attach-info");
+    info.appendChild(el("div", "attach-name", esc(file.original)));
+    info.appendChild(el("div", "attach-meta", `${esc(file.size_label)} · ${esc(file.rel)}`));
+    chip.appendChild(info);
+
+    const drop = el("button", "attach-del", "✕");
+    drop.title = "Убрать вложение и удалить файл из временной папки";
+    drop.onclick = async () => {
+      state.attachments = state.attachments.filter((f) => f.name !== file.name);
+      renderAttachments();
+      await api(`/api/uploads/${encodeURIComponent(state.project)}/file/${encodeURIComponent(file.name)}`,
+        { method: "DELETE" });
+    };
+    chip.appendChild(drop);
+    bar.appendChild(chip);
+  });
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function attachFiles(files) {
+  const list = [...(files || [])];
+  if (!list.length) return;
+  if (!state.project) { toast("Вложение", "Сначала выберите проект.", "warn"); return; }
+
+  for (const file of list) {
+    try {
+      const data = await readAsDataUrl(file);
+      const res = await api(`/api/uploads/${encodeURIComponent(state.project)}`, {
+        // Скриншот из буфера приходит без имени — бэкенд определит тип по сигнатуре.
+        body: { name: file.name || "screenshot.png", data },
+      });
+      if (res.status !== "success") { toast("Вложение", res.message || "Не принято", "err"); continue; }
+      state.attachments.push(res.file);
+    } catch (err) {
+      toast("Вложение", String(err && err.message || err), "err");
+    }
+  }
+  renderAttachments();
+}
+
+/** Файлы уже уехали на диск — после отправки задачи чистим только композер. */
+function clearAttachments() {
+  state.attachments = [];
+  renderAttachments();
+}
+
 async function sendChatTask() {
   const prompt = $("chat-input").value.trim();
-  if (!prompt) return;
+  if (!prompt && !state.attachments.length) return;
   if (!state.project) { toast("Чат", "Сначала выберите проект.", "warn"); return; }
 
   const model = $("chat-model").value;
@@ -1146,6 +1396,7 @@ async function sendChatTask() {
       model: model === state.boot.model_default ? "" : model,
       yolo: $("chk-yolo").checked,
       continue_dialog: $("chk-continue").checked,
+      attachments: state.attachments.map((file) => file.name),
     },
   });
   if (res.status !== "started") {
@@ -1155,6 +1406,7 @@ async function sendChatTask() {
   state.session = res.session.id;
   state.sessionRunning = true;
   $("chat-input").value = "";
+  clearAttachments();
   $("chat-session-name").textContent = `💬 ${res.session.title}`;
   showTyping(true);
   setChatStatus("● Выполнение...", "var(--accent)");
@@ -1202,8 +1454,20 @@ function renderActivity() {
   state.activity.forEach((item) => {
     const node = el("div", `act-item ${item.running ? "running" : item.status}`);
     node.title = `${item.title}\n${item.slug}`;
-    node.appendChild(el("div", "act-title",
+
+    const title = el("div", "act-title");
+    title.appendChild(el("span", "act-name",
       `${ACT_ICONS[item.status] || "•"} ${esc(item.title)}`));
+    // Крестик убирает тему из панели. Сама беседа остаётся в чатах проекта —
+    // уходит только строка активности.
+    const close = el("button", "act-close", "✕");
+    close.title = item.running
+      ? "Тема в работе: сначала «⏹ Стоп»"
+      : "Убрать тему из панели (чат останется)";
+    close.onclick = (e) => { e.stopPropagation(); dismissActivity(item); };
+    title.appendChild(close);
+    node.appendChild(title);
+
     node.appendChild(el("div", "act-meta", esc(
       item.running
         ? `${item.slug} · ${item.stopping ? "останавливаю" : "идёт"} ${item.duration}`
@@ -1250,6 +1514,21 @@ function renderServerStrip() {
     strip.textContent = `🎮 Запущено игр: ${live.length} · порты ${live.map((s) => s.port || "?").join(", ")}`;
     strip.onclick = () => showView("play");
   }
+}
+
+/** Убирает одну тему из панели активности (чат проекта при этом сохраняется). */
+async function dismissActivity(item) {
+  const res = await api(`/api/activity/${encodeURIComponent(item.session_id)}`, { method: "DELETE" });
+  if (res.status === "error") { toast("Активность", res.message, "warn"); return; }
+  state.activity = state.activity.filter((row) => row.session_id !== item.session_id);
+  renderActivity();
+  loadActivity();
+}
+
+async function clearActivity() {
+  const res = await api("/api/activity/clear", { method: "POST" });
+  toast("Активность", res.message || "", res.removed ? "ok" : "");
+  loadActivity();
 }
 
 function startActivityTimer() {
@@ -1375,9 +1654,24 @@ function openGameTab(slug) {
   return tab;
 }
 
+/**
+ * Адрес игры для запуска «с чистого листа».
+ *
+ * Сам сброс делает бэкенд (сносит кеш сборщика и поднимает сервер на новом
+ * порту — а значит, с пустым localStorage). Здесь добавляем метку времени,
+ * чтобы браузер не отдал страницу и ассеты из своего HTTP-кеша.
+ */
+function freshUrl(url) {
+  if (!url) return url;
+  const settings = (state.boot && state.boot.settings) || {};
+  if (!settings.reset_game_on_launch) return url;
+  return url + (url.includes("?") ? "&" : "?") + "factory_fresh=" + Date.now();
+}
+
 function navigateGameTab(tab, url) {
-  if (!tab || tab.closed) { window.open(url, "_blank", "noopener"); return; }
-  try { tab.location.replace(url); } catch { tab.location = url; }
+  const target = freshUrl(url);
+  if (!tab || tab.closed) { window.open(target, "_blank", "noopener"); return; }
+  try { tab.location.replace(target); } catch { tab.location = target; }
   try { tab.focus(); } catch { /* фокус не обязателен */ }
 }
 
@@ -1641,6 +1935,14 @@ function renderSettings() {
   $("set-workspace").value = settings.workspace_dir;
   $("set-notify").checked = settings.notifications;
   $("chk-notify").checked = settings.notifications;
+  $("set-reset-launch").checked = !!settings.reset_game_on_launch;
+
+  const fish = settings.fish_audio || {};
+  $("set-fish-key").value = fish.api_key || "";
+  const fishModel = $("set-fish-model");
+  fishModel.innerHTML = "";
+  (fish.models || []).forEach((m) => fishModel.appendChild(new Option(m.label, m.key)));
+  fishModel.value = fish.model || fish.free_model || "";
 
   const defaults = $("set-default-agent");
   defaults.innerHTML = "";
@@ -1660,11 +1962,14 @@ async function saveSettings() {
       default_agent: $("set-default-agent").value,
       workspace_dir: $("set-workspace").value.trim(),
       notifications: $("set-notify").checked,
+      reset_game_on_launch: $("set-reset-launch").checked,
+      fish_audio: { api_key: $("set-fish-key").value.trim(), model: $("set-fish-model").value },
     },
   });
   $("settings-msg").textContent = res.message || "";
   setTimeout(() => { $("settings-msg").textContent = ""; }, 3000);
   state.boot.settings = await api("/api/settings");
+  state.boot.tts = await api("/api/tts");
   $("chat-sandbox").textContent = `🔒 Песочница: ${state.boot.settings.sandbox_root}`;
 }
 
@@ -1714,6 +2019,10 @@ function handleEvent(topic, data) {
     case "chats.changed":
       if (data.slug === state.project) loadChats();
       break;
+    case "activity.changed":
+      // Тему убрали из панели (возможно, в другой вкладке) — перечитываем список.
+      loadActivity();
+      break;
     case "chat.event":
       if (data.session_id === state.session) pushChatEvent(data.event);
       break;
@@ -1747,7 +2056,7 @@ function handleEvent(topic, data) {
       if (data.slug === state.playSlug) {
         $("play-url").value = data.url;
         setPlayStatus(true, false, data.url);
-        toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(data.url, "_blank", "noopener")]]);
+        toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(freshUrl(data.url), "_blank", "noopener")]]);
       }
       loadServers();
       break;
@@ -1868,6 +2177,11 @@ function bindProjects() {
     const card = (state.projects || []).find((p) => p.slug === state.project);
     if (card) deleteProject(card);
   };
+  $("btn-rename-project").onclick = () => {
+    const card = (state.projects || []).find((p) => p.slug === state.project) || state.detail;
+    if (card) renameProject(card);
+    else toast("Переименование", "Сначала выберите проект.", "warn");
+  };
   $("btn-new-chat").onclick = newChat;
   $("btn-new-chat-2").onclick = newChat;
 
@@ -1914,6 +2228,8 @@ function bindChats() {
     localStorage.setItem("project", state.project);
     state.session = null;
     clearFeed();
+    // Вложения лежат в папке прежней игры — в новый проект они не переезжают.
+    clearAttachments();
     loadChats();
   };
   $("chat-agent").onchange = async () => {
@@ -1928,6 +2244,31 @@ function bindChats() {
   $("btn-chat-send").onclick = sendChatTask;
   $("chat-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatTask(); }
+  });
+
+  // Вложения: кнопка, Ctrl+V со скриншотом и перетаскивание файлов в композер.
+  $("btn-chat-attach").onclick = () => $("chat-file-input").click();
+  $("chat-file-input").onchange = async (e) => {
+    await attachFiles(e.target.files);
+    e.target.value = "";
+  };
+  $("chat-input").addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData ? e.clipboardData.files : [])];
+    if (!files.length) return;   // обычный текст вставляем как обычно
+    e.preventDefault();
+    attachFiles(files);
+  });
+  const composer = $("chat-composer");
+  ["dragenter", "dragover"].forEach((type) => composer.addEventListener(type, (e) => {
+    e.preventDefault();
+    composer.classList.add("drop-target");
+  }));
+  ["dragleave", "drop"].forEach((type) => composer.addEventListener(type, (e) => {
+    e.preventDefault();
+    composer.classList.remove("drop-target");
+  }));
+  composer.addEventListener("drop", (e) => {
+    if (e.dataTransfer && e.dataTransfer.files.length) attachFiles(e.dataTransfer.files);
   });
   $("btn-chat-stop").onclick = async () => {
     if (!state.session) return;
@@ -1983,7 +2324,7 @@ function bindPlay() {
   $("btn-play-start").onclick = startPlay;
   $("btn-play-open").onclick = () => {
     const url = $("play-url").value.trim();
-    if (url) window.open(url, "_blank", "noopener");
+    if (url) window.open(freshUrl(url), "_blank", "noopener");
     else toast("Игра", "URL неизвестен — сначала запустите dev-сервер.", "warn");
   };
   $("btn-play-window").onclick = async () => {
@@ -2014,6 +2355,20 @@ function bindCommon() {
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
   $("btn-save-settings").onclick = saveSettings;
+  $("btn-activity-clear").onclick = clearActivity;
+  $("btn-fish-test").onclick = async () => {
+    const btn = $("btn-fish-test");
+    btn.disabled = true; btn.textContent = "⏳ Проверка...";
+    // Ключ из поля может быть ещё не сохранён — сохраняем перед проверкой.
+    await api("/api/settings", {
+      body: { fish_audio: { api_key: $("set-fish-key").value.trim(), model: $("set-fish-model").value } },
+    });
+    const res = await api("/api/tts/test", { method: "POST" });
+    btn.disabled = false; btn.textContent = "🔌 Проверить Fish Audio";
+    $("fish-msg").style.color = res.status === "success" ? "var(--ok)" : "var(--err)";
+    $("fish-msg").textContent = res.message || "";
+    state.boot.tts = await api("/api/tts");
+  };
   $("set-notify").onchange = async () => {
     await api("/api/settings/notifications", { body: { enabled: $("set-notify").checked } });
     $("chk-notify").checked = $("set-notify").checked;

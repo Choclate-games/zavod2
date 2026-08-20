@@ -14,6 +14,13 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Кодовый агент запускается строго внутри него (см. app/sandbox.py).
 DEFAULT_WORKSPACE_DIR = BASE_DIR / "workspace"
 
+def _flag(name: str, default: bool) -> bool:
+    """Булев ключ .env: 1/true/yes/on — включено, всё остальное — выключено."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
 def load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -73,6 +80,17 @@ class AppConfig:
         self.opencode_model = os.getenv("OPENCODE_MODEL", "")
         self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
         self.gui_port = int(os.getenv("GUI_PORT", "7860"))
+
+        # Fish Audio TTS: озвучка реплик и голосов игры. Ключ берётся с fish.audio
+        # (раздел API Keys). Генерацию запускает только человек — см.
+        # providers/fish_audio.py.
+        self.fish_audio_api_key = os.getenv("FISH_AUDIO_API_KEY", "")
+        self.fish_audio_model = os.getenv("FISH_AUDIO_MODEL", "s2.1-pro-free")
+
+        # Каждый запуск игры начинается «с чистого листа»: кеш сборщика сносится,
+        # dev-сервер поднимается на новом порту (а значит, с пустым localStorage —
+        # хранилище браузера привязано к origin вместе с портом).
+        self.reset_game_on_launch = _flag("RESET_GAME_ON_LAUNCH", True)
 
 # ---------------------------------------------------------------------------
 # Слой Design OS (обещание игроку, плотность впечатлений, допущения, телеметрия,

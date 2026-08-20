@@ -177,6 +177,13 @@ async def project_rating(slug: str, request: Request) -> Dict[str, Any]:
     return service.set_project_rating(_slug(slug), rating)
 
 
+@app.post("/api/projects/{slug}/rename")
+async def project_rename(slug: str, request: Request) -> Dict[str, Any]:
+    """Новое имя игры. Пустая строка возвращает название из спецификации."""
+    payload = await _body(request)
+    return service.rename_project(_slug(slug), str(payload.get("title") or ""))
+
+
 @app.post("/api/projects/{slug}/archive")
 async def project_archive(slug: str, request: Request) -> Dict[str, Any]:
     payload = await _body(request)
@@ -292,6 +299,7 @@ async def chats_send(slug: str, request: Request) -> Dict[str, Any]:
     if agent not in AGENT_KEYS:
         return {"status": "error", "message": f"Неизвестный агент: {agent}"}
     model = (payload.get("model") or "").strip() or None
+    attachments = payload.get("attachments")
     return service.send_chat_task(
         _slug(slug),
         payload.get("session_id"),
@@ -300,6 +308,7 @@ async def chats_send(slug: str, request: Request) -> Dict[str, Any]:
         model=model,
         yolo=bool(payload.get("yolo", True)),
         continue_dialog=bool(payload.get("continue_dialog", True)),
+        attachments=attachments if isinstance(attachments, list) else None,
     )
 
 
@@ -328,6 +337,100 @@ def chats_running() -> Dict[str, Any]:
 def activity() -> Dict[str, Any]:
     """Панель активности сайдбара: работающие/недавно завершённые чаты и живые dev-серверы."""
     return service.activity()
+
+
+@app.delete("/api/activity/{session_id}")
+def activity_dismiss(session_id: str) -> Dict[str, Any]:
+    """Убрать одну тему из панели активности (сам чат остаётся)."""
+    return service.dismiss_activity(session_id)
+
+
+@app.post("/api/activity/clear")
+def activity_clear() -> Dict[str, Any]:
+    return service.clear_activity()
+
+
+# ── Вложения чата ───────────────────────────────────────────────────────────
+
+@app.get("/api/uploads/{slug}")
+def uploads_list(slug: str) -> Dict[str, Any]:
+    return service.list_uploads(_slug(slug))
+
+
+@app.post("/api/uploads/{slug}")
+async def uploads_save(slug: str, request: Request) -> Dict[str, Any]:
+    """
+    Приём файла или скриншота.
+
+    Содержимое приходит data-URL'ом в JSON — так вложение долетает обычным
+    fetch-запросом, без multipart и без лишней зависимости в requirements.
+    """
+    payload = await _body(request)
+    return service.save_upload(
+        _slug(slug),
+        str(payload.get("name") or "attachment"),
+        str(payload.get("data") or ""),
+    )
+
+
+@app.get("/api/uploads/{slug}/file/{name}")
+def uploads_file(slug: str, name: str):
+    path = service.upload_path(_slug(slug), name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Вложение не найдено")
+    return FileResponse(path)
+
+
+@app.delete("/api/uploads/{slug}/file/{name}")
+def uploads_delete(slug: str, name: str) -> Dict[str, Any]:
+    return service.delete_upload(_slug(slug), name)
+
+
+# ── Озвучка: Fish Audio TTS (только по действию пользователя) ───────────────
+
+@app.get("/api/tts")
+def tts_state() -> Dict[str, Any]:
+    return service.tts_state()
+
+
+@app.get("/api/tts/voices")
+def tts_voices(query: str = "", limit: int = 24) -> Dict[str, Any]:
+    return service.tts_voices(query, limit)
+
+
+@app.post("/api/tts/test")
+def tts_test() -> Dict[str, Any]:
+    return service.tts_test()
+
+
+@app.get("/api/tts/{slug}/files")
+def tts_files(slug: str) -> Dict[str, Any]:
+    return {"files": service.tts_files(_slug(slug))}
+
+
+@app.post("/api/tts/{slug}/generate")
+async def tts_generate(slug: str, request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.tts_generate(
+        _slug(slug),
+        str(payload.get("text") or ""),
+        voice_id=str(payload.get("voice_id") or ""),
+        name=str(payload.get("name") or ""),
+        fmt=str(payload.get("format") or "mp3"),
+    )
+
+
+@app.get("/api/tts/{slug}/file/{name}")
+def tts_file(slug: str, name: str):
+    path = service.tts_file_path(_slug(slug), name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return FileResponse(path)
+
+
+@app.delete("/api/tts/{slug}/file/{name}")
+def tts_file_delete(slug: str, name: str) -> Dict[str, Any]:
+    return service.tts_delete(_slug(slug), name)
 
 
 # ── Агенты ──────────────────────────────────────────────────────────────────

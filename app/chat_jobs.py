@@ -160,3 +160,26 @@ class ChatJobManager:
 
     def forget(self, session_id: str) -> None:
         self._jobs.pop(session_id, None)
+
+    def dismiss(self, session_id: str) -> str:
+        """
+        Убирает завершённую тему из панели активности.
+
+        Возвращает "" (такой темы нет), "running" (агент ещё работает — сначала
+        «Стоп») или "dismissed". Сама беседа при этом никуда не девается: из
+        реестра уходит только запись о запуске.
+        """
+        job = self._jobs.get(session_id)
+        if not job:
+            return ""
+        if job.status == "running":
+            return "running"
+        self._jobs.pop(session_id, None)
+        return "dismissed"
+
+    def dismiss_finished(self) -> int:
+        """Чистит панель разом: работающие темы остаются на месте."""
+        finished = [sid for sid, job in self._jobs.items() if job.status != "running"]
+        for session_id in finished:
+            self._jobs.pop(session_id, None)
+        return len(finished)

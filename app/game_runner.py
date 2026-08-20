@@ -64,13 +64,58 @@ def _dev_script(project_dir: Path) -> Optional[tuple]:
     return None
 
 
-def _free_port() -> int:
-    """Свободный порт от ОС: два проекта подряд не должны драться за 3000/5173."""
+def _free_port(avoid: Optional[int] = None) -> int:
+    """
+    Свободный порт от ОС: два проекта подряд не должны драться за 3000/5173.
+
+    `avoid` — порт прошлого запуска этой же игры. Новый порт означает новый
+    origin, а хранилище браузера (localStorage, IndexedDB, cookies) привязано
+    к origin вместе с портом: игра стартует с нулевым прогрессом.
+    """
     import socket
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    for _ in range(12):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port != avoid:
+            return port
+    return port
+
+
+# Кеши сборщиков и прошлые сборки. Всё это восстанавливается автоматически,
+# поэтому снести их перед запуском безопасно — а вот подхватить протухший
+# пре-бандл Vite после правок агента игра может запросто.
+CACHE_PATHS = (
+    "node_modules/.vite",
+    "node_modules/.cache",
+    ".vite",
+    ".cache",
+    ".parcel-cache",
+    ".turbo",
+    "dist",
+)
+
+
+def purge_caches(project_dir: Path, on_log: Optional[LogFn] = None) -> list[str]:
+    """Удаляет кеши сборщика и прошлую сборку. Возвращает список снесённого."""
+    log = on_log or (lambda _m: None)
+    root = ensure_inside_workspace(project_dir)
+    removed: list[str] = []
+    for relative in CACHE_PATHS:
+        target = root / relative
+        if not target.exists():
+            continue
+        try:
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
+            removed.append(relative)
+        except OSError as exc:
+            log(f"⚠️ Не удалось удалить {relative}: {exc}\n")
+    if removed:
+        log(f"🧹 Сброс кеша перед запуском: {', '.join(removed)}\n")
+    else:
+        log("🧹 Сброс кеша: чистить нечего — проект и так свежий.\n")
+    return removed
 
 
 def _normalize_url(url: str) -> str:
@@ -83,10 +128,16 @@ def _normalize_url(url: str) -> str:
 class DevServer:
     """Дочерний процесс `npm run dev` с потоковым логом и распознаванием URL."""
 
-    def __init__(self, project_dir: Path, on_log: LogFn, on_url: Callable[[str], None]):
+    def __init__(self, project_dir: Path, on_log: LogFn, on_url: Callable[[str], None],
+                 reset_state: bool = False, avoid_port: Optional[int] = None):
         self.project_dir = ensure_inside_workspace(project_dir)
         self.on_log = on_log
         self.on_url = on_url
+        # reset_state: снести кеш сборщика и выдать игре новый порт, чтобы она
+        # открылась без прошлого прогресса. См. purge_caches и _free_port.
+        self.reset_state = reset_state
+        self.avoid_port = avoid_port
+        self.port: Optional[int] = None
         self.proc: Optional[subprocess.Popen] = None
         self.url: Optional[str] = None
         self.expected_url: Optional[str] = None
@@ -146,6 +197,9 @@ class DevServer:
             )
             return False
 
+        if self.reset_state:
+            purge_caches(self.project_dir, self.on_log)
+
         if not (self.project_dir / "node_modules").exists():
             if self.install_dependencies() != 0:
                 self.on_log("❌ npm install завершился с ошибкой, запуск отменён.\n")
@@ -158,8 +212,13 @@ class DevServer:
         # --strictPort делает запуск одинаковым для всех проектов.
         script = _dev_script(self.project_dir)
         if script and "vite" in script[1].lower():
-            port = _free_port()
+            port = _free_port(avoid=self.avoid_port if self.reset_state else None)
+            self.port = port
             cmd = cmd + ["--", "--host", "localhost", "--port", str(port), "--strictPort"]
+            # --force заставляет Vite пересобрать пре-бандл зависимостей вместо
+            # того, чтобы поверить своему кешу.
+            if self.reset_state:
+                cmd.append("--force")
             self.expected_url = f"http://localhost:{port}/"
         else:
             self.expected_url = None
