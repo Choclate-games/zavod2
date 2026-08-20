@@ -190,7 +190,9 @@ export class TruckController {
 
     vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
 
-    this.speed = Math.abs(speed) * 3.6;
+    // Read the vehicle speed after the controller step so the HUD never lags one
+    // physics frame behind the actual chassis motion.
+    this.speed = Math.abs(vehicle.currentVehicleSpeed()) * 3.6;
     const p = body.translation();
     const r = body.rotation();
     this.position.set(p.x, p.y, p.z);

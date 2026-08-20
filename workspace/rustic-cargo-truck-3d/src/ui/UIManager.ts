@@ -35,11 +35,7 @@ export class UIManager {
   private readonly progressFill = document.createElement('div');
   private readonly speedNumber = document.createElement('div');
   private readonly cargoText = document.createElement('div');
-  private readonly routeText = document.createElement('div');
-  private readonly cargoTypeBadge = document.createElement('div');
   private readonly mudBadge = document.createElement('div');
-  private readonly soundBtn = document.createElement('button');
-  private readonly hudCoinsValue = document.createElement('span');
 
   private readonly input: InputManager;
   private readonly audio: AudioManager;
@@ -97,8 +93,8 @@ export class UIManager {
     const currentUpgrades = save.truckUpgrades[save.selectedTruck] || save.truckUpgrades.zil;
 
     panel.innerHTML = `
-      <div class="menu-badge">🌲 Сезон 01 · Экспедиция на Лесопилку</div>
-      <h1 class="game-title">Лесной Рейс 3D</h1>
+       <div class="menu-badge">🌲 Сезон 01 · Таёжная экспедиция</div>
+       <h1 class="game-title">Тайга: Экспедиция</h1>
       <p class="subtitle">Управляй джойстиком сквозь сибирскую тайгу, преодолевай броды и топи, не теряя груз!</p>
       
       <div class="menu-truck-card">
@@ -177,24 +173,57 @@ export class UIManager {
     this.events.emit('game:garage-preview', { truckId: currentTruckId, color: truckUpgrades.color });
 
     const screen = this.createScreen();
+    screen.classList.add('garage-screen');
     const panel = document.createElement('div');
     panel.className = 'panel garage-panel';
 
     // Header & Balance
+    const allTruckIds: TruckId[] = ['zil', 'gaz', 'kraz', 'ural'];
+    const tuningPoints = truckUpgrades.engine + truckUpgrades.tires + truckUpgrades.suspension + truckUpgrades.sides;
     panel.innerHTML = `
       <div class="garage-header">
-        <div>
-          <div class="eyebrow">Мастерская & Автопарк</div>
-          <h2>🏢 Автобаза</h2>
+        <div class="garage-header-main">
+          <button class="garage-back" aria-label="Вернуться в меню">←</button>
+          <div>
+            <div class="eyebrow">Мастерская и автопарк</div>
+            <h2>ГАРАЖ</h2>
+          </div>
         </div>
-        <div class="garage-coins">🪙 <strong>${save.coins}</strong></div>
+        <div class="garage-resources">
+          <div class="garage-coins">🪙 <strong>${save.coins}</strong></div>
+          <div class="garage-parts">🔧 <strong>${tuningPoints}</strong></div>
+        </div>
       </div>
     `;
+    panel.querySelector<HTMLButtonElement>('.garage-back')?.addEventListener('click', () => this.showMenu(save));
+
+    const garageMain = document.createElement('div');
+    garageMain.className = 'garage-main';
+
+    const infoColumn = document.createElement('div');
+    infoColumn.className = 'garage-info-column';
+
+    const showroom = document.createElement('div');
+    showroom.className = 'garage-showroom';
+    showroom.innerHTML = `
+      <div class="garage-showroom-label">3D ПРОСМОТР</div>
+      <div class="garage-showroom-hint">Автоматический осмотр автомобиля</div>
+    `;
+    const previewButton = (direction: -1 | 1, label: string): HTMLButtonElement => {
+      const button = document.createElement('button');
+      button.className = 'garage-preview-arrow';
+      button.textContent = label;
+      button.setAttribute('aria-label', direction < 0 ? 'Предыдущий автомобиль' : 'Следующий автомобиль');
+      const currentIndex = allTruckIds.indexOf(currentTruckId);
+      const nextIndex = (currentIndex + direction + allTruckIds.length) % allTruckIds.length;
+      button.addEventListener('click', () => this.showGarage(save, allTruckIds[nextIndex]));
+      return button;
+    };
+    showroom.append(previewButton(-1, '‹'), previewButton(1, '›'));
 
     // Truck Carousel Selector Tabs
     const truckTabs = document.createElement('div');
     truckTabs.className = 'truck-tabs';
-    const allTruckIds: TruckId[] = ['zil', 'gaz', 'kraz', 'ural'];
 
     for (const tid of allTruckIds) {
       const t = TRUCKS[tid];
@@ -203,19 +232,18 @@ export class UIManager {
       const tab = document.createElement('button');
       tab.className = `truck-tab ${active ? 'active' : ''} ${owned ? '' : 'locked'}`;
       tab.innerHTML = `
+        <div class="truck-tab-icon">${owned ? '🚚' : '🔒'}</div>
         <div class="truck-tab-name">${t.name}</div>
-        <div class="truck-tab-tag">${owned ? (tid === save.selectedTruck ? '✓ В строю' : 'В гараже') : `🔒 ${t.price} 🪙`}</div>
+        <div class="truck-tab-tag">${owned ? (tid === save.selectedTruck ? '✓ В строю' : 'В гараже') : `Открывается за ${t.price} 🪙`}</div>
       `;
       tab.addEventListener('click', () => {
         this.showGarage(save, tid);
       });
       truckTabs.append(tab);
     }
-    panel.append(truckTabs);
-
     // Selected Truck Profile Card
     const profile = document.createElement('div');
-    profile.className = 'truck-profile';
+    profile.className = 'truck-profile garage-profile';
     profile.innerHTML = `
       <div class="profile-top">
         <div>
@@ -228,7 +256,7 @@ export class UIManager {
       </div>
       <p class="profile-desc">${truckCfg.description}</p>
     `;
-    panel.append(profile);
+    infoColumn.append(profile);
 
     // Vehicle Stats Meters
     const statsWrap = document.createElement('div');
@@ -257,7 +285,7 @@ export class UIManager {
         <div class="stat-track"><div class="stat-fill" style="width: ${safetyPct}%; background: #3d7ea6;"></div></div>
       </div>
     `;
-    panel.append(statsWrap);
+    statsWrap.classList.add('garage-stats');
 
     // Color Swatch Paint Shop
     const colorSection = document.createElement('div');
@@ -282,7 +310,7 @@ export class UIManager {
       swatchRow.append(swatch);
     }
     colorSection.append(swatchRow);
-    panel.append(colorSection);
+    colorSection.classList.add('garage-paint');
 
     // Upgrades Grid (Engine, Tires, Suspension, Sides)
     const upgradesSection = document.createElement('div');
@@ -415,7 +443,9 @@ export class UIManager {
 
     upgradeGrid.append(engCard, tiresCard, suspCard, sidesCard);
     upgradesSection.append(upgradeGrid);
-    panel.append(upgradesSection);
+    const upgradeColumn = document.createElement('div');
+    upgradeColumn.className = 'garage-upgrade-column';
+    upgradeColumn.append(upgradesSection);
 
     // Equip / Buy Primary Button Bar
     const primaryBar = document.createElement('div');
@@ -450,19 +480,27 @@ export class UIManager {
       });
       primaryBar.append(driveBtn);
     }
-    panel.append(primaryBar);
+    upgradeColumn.append(primaryBar);
 
-    // Navigation Action Row
-    const navRow = document.createElement('div');
-    navRow.className = 'action-row';
+    garageMain.append(infoColumn, showroom, statsWrap, colorSection, upgradeColumn);
+    panel.append(garageMain, truckTabs);
 
-    const backBtn = this.button('← В главное меню', false);
-    backBtn.addEventListener('click', () => this.showMenu(save));
-
-    const levelsBtn = this.button('🗺️ Выбор уровня', false);
-    levelsBtn.addEventListener('click', () => this.showLevelSelect(save));
-
-    navRow.append(backBtn, levelsBtn);
+    // Navigation mirrors the reference layout and keeps real destinations available.
+    const navRow = document.createElement('nav');
+    navRow.className = 'garage-bottom-nav';
+    const baseNav = this.button('🚚 АВТОБАЗА', false);
+    baseNav.className = 'garage-nav-btn active';
+    baseNav.disabled = true;
+    const mapNav = this.button('🗺️ КАРТА', false);
+    mapNav.className = 'garage-nav-btn';
+    mapNav.addEventListener('click', () => this.showLevelSelect(save));
+    const tasksNav = this.button('📋 ЗАДАНИЯ', false);
+    tasksNav.className = 'garage-nav-btn';
+    tasksNav.addEventListener('click', () => this.showLevelSelect(save));
+    const shopNav = this.button('🛒 МАГАЗИН', false);
+    shopNav.className = 'garage-nav-btn';
+    shopNav.addEventListener('click', () => this.showGarage(save, currentTruckId));
+    navRow.append(baseNav, mapNav, tasksNav, shopNav);
     panel.append(navRow);
 
     screen.append(panel);
@@ -553,70 +591,44 @@ export class UIManager {
     this.layer.append(screen);
   }
 
-  showHud(level: LevelConfig): void {
+  showHud(_level: LevelConfig): void {
     this.state = 'running';
     this.clearScreen();
     this.hud.classList.remove('hidden');
     this.hud.innerHTML = '';
 
-    const pkg = getCargoPackage(level.cargoPackage || 'logs');
-
     // 1. Top Compact HUD Bar
     const top = document.createElement('div');
     top.className = 'hud-top';
 
-    // Left: Coins counter
-    const coinsCard = document.createElement('div');
-    coinsCard.className = 'hud-card hud-coins-card';
-    this.hudCoinsValue.textContent = `${this.currentSave?.coins ?? 0}`;
-    coinsCard.innerHTML = '🪙 ';
-    coinsCard.append(this.hudCoinsValue);
-
-    // Center: Cargo Integrity Card
+    // Center: cargo count only. Cargo type and route title stay out of gameplay HUD.
     const cargoCard = document.createElement('div');
     cargoCard.className = 'hud-card cargo-wrap';
-    this.cargoTypeBadge.className = 'hud-label';
-    this.cargoTypeBadge.textContent = `${pkg.icon} ${pkg.tag}`;
+    const cargoLabel = document.createElement('div');
+    cargoLabel.className = 'hud-label';
+    cargoLabel.textContent = 'ГРУЗ В КУЗОВЕ';
+    const initialCargoTotal = getCargoPackage(_level.cargoPackage || 'logs').slots.length;
     this.cargoText.className = 'hud-value';
-    this.cargoText.textContent = `${pkg.slots.length} / ${pkg.slots.length}`;
+    this.cargoText.textContent = `${initialCargoTotal} / ${initialCargoTotal}`;
     this.cargoFill.className = 'bar-fill';
+    this.cargoFill.style.width = '100%';
     const bar = document.createElement('div');
     bar.className = 'bar';
     bar.append(this.cargoFill);
-    cargoCard.append(this.cargoTypeBadge, this.cargoText, bar);
+    cargoCard.append(cargoLabel, this.cargoText, bar);
 
-    // Right: Controls cluster (Sound + Pause)
+    // Right: pause only. Sound remains available from the pause screen and menu.
     const rightControls = document.createElement('div');
     rightControls.className = 'hud-right-controls';
-
-    this.soundBtn.className = 'hud-control-btn sound-btn';
-    this.soundBtn.textContent = this.currentSave?.settings.muted ? '🔇' : '🔊';
-    this.soundBtn.setAttribute('aria-label', 'Вкл/выкл звук');
-    this.soundBtn.addEventListener('click', () => {
-      if (this.currentSave) {
-        this.currentSave.settings.muted = !this.currentSave.settings.muted;
-        this.audio.setMuted(this.currentSave.settings.muted);
-        this.soundBtn.textContent = this.currentSave.settings.muted ? '🔇' : '🔊';
-        this.events.emit('game:save', undefined);
-      }
-    });
 
     const pause = this.button('⏸', false);
     pause.className = 'hud-control-btn pause-btn';
     pause.setAttribute('aria-label', 'Пауза');
     pause.addEventListener('click', () => this.events.emit('game:pause', { paused: true }));
 
-    rightControls.append(this.soundBtn, pause);
-    top.append(coinsCard, cargoCard, rightControls);
+    rightControls.append(pause);
+    top.append(cargoCard, rightControls);
     this.hud.append(top);
-
-    // Route title pill at top
-    const routeChip = document.createElement('div');
-    routeChip.className = 'hud-route-chip';
-    this.routeText.className = 'hud-route-title';
-    this.routeText.textContent = `Ур. ${level.id} · ${level.title}`;
-    routeChip.append(this.routeText);
-    this.hud.append(routeChip);
 
     // Center Alert Badges (Mud, Water, Fork Prompts)
     this.mudBadge.className = 'hud-badge hidden';
@@ -684,11 +696,11 @@ export class UIManager {
           s.settings.muted = !s.settings.muted;
           this.audio.setMuted(s.settings.muted);
           soundBtn.textContent = `🔊 Звук: ${s.settings.muted ? 'ВЫКЛ' : 'ВКЛ'}`;
-          this.soundBtn.textContent = s.settings.muted ? '🔇' : '🔊';
           this.events.emit('game:save', undefined);
         }
       });
 
+      /* Steering inversion is intentionally hidden until the control model is finalized.
       const invertBtn = this.button(`🔄 Инверсия руля: ${s?.settings.invertSteering ? 'ВКЛ' : 'ВЫКЛ'}`, false);
       invertBtn.style.marginTop = '10px';
       invertBtn.addEventListener('click', () => {
@@ -698,6 +710,7 @@ export class UIManager {
           this.events.emit('game:save', undefined);
         }
       });
+      */
 
       const levelSelectBtn = this.button('🗺️ Выход в выбор уровней', false);
       levelSelectBtn.style.marginTop = '10px';
@@ -705,7 +718,7 @@ export class UIManager {
         if (s) this.showLevelSelect(s);
       });
 
-      panel.append(resume, garageBtn, soundBtn, invertBtn, levelSelectBtn);
+      panel.append(resume, garageBtn, soundBtn, levelSelectBtn);
       screen.append(panel);
       this.layer.append(screen);
     } else {
@@ -714,16 +727,15 @@ export class UIManager {
   }
 
   updateHud(state: HudState): void {
-    this.speedNumber.textContent = Math.round(state.speed).toString();
-    this.cargoText.textContent = `${state.cargo} / ${state.totalCargo}`;
-    const ratio = state.cargo / Math.max(1, state.totalCargo);
+    const safeSpeed = Number.isFinite(state.speed) ? Math.max(0, state.speed) : 0;
+    const safeTotalCargo = Math.max(0, Math.floor(state.totalCargo));
+    const safeCargo = Math.min(safeTotalCargo, Math.max(0, Math.floor(state.cargo)));
+    this.speedNumber.textContent = Math.round(safeSpeed).toString();
+    this.cargoText.textContent = `${safeCargo} / ${safeTotalCargo}`;
+    const ratio = safeCargo / Math.max(1, safeTotalCargo);
     this.cargoFill.style.width = `${ratio * 100}%`;
     this.cargoFill.style.background = ratio > 0.6 ? '#76bd6b' : ratio > 0.3 ? '#e8ad61' : '#d8574b';
     this.progressFill.style.width = `${Math.min(100, state.progress * 100)}%`;
-
-    if (this.currentSave) {
-      this.hudCoinsValue.textContent = `${this.currentSave.coins}`;
-    }
 
     if (state.forkPrompt) {
       this.mudBadge.classList.remove('hidden');

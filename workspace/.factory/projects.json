@@ -46,7 +46,8 @@
     "rating": 5,
     "archived": false,
     "created_at": "2026-08-19T14:50:19",
-    "archived_at": ""
+    "archived_at": "",
+    "title": "Тайга: Экспедиция"
   },
   "drill-core-survivor-2d": {
     "rating": 0,
