@@ -45,7 +45,8 @@ const state = {
   timerHandle: null,
   elapsed: 0,
   streamBubble: null,
-  streamRaw: "",
+  streamRaw: "",   // потоковый текст текущего ответа для markdown-рендера
+  streamBubbles: [],   // потоковые пузыри текущего ответа — их заменит финальная версия
   gallerySort: localStorage.getItem("gallerySort") || "new",
   showArchived: localStorage.getItem("showArchived") === "1",
   showArchivedList: localStorage.getItem("showArchivedList") === "1",
@@ -874,6 +875,7 @@ function clearFeed() {
   $("chat-feed").innerHTML = "";
   state.streamBubble = null;
   state.streamRaw = "";
+  state.streamBubbles = [];
 }
 
 function showTyping(visible) {
@@ -989,6 +991,58 @@ function addToolBubble(event) {
   return bubble;
 }
 
+/**
+ * Запрос пользователя: пузырь плюс кнопка отката слева от него — она возвращает
+ * проект к состоянию на момент, когда этот запрос был отправлен.
+ */
+function addUserBubble(event) {
+  const feed = $("chat-feed");
+  const row = el("div", "user-row");
+
+  if (event.undoable && Number.isInteger(event.index)) {
+    const btn = el("button", "btn small undo-here", "↩");
+    btn.type = "button";
+    btn.title = "Откатить проект к состоянию до этого запроса";
+    btn.onclick = () => openUndoModal(event.index);
+    row.appendChild(btn);
+  }
+
+  row.appendChild(el("div", "bubble user",
+    `${esc(event.text)}<span class="stamp">вы · ${now()}</span>`));
+
+  const typing = feed.querySelector(".typing");
+  if (typing) feed.insertBefore(row, typing); else feed.appendChild(row);
+  scrollFeed();
+  return row;
+}
+
+/** Финальный ответ агента: Markdown-вид с переключателем на исходник. */
+function addAnswerBubble(text) {
+  const node = addBubble("assistant answer",
+    `<div class="answer-head"><span class="who">⚡ агент · ${now()}</span>` +
+    `<button class="btn small answer-toggle" type="button"></button></div>` +
+    `<div class="answer-body md"></div>`);
+  const body = node.querySelector(".answer-body");
+  const toggle = node.querySelector(".answer-toggle");
+  let raw = false;
+
+  const render = () => {
+    if (raw) {
+      body.className = "answer-body raw";
+      body.textContent = text;
+      toggle.textContent = "🎨 Markdown";
+    } else {
+      body.className = "answer-body md";
+      body.innerHTML = renderMarkdown(text);
+      toggle.textContent = "📝 Исходник";
+    }
+  };
+  toggle.onclick = () => { raw = !raw; render(); };
+  render();
+  scrollFeed();
+  return node;
+}
+
 function pushChatEvent(event) {
   const kind = event.kind || "raw";
 
@@ -997,6 +1051,7 @@ function pushChatEvent(event) {
       state.streamBubble = addBubble("assistant",
         `<span class="who">⚡ агент · ${now()}</span><span class="body md"></span>`);
       state.streamRaw = "";
+      state.streamBubbles.push(state.streamBubble);
     }
     state.streamRaw += event.text || "";
     renderStream();
@@ -1007,15 +1062,17 @@ function pushChatEvent(event) {
   state.streamRaw = "";
 
   if (kind === "user") {
-    const bubble = addBubble("user", "");
-    const body = el("div", "body md", renderMarkdown(event.text));
-    bubble.append(body, el("span", "stamp", `вы · ${now()}`));
-    attachClamp(bubble, body);
+    addUserBubble(event);
+    state.streamBubbles = [];
   } else if (kind === "assistant_final") {
-    const bubble = addBubble("assistant", `<span class="who">⚡ агент · ${now()}</span>`);
-    const body = el("div", "body md", renderMarkdown(event.text));
-    bubble.appendChild(body);
-    attachClamp(bubble, body);
+    // Пока агент работал, ответ шёл в ленту сырым потоком. Финальный текст
+    // содержит его целиком, поэтому потоковые пузыри убираем — иначе один и
+    // тот же ответ показался бы дважды.
+    if (event.replaces_stream) {
+      state.streamBubbles.forEach((node) => node.remove());
+      state.streamBubbles = [];
+    }
+    addAnswerBubble(event.text || "");
   } else if (kind === "system") {
     addBubble("system", `${esc(event.icon || "⚙")} ${esc(event.text)} <span class="stamp">${now()}</span>`);
   } else if (kind === "tool") {
@@ -1106,8 +1163,63 @@ function updateChatButtons() {
   $("btn-chat-play").disabled = !(project && project.playable);
   $("btn-chat-play").textContent = project && project.playable ? "▶ Играть" : "▶ Нет кода";
   $("btn-chat-stop").disabled = !state.sessionRunning;
+
+  // Откат живёт в самой ленте — кнопка ↩ у каждого запроса пользователя.
   const running = (state.sessions || []).filter((s) => s.running).length;
   $("sidebar-running").textContent = running ? `⏳ Работает чатов: ${running}` : "";
+}
+
+/* ── Откат запроса ────────────────────────────────────────────────────── */
+
+/** `index` — номер запроса в переписке; без него откатывается последний. */
+async function openUndoModal(index) {
+  if (!state.project || !state.session) return;
+  if (state.sessionRunning) {
+    toast("Откат", "Сначала остановите агента — он прямо сейчас правит файлы проекта.", "warn");
+    return;
+  }
+  const info = await api(`/api/chats/${encodeURIComponent(state.project)}/${state.session}/undo`
+    + undoQuery(index));
+  if (info.status !== "success") { toast("Откат", info.message || "Откатывать нечего", "warn"); return; }
+
+  state.undoIndex = info.index;
+  $("undo-prompt").textContent = info.prompt || "";
+  const dropped = info.dropped_messages || 0;
+  $("undo-note").textContent = dropped > 1
+    ? `Из чата уйдёт этот запрос и всё, что было после него: сообщений — ${dropped}.`
+    : "Из чата уйдёт этот запрос вместе с ответом на него.";
+  const files = info.files || [];
+  $("undo-files-title").textContent = files.length
+    ? `Файлы, которые вернутся к прежнему состоянию: ${files.length}`
+    : "Файлы проекта с тех пор не менялись";
+  const box = $("undo-files");
+  box.innerHTML = "";
+  files.forEach((path) => box.appendChild(el("div", "undo-file", esc(path))));
+  $("undo-modal").classList.remove("hidden");
+}
+
+function undoQuery(index) {
+  return Number.isInteger(index) ? `?index=${index}` : "";
+}
+
+function closeUndoModal() {
+  $("undo-modal").classList.add("hidden");
+  state.undoIndex = null;
+}
+
+async function confirmUndo() {
+  const btn = $("btn-confirm-undo");
+  const index = state.undoIndex;
+  btn.disabled = true;
+  const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${state.session}/undo`
+    + undoQuery(index), { method: "POST" });
+  btn.disabled = false;
+  closeUndoModal();
+
+  if (res.status !== "success") { toast("Откат", res.message || "Не удалось", "err"); return; }
+  toast("↩ Откат выполнен", res.message, "ok");
+  await loadChats();
+  await openChat(state.session);
 }
 
 function ensureModelOption(model) {
@@ -1400,6 +1512,10 @@ function handleEvent(topic, data) {
     case "chat.event":
       if (data.session_id === state.session) pushChatEvent(data.event);
       break;
+    case "chat.undone":
+      // Откат мог прийти из другой вкладки — перечитываем ленту чата.
+      if (data.session_id === state.session) openChat(data.session_id);
+      break;
     case "chat.started":
       if (data.session_id === state.session) { state.sessionRunning = true; updateChatButtons(); }
       break;
@@ -1603,8 +1719,16 @@ function bindChats() {
     if (!state.session) return;
     const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${state.session}/stop`, { method: "POST" });
     if (res.status === "error") toast("Стоп", res.message, "warn");
-    else setChatStatus("● Остановка...", "var(--err)");
+    else {
+      // Сервер отвечает по-разному: обычная остановка или принудительное
+      // освобождение чата по второму нажатию — сообщение стоит показать.
+      toast("Стоп", res.message, "warn");
+      setChatStatus("● Остановка...", "var(--err)");
+    }
   };
+  $("btn-close-undo").onclick = closeUndoModal;
+  $("btn-confirm-undo").onclick = confirmUndo;
+  $("undo-modal").onclick = (e) => { if (e.target === $("undo-modal")) closeUndoModal(); };
   $("btn-chat-clear").onclick = clearFeed;
   $("btn-chat-copy").onclick = async () => {
     await navigator.clipboard.writeText($("chat-feed").innerText);

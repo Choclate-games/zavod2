@@ -1,26 +1,24 @@
-/**
- * Head-less sanity run for the truck physics.
- *
- * Builds the real terrain and the real truck spec in Rapier — no renderer, no browser — and
- * asserts the things that silently break a driving game: the truck accelerates, the wheels
- * turn, the suspension settles instead of oscillating, steering is not mirrored, and the
- * cargo stays in the bed. Run with `npm run check:physics`.
- */
 import RAPIER from '@dimforge/rapier3d-compat';
-import { buildTerrainGeometry, roadHeightAt } from '../src/world/terrain';
+import { buildTerrainGeometry, roadHeightAt, heightAt, setLevel, getActiveFork } from '../src/world/terrain';
+import { LEVELS } from '../src/world/levels';
 import {
   BED,
   BRAKE,
   CABIN,
   CARGO,
   CARGO_SLOTS,
+  CARGO_PACKAGES,
+  CARGO_SPECS,
   ENGINE,
   FRAME,
   MASS,
   RIDE_HEIGHT,
   SUSPENSION,
   TIRE,
+  TRUCKS,
   WHEEL,
+  type CargoPackageType,
+  type TruckId,
 } from '../src/vehicle/truckSpec';
 
 const SPAWN_Z = 2;
@@ -45,10 +43,11 @@ interface Rig {
   cargo: RAPIER.RigidBody[];
 }
 
-function buildRig(withCargo: boolean): Rig {
+function buildRig(truckId: TruckId = 'zil', packageType?: CargoPackageType): Rig {
   const world = new RAPIER.World({ x: 0, y: -14, z: 0 });
   world.timestep = DT;
 
+  const cfg = TRUCKS[truckId];
   const geometry = buildTerrainGeometry();
   const ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   world.createCollider(
@@ -71,62 +70,65 @@ function buildRig(withCargo: boolean): Rig {
       chassis,
     );
   };
-  box(FRAME.hx, FRAME.hy, FRAME.hz, 0, 0, 0, MASS.frame);
-  box(CABIN.hx, CABIN.hy, CABIN.hz, 0, CABIN.y, CABIN.z, MASS.cabin);
-  const wallHalfZ = (BED.frontZ - BED.backZ) / 2;
-  const wallCentreZ = (BED.frontZ + BED.backZ) / 2;
-  const wallY = BED.floorY + BED.wallHalfY;
+  box(cfg.frame.hx, cfg.frame.hy, cfg.frame.hz, 0, 0, 0, cfg.mass.frame);
+  box(cfg.cabin.hx, cfg.cabin.hy, cfg.cabin.hz, 0, cfg.cabin.y, cfg.cabin.z, cfg.mass.cabin);
+  const wallHalfZ = (cfg.bed.frontZ - cfg.bed.backZ) / 2;
+  const wallCentreZ = (cfg.bed.frontZ + cfg.bed.backZ) / 2;
+  const wallY = cfg.bed.floorY + cfg.bed.wallHalfY;
   for (const side of [-1, 1]) {
-    box(BED.wallThickness, BED.wallHalfY, wallHalfZ, side * (BED.innerHalfX + BED.wallThickness), wallY, wallCentreZ, MASS.wall);
+    box(cfg.bed.wallThickness, cfg.bed.wallHalfY, wallHalfZ, side * (cfg.bed.innerHalfX + cfg.bed.wallThickness), wallY, wallCentreZ, cfg.mass.wall);
   }
-  for (const z of [BED.frontZ + BED.wallThickness, BED.backZ - BED.wallThickness]) {
-    box(BED.innerHalfX + BED.wallThickness * 2, BED.wallHalfY, BED.wallThickness, 0, wallY, z, MASS.wall);
+  for (const z of [cfg.bed.frontZ + cfg.bed.wallThickness, cfg.bed.backZ - cfg.bed.wallThickness]) {
+    box(cfg.bed.innerHalfX + cfg.bed.wallThickness * 2, cfg.bed.wallHalfY, cfg.bed.wallThickness, 0, wallY, z, cfg.mass.wall);
   }
 
   const vehicle = world.createVehicleController(chassis);
   vehicle.indexUpAxis = 1;
   vehicle.setIndexForwardAxis = 2;
-  for (const z of [WHEEL.frontZ, WHEEL.rearZ]) {
-    for (const x of [-WHEEL.offsetX, WHEEL.offsetX]) {
-      vehicle.addWheel({ x, y: WHEEL.connectionY, z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, SUSPENSION.restLength, WHEEL.radius);
-    }
+  for (const w of cfg.wheels) {
+    vehicle.addWheel({ x: w.x, y: cfg.suspension.connectionY, z: w.z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, cfg.suspension.restLength, cfg.wheelRadius);
   }
-  for (let i = 0; i < 4; i += 1) {
-    vehicle.setWheelSuspensionStiffness(i, SUSPENSION.stiffness);
-    vehicle.setWheelSuspensionCompression(i, SUSPENSION.compression);
-    vehicle.setWheelSuspensionRelaxation(i, SUSPENSION.relaxation);
-    vehicle.setWheelMaxSuspensionTravel(i, SUSPENSION.maxTravel);
-    vehicle.setWheelMaxSuspensionForce(i, SUSPENSION.maxForce);
-    vehicle.setWheelFrictionSlip(i, TIRE.frictionSlip);
-    vehicle.setWheelSideFrictionStiffness(i, TIRE.sideFrictionStiffness);
+  for (let i = 0; i < cfg.wheels.length; i += 1) {
+    vehicle.setWheelSuspensionStiffness(i, cfg.suspension.stiffness);
+    vehicle.setWheelSuspensionCompression(i, cfg.suspension.compression);
+    vehicle.setWheelSuspensionRelaxation(i, cfg.suspension.relaxation);
+    vehicle.setWheelMaxSuspensionTravel(i, cfg.suspension.maxTravel);
+    vehicle.setWheelMaxSuspensionForce(i, cfg.suspension.maxForce);
+    vehicle.setWheelFrictionSlip(i, cfg.tire.frictionSlip);
+    vehicle.setWheelSideFrictionStiffness(i, cfg.tire.sideFrictionStiffness);
   }
 
   const cargo: RAPIER.RigidBody[] = [];
-  if (withCargo) {
-    for (const slot of CARGO_SLOTS) {
+  if (packageType) {
+    const pkg = CARGO_PACKAGES[packageType] || CARGO_PACKAGES.logs;
+    for (const slot of pkg.slots) {
       const body = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic().setTranslation(slot.x, spawnY + slot.y, SPAWN_Z + slot.z).setLinearDamping(0.12).setAngularDamping(0.6),
       );
+      const spec = CARGO_SPECS[slot.kind];
+      const dims = spec.dimensions;
       const desc =
-        slot.kind === 'log'
-          ? RAPIER.ColliderDesc.cylinder(CARGO.log.halfLength, CARGO.log.radius)
-              .setRotation({ x: Math.sin(Math.PI / 4), y: 0, z: 0, w: Math.cos(Math.PI / 4) })
-              .setMass(CARGO.log.mass)
-          : RAPIER.ColliderDesc.cuboid(CARGO.crate.half, CARGO.crate.half, CARGO.crate.half).setMass(CARGO.crate.mass);
-      world.createCollider(desc.setFriction(0.8).setCollisionGroups(CARGO_GROUPS), body);
+        spec.shape === 'cylinder'
+          ? (slot.kind === 'barrel'
+              ? RAPIER.ColliderDesc.cylinder(dims.halfLength ?? 0.38, dims.radius ?? 0.28)
+              : RAPIER.ColliderDesc.cylinder(dims.halfLength ?? 0.95, dims.radius ?? 0.28).setRotation({ x: Math.sin(Math.PI / 4), y: 0, z: 0, w: Math.cos(Math.PI / 4) }))
+          : RAPIER.ColliderDesc.cuboid(dims.halfX ?? 0.31, dims.halfY ?? 0.31, dims.halfZ ?? 0.31);
+
+      world.createCollider(desc.setMass(spec.mass).setFriction(spec.friction).setCollisionGroups(CARGO_GROUPS), body);
       cargo.push(body);
     }
   }
   return { world, chassis, vehicle, cargo };
 }
 
-function drive(rig: Rig, steps: number, throttle: number, steering: number, brake = 0): void {
+function drive(rig: Rig, steps: number, throttle: number, steering: number, brake = 0, driveWheels = [2, 3]): void {
   for (let step = 0; step < steps; step += 1) {
     const speed = rig.vehicle.currentVehicleSpeed();
     const force = throttle > 0 ? ENGINE.baseForce * throttle * Math.max(0, 1 - Math.max(0, speed) / ENGINE.maxSpeed) : 0;
-    for (const i of [2, 3]) rig.vehicle.setWheelEngineForce(i, force);
-    for (let i = 0; i < 4; i += 1) rig.vehicle.setWheelBrake(i, brake > 0 ? BRAKE.foot : throttle > 0 ? 0 : BRAKE.idle);
-    for (const i of [0, 1]) rig.vehicle.setWheelSteering(i, steering);
+    for (const i of driveWheels) rig.vehicle.setWheelEngineForce(i, force);
+    const wheelCount = rig.vehicle.numWheels();
+    for (let i = 0; i < wheelCount; i += 1) rig.vehicle.setWheelBrake(i, brake > 0 ? BRAKE.foot : throttle > 0 ? 0 : BRAKE.idle);
+    for (let i = 0; i < Math.min(2, wheelCount); i += 1) rig.vehicle.setWheelSteering(i, steering);
     rig.vehicle.updateVehicle(DT, undefined, WHEEL_RAY);
     rig.world.step();
   }
@@ -136,7 +138,7 @@ async function main(): Promise<void> {
   await RAPIER.init();
 
   console.log('\nsettle at rest (2 s, no input)');
-  const rest = buildRig(false);
+  const rest = buildRig('zil');
   drive(rest, 120, 0, 0);
   const restY = rest.chassis.translation().y;
   const restLengths = [0, 1, 2, 3].map((i) => rest.vehicle.wheelSuspensionLength(i) ?? -1);
@@ -156,7 +158,7 @@ async function main(): Promise<void> {
   check('the truck stays put with no throttle', restSpeed < 0.35, `speed = ${restSpeed.toFixed(3)} m/s`);
 
   console.log('\nfull throttle for 8 s');
-  const run = buildRig(true);
+  const run = buildRig('zil', 'logs');
   drive(run, 120, 0, 0);
   const startZ = run.chassis.translation().z;
   drive(run, 480, 1, 0);
@@ -185,17 +187,17 @@ async function main(): Promise<void> {
   const overlapping = CARGO_SLOTS.filter((slot) => slot.y - (slot.kind === 'log' ? CARGO.log.radius : CARGO.crate.half) < BED.floorY - 1e-6);
   check('no cargo slot starts inside the bed floor', overlapping.length === 0, `${overlapping.length} overlapping slot(s), spawn y base ${spawnY.toFixed(2)}`);
 
-  console.log('\nsteering sign (positive steering must turn right, towards +X)');
-  const turn = buildRig(false);
+  console.log('\nsteering sign (positive steer input must turn right, towards screen right / world -X)');
+  const turn = buildRig('zil');
   drive(turn, 120, 0, 0);
   drive(turn, 240, 1, 0);
   const beforeX = turn.chassis.translation().x;
-  drive(turn, 180, 1, 0.4);
+  drive(turn, 180, 1, -0.4);
   const afterX = turn.chassis.translation().x;
-  check('positive steering steers right', afterX - beforeX > 0.5, `x moved ${(afterX - beforeX).toFixed(2)} m`);
+  check('positive user input steers screen right (world -X)', afterX - beforeX < -0.5, `x moved ${(afterX - beforeX).toFixed(2)} m`);
 
   console.log('\nbraking from speed');
-  const stop = buildRig(true);
+  const stop = buildRig('zil', 'logs');
   drive(stop, 120, 0, 0);
   drive(stop, 360, 1, 0);
   const beforeBrake = stop.vehicle.currentVehicleSpeed();
@@ -203,8 +205,61 @@ async function main(): Promise<void> {
   const afterBrake = stop.vehicle.currentVehicleSpeed();
   check('the brake stops the truck within 3 s', Math.abs(afterBrake) < 1, `${beforeBrake.toFixed(2)} → ${afterBrake.toFixed(2)} m/s`);
 
+  console.log('\nmud physics & slip response');
+  const mudRig = buildRig('zil');
+  mudRig.chassis.setTranslation({ x: 0, y: roadHeightAt(110) + RIDE_HEIGHT + 0.1, z: 110 }, true);
+  drive(mudRig, 60, 0, 0);
+  const mudStartZ = mudRig.chassis.translation().z;
+  drive(mudRig, 180, 1, 0);
+  const mudEndZ = mudRig.chassis.translation().z;
+  check('the truck navigates deep mud with increased resistance', mudEndZ - mudStartZ > 8 && mudEndZ - mudStartZ < 35, `travelled ${(mudEndZ - mudStartZ).toFixed(1)} m in mud sector`);
+
+  console.log('\n6x6 heavy truck (KRAZ-255) sanity');
+  const krazRig = buildRig('kraz', 'construction');
+  drive(krazRig, 120, 0, 0);
+  const krazWheelContacts = [0, 1, 2, 3, 4, 5].every((i) => krazRig.vehicle.wheelIsInContact(i));
+  check('all 6 wheels of KRAZ make ground contact', krazWheelContacts, `6 wheels in contact`);
+  const krazStartZ = krazRig.chassis.translation().z;
+  drive(krazRig, 240, 1, 0, 0, [2, 3, 4, 5]);
+  const krazEndZ = krazRig.chassis.translation().z;
+  check('6x6 truck drives forward with 4-wheel rear drive', krazEndZ - krazStartZ > 20, `travelled ${(krazEndZ - krazStartZ).toFixed(1)} m`);
+
+  console.log('\ndiverse cargo packages validation (no floor overlaps)');
+  const packages: CargoPackageType[] = ['logs', 'barrels', 'construction', 'farm', 'fragile', 'mixed'];
+  for (const pkgType of packages) {
+    const pkg = CARGO_PACKAGES[pkgType];
+    const overlaps = pkg.slots.filter((s) => s.y < BED.floorY + 0.15);
+    check(`cargo package «${pkg.title}» (${pkg.tag}) slots are valid`, overlaps.length === 0 && pkg.slots.length === 8, `${pkg.slots.length} slots, ${overlaps.length} overlaps`);
+  }
+
+  console.log('\nfork branching road sanity (Level 10 - Wide Separation & Distinct Paths)');
+  const lvl10 = LEVELS[9];
+  setLevel(lvl10);
+  const forkRig = buildRig('zil');
+  const forkInfo = getActiveFork(120);
+  const branchSeparation = forkInfo ? Math.abs(forkInfo.leftCX - forkInfo.rightCX) : 0;
+  check('level 10 contains wide distinct fork branches at z=120', !!forkInfo && branchSeparation > 24, `branches separated by ${branchSeparation.toFixed(1)} m`);
+  if (forkInfo) {
+    // Left branch (sunken swamp)
+    const expectedLeftY = heightAt(forkInfo.leftCX, 120) + RIDE_HEIGHT;
+    forkRig.chassis.setTranslation({ x: forkInfo.leftCX, y: expectedLeftY + 0.2, z: 120 }, true);
+    drive(forkRig, 60, 0, 0);
+    const forkLeftY = forkRig.chassis.translation().y;
+    check('truck rests solidly on left branch terrain', Math.abs(forkLeftY - expectedLeftY) < 0.45, `y=${forkLeftY.toFixed(2)} (expected ≈ ${expectedLeftY.toFixed(2)})`);
+
+    // Right branch (elevated dry bypass)
+    const expectedRightY = heightAt(forkInfo.rightCX, 120) + RIDE_HEIGHT;
+    forkRig.chassis.setTranslation({ x: forkInfo.rightCX, y: expectedRightY + 0.2, z: 120 }, true);
+    drive(forkRig, 60, 0, 0);
+    const forkRightY = forkRig.chassis.translation().y;
+    check('truck rests solidly on right branch terrain', Math.abs(forkRightY - expectedRightY) < 0.45, `y=${forkRightY.toFixed(2)} (expected ≈ ${expectedRightY.toFixed(2)})`);
+  }
+  setLevel(LEVELS[0]);
+
   console.log(failures.length === 0 ? '\nAll physics checks passed.\n' : `\n${failures.length} check(s) failed: ${failures.join('; ')}\n`);
   process.exit(failures.length === 0 ? 0 : 1);
 }
 
 void main();
+
+

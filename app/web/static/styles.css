@@ -306,6 +306,7 @@ textarea { resize: vertical; line-height: 1.45; }
 /* Markdown в пузыре: pre-wrap ленты ломает разметку — внутри .md переключаем
    перенос строк на обычный и поджимаем отступы под плотность чата. */
 .bubble .body.md { white-space: normal; display: block; }
+.bubble .md { white-space: normal; }
 .bubble .md > :first-child { margin-top: 0; }
 .bubble .md > :last-child { margin-bottom: 0; }
 .bubble .md p { margin: 5px 0; line-height: 1.55; }
@@ -316,7 +317,7 @@ textarea { resize: vertical; line-height: 1.45; }
 .bubble .md h3 { font-size: 13px; color: #a5f3fc; margin: 8px 0 3px; }
 .bubble .md code { font-family: var(--mono); background: #1e293b; color: var(--ok); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
 .bubble .md pre code { background: transparent; color: #a5f3fc; padding: 0; }
-.bubble .md table { border-collapse: collapse; margin: 8px 0; }
+.bubble .md table { border-collapse: collapse; margin: 8px 0; width: 100%; display: block; overflow-x: auto; }
 .bubble .md th, .bubble .md td { border: 1px solid var(--border); padding: 4px 8px; font-size: 11.5px; }
 .bubble .md blockquote { border-left: 3px solid var(--border); margin: 6px 0; padding: 2px 10px; color: var(--muted); }
 .bubble .md hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
@@ -346,6 +347,45 @@ textarea { resize: vertical; line-height: 1.45; }
 .bubble.tool.collapsed .tool-body { display: none; }
 .bubble.tool .tool-detail { color: var(--muted); font-size: 11px; margin: 4px 0 0; max-height: 320px; }
 .bubble.tool .tool-result { color: var(--ok); font-size: 11px; margin-top: 5px; font-family: var(--mono); word-break: break-word; }
+
+/* Финальный ответ агента: Markdown-вид шире обычного пузыря и без pre-wrap,
+   иначе разметка получает двойные отступы от переносов исходника. */
+.bubble.answer { width: 92%; max-width: 92%; white-space: normal; border: 1px solid #1b2740; }
+.bubble.answer .answer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.bubble.answer .answer-head .who { margin-bottom: 0; }
+.bubble.answer .answer-toggle { flex: 0 0 auto; }
+.bubble.answer .answer-body.raw { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: #dbe6f5; }
+
+/* ── Откат запроса ────────────────────────────────────────────────────── */
+
+/* Запрос пользователя вместе с кнопкой отката: кнопка слева от пузыря,
+   проявляется при наведении на строку, чтобы не рябить в длинной ленте. */
+.user-row {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 82%;
+}
+.user-row .bubble.user { max-width: 100%; align-self: auto; }
+.user-row .undo-here {
+  flex: 0 0 auto;
+  opacity: 0.25;
+  padding: 2px 7px;
+  transition: opacity .12s ease;
+}
+.user-row:hover .undo-here, .user-row .undo-here:focus-visible { opacity: 1; }
+
+.undo-prompt {
+  background: #0f3b46; color: #e0fbff; border-radius: 10px; padding: 9px 12px;
+  margin: 8px 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font-size: 13px;
+}
+.undo-files {
+  max-height: 240px; overflow: auto; background: var(--bg-deep); border-radius: 8px;
+  padding: 8px 10px; margin: 6px 0 10px;
+}
+.undo-file { font-family: var(--mono); font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+.undo-files:empty { display: none; }
 
 .typing { align-self: flex-start; color: var(--dim); font-size: 11px; font-style: italic; padding: 6px 12px; background: #111c30; border-radius: 12px; }
 

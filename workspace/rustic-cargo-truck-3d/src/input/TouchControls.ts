@@ -11,6 +11,12 @@ export class TouchControls {
   steer = 0;
   steerLeft = 0;
   handbrake = false;
+
+  private buttonThrottle = 0;
+  private buttonBrake = 0;
+  private joystickThrottle = 0;
+  private joystickBrake = 0;
+
   private joystickPointer = -1;
   private originX = 0;
   private originY = 0;
@@ -66,6 +72,10 @@ export class TouchControls {
   releaseAll = (): void => {
     this.joystickPointer = -1;
     this.joystick.classList.add('hidden');
+    this.buttonThrottle = 0;
+    this.buttonBrake = 0;
+    this.joystickThrottle = 0;
+    this.joystickBrake = 0;
     this.throttle = 0;
     this.brake = 0;
     this.steer = 0;
@@ -102,6 +112,10 @@ export class TouchControls {
     this.joystickPointer = -1;
     this.steer = 0;
     this.steerLeft = 0;
+    this.joystickThrottle = 0;
+    this.joystickBrake = 0;
+    this.throttle = this.buttonThrottle;
+    this.brake = this.buttonBrake;
     this.joystick.classList.add('hidden');
   };
 
@@ -110,9 +124,20 @@ export class TouchControls {
     const dy = event.clientY - this.originY;
     const normalizedX = Math.max(-1, Math.min(1, dx / MAX_RADIUS));
     const normalizedY = Math.max(-1, Math.min(1, dy / MAX_RADIUS));
+
     const x = Math.abs(normalizedX) < DEAD_ZONE ? 0 : Math.sign(normalizedX) * (Math.abs(normalizedX) - DEAD_ZONE) / (1 - DEAD_ZONE);
+    const y = Math.abs(normalizedY) < DEAD_ZONE ? 0 : Math.sign(normalizedY) * (Math.abs(normalizedY) - DEAD_ZONE) / (1 - DEAD_ZONE);
+
     this.steer = Math.max(0, x);
     this.steerLeft = Math.max(0, -x);
+
+    // Negative Y (dragged up) -> throttle; Positive Y (dragged down) -> brake/reverse
+    this.joystickThrottle = Math.max(0, -y);
+    this.joystickBrake = Math.max(0, y);
+
+    this.throttle = Math.max(this.buttonThrottle, this.joystickThrottle);
+    this.brake = Math.max(this.buttonBrake, this.joystickBrake);
+
     this.joystick.style.transform = `translate(${normalizedX * 35}px, ${normalizedY * 35}px)`;
   };
 
@@ -134,12 +159,15 @@ export class TouchControls {
   };
 
   private readonly updateButtons = (): void => {
-    this.throttle = (this.buttonPointers.get(this.throttleButton)?.size ?? 0) > 0 ? 1 : 0;
-    this.brake = (this.buttonPointers.get(this.brakeButton)?.size ?? 0) > 0 ? 1 : 0;
+    this.buttonThrottle = (this.buttonPointers.get(this.throttleButton)?.size ?? 0) > 0 ? 1 : 0;
+    this.buttonBrake = (this.buttonPointers.get(this.brakeButton)?.size ?? 0) > 0 ? 1 : 0;
     this.handbrake = (this.buttonPointers.get(this.handbrakeButton)?.size ?? 0) > 0;
+    this.throttle = Math.max(this.buttonThrottle, this.joystickThrottle);
+    this.brake = Math.max(this.buttonBrake, this.joystickBrake);
   };
 
   private readonly preventBrowserGesture = (event: Event): void => {
     event.preventDefault();
   };
 }
+

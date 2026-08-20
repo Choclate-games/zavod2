@@ -26,7 +26,7 @@ export class SceneRenderer {
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -42,8 +42,8 @@ export class SceneRenderer {
     this.sunLight = new THREE.DirectionalLight(0xfff0db, 2.5);
     this.sunLight.position.set(45, 65, 35);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 2048;
-    this.sunLight.shadow.mapSize.height = 2048;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
     this.sunLight.shadow.camera.near = 5;
     this.sunLight.shadow.camera.far = 175;
     const d = 48;

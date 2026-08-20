@@ -3703,8 +3703,12 @@ class GamePromptFactoryGUI(ctk.CTk):
         """Останавливает задачу текущего чата — остальные чаты продолжают работу."""
         if not self.active_chat_session:
             return
-        if self.chat_jobs.request_stop(self.active_chat_session.id):
+        outcome = self.chat_jobs.request_stop(self.active_chat_session.id)
+        if outcome == "requested":
             self.lbl_agy_term_status.configure(text="● Остановка...", text_color="#ff4d79")
+        elif outcome == "forced":
+            # Повторное нажатие: чат освобождён, даже если процесс агента упрямится.
+            self.lbl_agy_term_status.configure(text="● Чат освобождён", text_color="#ff4d79")
 
     def _update_chat_run_indicator(self):
         """Показывает, сколько чатов работает прямо сейчас."""

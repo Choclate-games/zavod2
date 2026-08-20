@@ -81,10 +81,29 @@ def test_opencode_cli_stream_events():
     tool_event = prov.parse_stream_event(tool_line)
     assert tool_event["kind"] == "tool_result" and "hi" in tool_event["text"]
 
+    # Конец шага — это не конец задачи: он идёт тихой строкой (kind "meta"),
+    # но токены в ней считаются, иначе расход агента терялся бы.
     finish_line = ('{"type":"step_finish","sessionID":"ses_1","part":{"type":"step-finish",'
                    '"tokens":{"input":3,"output":5,"reasoning":0}}}')
     finish = prov.parse_stream_event(finish_line)
-    assert finish["kind"] == "result" and finish["tokens"] == 8
+    assert finish["kind"] == "meta" and finish["tokens"] == 8
+
+    # Единственная карточка итога появляется в конце прогона
+    final = prov.finalize_events(elapsed=65.0, tokens=8, returncode=0)[0]
+    assert final["kind"] == "result" and final["tokens"] == 8 and "1м" in final["duration"]
+
+
+def test_opencode_tool_start_is_announced_once():
+    """Обновления одной и той же части инструмента не должны плодить карточки."""
+    prov = OpenCodeCLIAgent()
+    prov.reset_stream_state()
+    pending = ('{"type":"tool","part":{"type":"tool","id":"p1","tool":"bash",'
+               '"state":{"status":"pending","input":{"command":"npm run build"}}}}')
+    running = pending.replace("pending", "running")
+
+    first = prov.parse_stream_event(pending)
+    assert first["kind"] == "tool" and first["detail"] == "npm run build"
+    assert prov.parse_stream_event(running) is None
 
 def test_agy_is_available_check():
     prov = AGYProvider()

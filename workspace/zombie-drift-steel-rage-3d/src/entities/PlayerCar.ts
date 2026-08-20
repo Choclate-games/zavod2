@@ -9,10 +9,11 @@ import { gameStore } from '../core/Store';
 import { audioManager } from '../core/AudioManager';
 import { eventBus } from '../core/EventBus';
 
-/** Переиспользуемый вектор: в игровом цикле нельзя аллоцировать каждый кадр. */
 const _scratchForward = new THREE.Vector3();
 const _scratchRearLeft = new THREE.Vector3();
 const _scratchRearRight = new THREE.Vector3();
+const _scratchExWorld = new THREE.Vector3();
+const _scratchForwardDir = new THREE.Vector3();
 
 export class PlayerCar {
   public physics = new VehiclePhysics();
@@ -46,13 +47,29 @@ export class PlayerCar {
     dt: number,
     controls: VehicleControls,
     particleSystem: ParticleSystem,
-    skidmarkSystem: SkidmarkSystem
+    skidmarkSystem: SkidmarkSystem,
+    arena?: {
+      obstacles: import('../graphics/ArenaBuilder').ArenaObstacle[];
+    },
+    onObstacleHit?: (obs: import('../graphics/ArenaBuilder').ArenaObstacle, speed: number, hitX: number, hitZ: number) => void
   ): void {
-    const state = this.physics.update(dt, controls);
+    const state = this.physics.update(
+      dt,
+      controls,
+      arena?.obstacles,
+      (obs, impactSpeed, hitX, hitZ) => {
+        if (impactSpeed > 3.5) {
+          particleSystem.emitSparks(hitX, 0.5, hitZ, Math.min(12, Math.floor(impactSpeed * 1.5)));
+          audioManager.playObstacleHit(Math.min(1.8, impactSpeed / 15));
+        }
+        if (onObstacleHit) {
+          onObstacleHit(obs, impactSpeed, hitX, hitZ);
+        }
+      }
+    );
     this.updateMeshTransforms();
 
-    // Качение колёс. Знак берём из реальной скорости вдоль корпуса, а не из
-    // положения газа: на выкате и в заносе машина едет, когда газ уже отпущен.
+    // Качение колёс
     const forwardSpeed = this.physics.velocity.dot(
       _scratchForward.set(state.forward.x, state.forward.y, state.forward.z)
     );
@@ -62,26 +79,24 @@ export class PlayerCar {
       spin.rotation.x = this.wheelRotation;
     });
 
-    // Поворот руля крутит только внешнюю группу — качение живёт во вложенной,
-    // поэтому передние колёса не «косят» при одновременном повороте и вращении.
-    // Знак тот же, что у поворота корпуса: руль вправо (steering > 0) уменьшает yaw.
+    // Поворот передних колёс
     const visualSteer = -this.physics.steeringAngle;
     this.meshResult.frontLeftWheel.rotation.y = visualSteer;
     this.meshResult.frontRightWheel.rotation.y = visualSteer;
 
-    // Динамическое освещение тормозов и задних фонарей
+    // Стоп-сигналы и задние фонари
     const isBraking = controls.throttle < -0.05 || controls.handbrake || state.isDrifting;
     if (isBraking) {
-      this.meshResult.taillightMat.emissiveIntensity = 3.2;
-      this.meshResult.brakeLight.intensity = 2.0;
+      this.meshResult.taillightMat.emissiveIntensity = 3.0;
+      this.meshResult.brakeLight.intensity = 1.6;
     } else {
       this.meshResult.taillightMat.emissiveIntensity = 0.8;
       this.meshResult.brakeLight.intensity = 0.05;
     }
 
-    // Динамический свет нитро
+    // Нитро свет
     if (state.isNitroActive) {
-      this.meshResult.nitroLight.intensity = 3.2 + Math.random() * 0.8;
+      this.meshResult.nitroLight.intensity = 2.5 + Math.random() * 0.5;
     } else {
       this.meshResult.nitroLight.intensity = 0;
     }
@@ -91,13 +106,14 @@ export class PlayerCar {
     audioManager.updateEngine(speedRatio, state.isDrifting, state.isNitroActive);
 
     // Particle & Skidmark emission
-    const forwardDir = new THREE.Vector3(state.forward.x, state.forward.y, state.forward.z);
+    _scratchForwardDir.set(state.forward.x, state.forward.y, state.forward.z);
 
     // Nitro flames
     if (state.isNitroActive) {
-      for (const ex of this.meshResult.exhaustPoints) {
-        const exWorld = ex.clone().applyMatrix4(this.meshResult.root.matrixWorld);
-        particleSystem.emitNitroFire(exWorld.x, exWorld.y, exWorld.z, forwardDir, 2);
+      for (let i = 0; i < this.meshResult.exhaustPoints.length; i++) {
+        const ex = this.meshResult.exhaustPoints[i];
+        _scratchExWorld.copy(ex).applyMatrix4(this.meshResult.root.matrixWorld);
+        particleSystem.emitNitroFire(_scratchExWorld.x, _scratchExWorld.y, _scratchExWorld.z, _scratchForwardDir, 2);
       }
     }
 

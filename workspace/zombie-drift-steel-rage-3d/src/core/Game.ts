@@ -200,13 +200,43 @@ export class Game {
         // 1. Step Physics
         PhysicsWorld.getInstance().step(dt);
 
-        // 2. Update Player Car
-        this.playerCar.update(dt, controls, this.particles, this.skidmarks);
+        // 2. Update Player Car with Solid Obstacles & Boost Pads
+        this.playerCar.update(
+          dt,
+          controls,
+          this.particles,
+          this.skidmarks,
+          this.arena,
+          (obs, impactSpeed) => {
+            if (obs.isCrate && impactSpeed > 2.8) {
+              const crate = this.arena.crates.find((c) => c.obstacleRef === obs);
+              if (crate && !crate.destroyed) {
+                this.zombieManager.smashCrate(crate, this.scrapManager, this.particles);
+              }
+            } else if (obs.isBarrel && impactSpeed > 4.0) {
+              const barrel = this.arena.barrels.find((b) => b.obstacleRef === obs);
+              if (barrel && !barrel.exploded) {
+                this.zombieManager.explodeBarrel(
+                  barrel,
+                  this.scrapManager,
+                  this.particles,
+                  this.renderer.cameraController,
+                  this.playerCar,
+                  this.renderer.dynamicLights,
+                  this.arena
+                );
+              }
+            }
+            if (impactSpeed > 4.0) {
+              this.renderer.cameraController.addTrauma(Math.min(0.25, impactSpeed / 30));
+            }
+          }
+        );
 
         // 3. Update Waves
         this.waveManager.update(dt, this.playerCar.physics.position, this.zombieManager);
 
-        // 4. Update Zombies & Combat Collisions
+        // 4. Update Zombies & Combat Collisions with Arena Obstacles
         this.zombieManager.update(
           dt,
           this.playerCar,
@@ -214,7 +244,8 @@ export class Game {
           this.scrapManager,
           this.particles,
           this.renderer.cameraController,
-          this.renderer.dynamicLights
+          this.renderer.dynamicLights,
+          this.arena
         );
 
         // 5. Update Scrap Drops & Magnet Collection

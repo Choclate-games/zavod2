@@ -109,7 +109,7 @@ export class UpgradeManager {
       {
         id: 'stat_ram_boost',
         nameRu: 'Шипастый Булл-Бар',
-        descriptionRu: 'Увеличивает урон от лобового тарана зомби на +45%.',
+        descriptionRu: 'Увеличивает урон от лобового тарана зомби на +20%.',
         icon: '🛡️',
         rarity: 'COMMON',
         category: 'STAT',
@@ -122,7 +122,7 @@ export class UpgradeManager {
       {
         id: 'stat_nitro_supercharger',
         nameRu: 'Нитро-Нагнетатель',
-        descriptionRu: 'Ускоряет перезарядку нитро на +50% и увеличивает длительность форсажа.',
+        descriptionRu: 'Ускоряет перезарядку нитро на +25% и продлевает форсаж.',
         icon: '💨',
         rarity: 'RARE',
         category: 'STAT',
@@ -135,28 +135,28 @@ export class UpgradeManager {
       {
         id: 'stat_magnet',
         nameRu: 'Магнитный Захват',
-        descriptionRu: 'Увеличивает радиус сбора шестеренок и аптечек на +6 метров.',
+        descriptionRu: 'Увеличивает радиус сбора шестеренок и аптечек на +1.8 метра.',
         icon: '🧲',
         rarity: 'COMMON',
         category: 'UTILITY',
         maxLevel: 5,
         currentLevel: 0,
         apply: () => {
-          gameStore.run.magnetRadius += 6.0;
+          gameStore.run.magnetRadius += 1.8;
         },
       },
       {
         id: 'stat_repair',
-        nameRu: 'Нано-Ремонт и Броня',
-        descriptionRu: 'Мгновенно восстанавливает +80 HP и увеличивает максимальную прочность на +30 HP.',
+        nameRu: 'Полевой Ремонт и Укрепление',
+        descriptionRu: 'Восстанавливает +20 HP и увеличивает максимальную прочность корпуса на +8 HP.',
         icon: '🔧',
         rarity: 'COMMON',
         category: 'STAT',
-        maxLevel: 10,
+        maxLevel: 6,
         currentLevel: 0,
         apply: (game: any) => {
-          gameStore.run.maxHealth += 30;
-          (game.playerCar as PlayerCar).heal(80);
+          gameStore.run.maxHealth += 8;
+          (game.playerCar as PlayerCar).heal(20);
         },
       },
       {
@@ -170,6 +170,33 @@ export class UpgradeManager {
         currentLevel: 0,
         apply: () => {
           gameStore.save.garageUpgrades.driftLevel += 1;
+        },
+      },
+      {
+        id: 'stat_turret_servo',
+        nameRu: 'Сервоприводы Орудий',
+        descriptionRu: 'Ускоряет наведение турели на +22% и снижает перезарядку всех орудий на 8%.',
+        icon: '🎯',
+        rarity: 'RARE',
+        category: 'STAT',
+        maxLevel: 4,
+        currentLevel: 0,
+        apply: () => {
+          gameStore.run.turretSpeedMultiplier = (gameStore.run.turretSpeedMultiplier || 1.0) * 1.22;
+          gameStore.run.weaponCooldownMultiplier = (gameStore.run.weaponCooldownMultiplier || 1.0) * 0.92;
+        },
+      },
+      {
+        id: 'stat_bullet_caliber',
+        nameRu: 'Бронебойный Калибр',
+        descriptionRu: 'Увеличивает разрушительный урон всех орудий и снарядов на +12%.',
+        icon: '💥',
+        rarity: 'RARE',
+        category: 'STAT',
+        maxLevel: 4,
+        currentLevel: 0,
+        apply: () => {
+          gameStore.run.weaponDamageMultiplier = (gameStore.run.weaponDamageMultiplier || 1.0) * 1.12;
         },
       },
     ];

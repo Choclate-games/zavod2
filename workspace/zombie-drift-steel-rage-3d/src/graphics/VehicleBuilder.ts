@@ -78,11 +78,11 @@ export class VehicleBuilder {
       metalness: 0.9,
     });
 
-    // Glowing Light Materials
+    // Pure Neutral White Headlight Materials (No artificial yellow or color tint)
     const headlightLensMat = new THREE.MeshStandardMaterial({
-      color: 0xfffbee,
-      emissive: 0xfffae0,
-      emissiveIntensity: 3.2,
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 2.8,
       roughness: 0.1,
     });
 
@@ -96,11 +96,11 @@ export class VehicleBuilder {
     const redGlowMat = new THREE.MeshBasicMaterial({ color: 0xff0033 });
     const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0.1 });
 
-    // Volumetric Beam Material (Dusty Wasteland Headlight Beams)
+    // Volumetric Beam Material (Neutral White Headlight Beams)
     const beamMat = new THREE.MeshBasicMaterial({
-      color: 0xfffae6,
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.09,
+      opacity: 0.055,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -143,8 +143,8 @@ export class VehicleBuilder {
       return wheelGroup;
     };
 
-    // Forward SpotLight (Real dynamic lighting on zombies and asphalt)
-    const headlightSpot = new THREE.SpotLight(0xfff5dd, 2.8, 36, Math.PI / 4.2, 0.55, 1.2);
+    // Forward SpotLight (Pure white dynamic road illumination)
+    const headlightSpot = new THREE.SpotLight(0xffffff, 2.4, 34, Math.PI / 4.2, 0.6, 1.2);
     headlightSpot.position.set(0, 0.6, 1.5);
     const spotTarget = new THREE.Object3D();
     spotTarget.position.set(0, 0.2, 18);

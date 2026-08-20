@@ -248,19 +248,48 @@ class AGYProvider(AIProvider):
     Поддерживает режим YOLO (--dangerously-skip-permissions), двухсторонний интерактивный stdin, стриминг и квоты.
     """
 
+    # Сколько агенту разрешено работать над одной задачей (--print-timeout).
+    # По умолчанию сутки: длинные автономные прогоны не должны обрываться посреди
+    # работы. Переопределяется переменной AGY_PRINT_TIMEOUT (формат Go: "90m0s",
+    # "24h0m0s"); пустое значение полностью убирает флаг.
+    DEFAULT_PRINT_TIMEOUT = "24h0m0s"
+    DEFAULT_TIMEOUT_SECONDS = 24 * 60 * 60
+
+    @classmethod
+    def _blocking_timeout(cls) -> Optional[int]:
+        """Потолок для subprocess.run: AGY_TIMEOUT_SECONDS, 0/пусто — без потолка."""
+        raw = (os.getenv("AGY_TIMEOUT_SECONDS") or "").strip()
+        if not raw:
+            return cls.DEFAULT_TIMEOUT_SECONDS
+        try:
+            value = int(raw)
+        except ValueError:
+            return cls.DEFAULT_TIMEOUT_SECONDS
+        return value if value > 0 else None
+
+    @classmethod
+    def _print_timeout(cls) -> Optional[str]:
+        value = os.getenv("AGY_PRINT_TIMEOUT")
+        if value is None:
+            return cls.DEFAULT_PRINT_TIMEOUT
+        value = value.strip()
+        return value or None
+
     def __init__(
         self,
         cli_path: Optional[str] = None,
         model: Optional[str] = None,
         effort: Optional[str] = None,
         yolo: bool = True,
-        timeout_seconds: int = 300
+        timeout_seconds: Optional[int] = None
     ):
         self.cli_path = cli_path or os.getenv("AGY_CLI_PATH", "agy")
         self.model = model or os.getenv("AGY_MODEL", None)
         self.effort = effort or os.getenv("AGY_EFFORT", None)
         self.yolo = yolo
-        self.timeout_seconds = timeout_seconds
+        # Блокирующий прогон живёт столько же, сколько сам агент: обрывать его
+        # раньше --print-timeout нельзя, иначе задача умрёт на середине.
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else self._blocking_timeout()
         self.fallback = LocalAIProvider()
         self.quota_tracker = AGYQuotaTracker()
 
@@ -288,7 +317,6 @@ class AGYProvider(AIProvider):
         prompt: str,
         output_format: str = "text",
         yolo: Optional[bool] = None,
-        print_timeout: Optional[str] = "20m0s",
         with_effort: bool = True,
         conversation_id: Optional[str] = None
     ) -> list[str]:
@@ -298,6 +326,7 @@ class AGYProvider(AIProvider):
         # контекст целиком, а не пересказ из GUI.
         if conversation_id:
             cmd.extend(["--conversation", conversation_id])
+        print_timeout = self._print_timeout()
         if print_timeout:
             cmd.extend(["--print-timeout", print_timeout])
         if use_yolo:
@@ -504,8 +533,7 @@ class AGYProvider(AIProvider):
 
         def attempt(with_effort: bool):
             cmd = self._build_command(
-                prompt, output_format=output_format, yolo=yolo,
-                print_timeout="10m0s", with_effort=with_effort
+                prompt, output_format=output_format, yolo=yolo, with_effort=with_effort
             )
             try:
                 return subprocess.run(
@@ -556,8 +584,15 @@ class AGYProvider(AIProvider):
         `on_conversation_id` — вызывается, когда CLI сообщил ID своей беседы;
                                его нужно сохранить, чтобы продолжить чат позже.
         """
-        import io
         import time
+
+        from providers.proc_stream import (
+            env_seconds,
+            iter_process_lines,
+            kill_process_tree,
+            popen_kwargs,
+            wait_quietly,
+        )
 
         cli = self.resolve_cli()
         if not cli:
@@ -589,7 +624,6 @@ class AGYProvider(AIProvider):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
         seen_conversation: Dict[str, str] = {}
 
@@ -616,8 +650,7 @@ class AGYProvider(AIProvider):
             """Один прогон CLI. Возвращает (код, вывод, остановлен, отклонён_effort)."""
             cmd = self._build_command(
                 prompt, output_format="stream-json", yolo=yolo,
-                print_timeout="25m0s", with_effort=with_effort,
-                conversation_id=conversation_id
+                with_effort=with_effort, conversation_id=conversation_id
             )
             cmd[0] = cli
             shown_cmd = " ".join(
@@ -633,7 +666,7 @@ class AGYProvider(AIProvider):
                     cwd=work_dir,
                     env=env,
                     bufsize=0,
-                    creationflags=creationflags
+                    **popen_kwargs()
                 )
             except OSError as exc:
                 raise RuntimeError(
@@ -641,26 +674,50 @@ class AGYProvider(AIProvider):
                 ) from exc
 
             collected: List[str] = []
-            reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
             stopped = False
+            hung = False
             effort_rejected = False
             reported_error = False
+            started_at = time.monotonic()
+
+            # По умолчанию не обрываем: см. пояснение в providers/cli_agents.py
+            idle_timeout = env_seconds("AGENT_IDLE_TIMEOUT_SECONDS", 0.0)
+            idle_ping = env_seconds("AGENT_IDLE_PING_SECONDS", 60.0)
 
             try:
-                while True:
-                    if stop_check_fn and stop_check_fn():
+                # Чтение идёт через отдельный поток (providers.proc_stream):
+                # блокирующий readline не давал нажать «Стоп», пока агент молчит.
+                for item, payload in iter_process_lines(
+                    proc,
+                    stop_check_fn=stop_check_fn,
+                    idle_ping=idle_ping,
+                    idle_timeout=idle_timeout,
+                ):
+                    if item == "stop":
                         stopped = True
-                        proc.kill()
-                        emit({"kind": "system", "icon": "⏹️", "text": "Процесс принудительно остановлен."})
+                        kill_process_tree(proc)
+                        emit({"kind": "system", "icon": "⏹️",
+                              "text": "Процесс и все его дочерние процессы остановлены."})
                         break
 
-                    line = reader.readline()
-                    if not line:
-                        if proc.poll() is not None:
-                            break
-                        time.sleep(0.02)
+                    if item == "timeout":
+                        hung = True
+                        kill_process_tree(proc)
+                        reported_error = True
+                        emit({"kind": "error",
+                              "text": f"AGY CLI не выдал ни строки за {int(payload or 0)} с и "
+                                      f"считается зависшим — процесс снят.\n"
+                                      f"Порог задаётся переменной AGENT_IDLE_TIMEOUT_SECONDS "
+                                      f"(сейчас {int(idle_timeout)} с, 0 — не обрывать)."})
+                        break
+
+                    if item == "idle":
+                        emit({"kind": "meta",
+                              "text": f"⏳ агент молчит {int(payload or 0)} с "
+                                      f"(всего в работе {int(time.monotonic() - started_at)} с)"})
                         continue
 
+                    line = str(payload)
                     collected.append(line)
                     capture_conversation(line)
                     event = self.parse_stream_event(line)
@@ -679,11 +736,14 @@ class AGYProvider(AIProvider):
                         proc.stdout.close()
                     except Exception:
                         pass
-                proc.wait()
+                wait_quietly(proc)
 
             raw = "".join(collected)
             if effort_rejected:
                 return proc.returncode, raw, stopped, True
+
+            if hung:
+                return proc.returncode or 1, raw, stopped, False
 
             if proc.returncode not in (0, None) and not stopped:
                 if reported_error:
