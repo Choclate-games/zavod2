@@ -503,6 +503,21 @@ def play_build(slug: str) -> Dict[str, Any]:
     return service.build_play(_slug(slug))
 
 
+@app.post("/api/play/{slug}/build-zip")
+def play_build_zip(slug: str):
+    """
+    Собрать игру и сразу отдать ZIP на скачивание.
+
+    Роут синхронный (FastAPI выполнит его в пуле потоков): браузер держит запрос
+    до конца сборки, а ход сборки видно в логе вкладки «Игра».
+    """
+    try:
+        path = service.build_zip(_slug(slug))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
 @app.post("/api/play/{slug}/window")
 async def play_window(slug: str, request: Request) -> Dict[str, Any]:
     payload = await _body(request)

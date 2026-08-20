@@ -31,7 +31,7 @@ from app import chat_store, design_os, notify, project_meta, sandbox, snapshots,
 from app.chat_jobs import ChatJobManager
 from app.config import BASE_DIR, DESIGN_OS_ENABLED, config
 from app.context import GenerationContext
-from app.game_runner import DevServer, detect_start_command, open_internal_browser
+from app.game_runner import DevServer, read_scripts, detect_start_command, open_internal_browser
 from app.logging import register_log_listener
 from app.pipeline import Pipeline
 from app.web.bus import bus
@@ -1620,6 +1620,70 @@ class FactoryService:
         server = DevServer(proj_dir, on_log=lambda m: self._play_log(slug, m), on_url=lambda _u: None)
         threading.Thread(target=server.build, daemon=True).start()
         return {"status": "started"}
+
+    # Куда сборщики кладут готовую игру. Порядок = приоритет.
+    BUILD_OUTPUT_DIRS = ("dist", "build", "out", "www", "public/dist")
+
+    def _build_output_dir(self, proj_dir: Path) -> Optional[Path]:
+        for relative in self.BUILD_OUTPUT_DIRS:
+            candidate = proj_dir / relative
+            if candidate.is_dir() and any(candidate.iterdir()):
+                return candidate
+        return None
+
+    def build_zip(self, slug: str) -> Path:
+        """
+        Синхронно собирает игру и пакует результат в ZIP.
+
+        Внутри архива — одна папка со слагом проекта, чтобы игра не рассыпалась
+        по каталогу при распаковке (этого же ждут площадки вроде Yandex Games).
+        Ход сборки уходит в лог вкладки «Игра» обычными событиями play.log.
+        """
+        proj_dir = sandbox.project_dir(slug)
+        server = DevServer(proj_dir, on_log=lambda m: self._play_log(slug, m), on_url=lambda _u: None)
+
+        has_build = "build" in read_scripts(proj_dir)
+        if has_build:
+            if not (proj_dir / "node_modules").exists():
+                if server.install_dependencies() != 0:
+                    raise RuntimeError("npm install завершился с ошибкой — сборка отменена.")
+            if server.build() != 0:
+                raise RuntimeError("npm run build завершился с ошибкой. Смотрите вывод сборки.")
+            source = self._build_output_dir(proj_dir)
+            if source is None:
+                raise RuntimeError(
+                    "Сборка прошла, но каталог результата не найден "
+                    f"(искали: {', '.join(self.BUILD_OUTPUT_DIRS)})."
+                )
+        else:
+            # Игра без сборщика: пакуем сам проект, если в нём есть точка входа.
+            if not (proj_dir / "index.html").exists():
+                raise RuntimeError(
+                    "В package.json нет скрипта build, а index.html в корне проекта отсутствует — "
+                    "паковать нечего. Попросите агента настроить сборку."
+                )
+            source = proj_dir
+            self._play_log(slug, "ℹ️ Скрипта build нет — пакую файлы проекта как есть.")
+
+        zip_path = config.output_dir / f"{slug}-build.zip"
+        if zip_path.exists():
+            zip_path.unlink()
+        files = 0
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, names in os.walk(source):
+                dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", ".vite", ".cache")]
+                for name in names:
+                    full_path = Path(root) / name
+                    if full_path == zip_path:
+                        continue
+                    zf.write(full_path, arcname=str(Path(slug) / full_path.relative_to(source)))
+                    files += 1
+        size_mb = zip_path.stat().st_size / 1048576
+        self._play_log(
+            slug,
+            f"📦 Архив готов: {zip_path.name} — папка {slug}/, файлов: {files}, {size_mb:.1f} МБ.",
+        )
+        return zip_path
 
     def open_preview_window(self, slug: str, url: str) -> Dict[str, Any]:
         """Отдельное окно предпросмотра (pywebview / Chromium --app / браузер)."""

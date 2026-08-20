@@ -1743,6 +1743,46 @@ function startPlay() {
   if (slug) openPlay(slug);
 }
 
+/**
+ * Собрать игру (npm run build) и сразу скачать ZIP с готовой сборкой.
+ * Запрос держится до конца сборки, поэтому ход виден в логе dev-сервера,
+ * а кнопка блокируется, чтобы не запустить вторую сборку поверх первой.
+ */
+async function buildAndDownloadZip() {
+  const slug = $("play-project").value;
+  if (!slug) { toast("Сборка", "Сначала выберите проект.", "warn"); return; }
+
+  const btn = $("btn-play-build-zip");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ Сборка...";
+  toast("Сборка", `${slug}: npm run build, это может занять пару минут...`);
+  try {
+    const res = await fetch(`/api/play/${encodeURIComponent(slug)}/build-zip`, { method: "POST" });
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try { message = (await res.json()).detail || message; } catch (_e) { /* не JSON */ }
+      toast("Сборка", message, "err");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = el("a");
+    link.href = url;
+    link.download = `${slug}-build.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast("Сборка", `Готово: ${slug}-build.zip (внутри папка ${slug}/)`, "ok");
+  } catch (err) {
+    toast("Сборка", String(err), "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
 /* ── Менеджер запущенных игр ──────────────────────────────────────────── */
 
 async function loadServers() {
@@ -2333,6 +2373,7 @@ function bindPlay() {
     if (res.status === "error") toast("Окно предпросмотра", res.message, "err");
   };
   $("btn-play-build").onclick = () => api(`/api/play/${encodeURIComponent($("play-project").value)}/build`, { method: "POST" });
+  $("btn-play-build-zip").onclick = buildAndDownloadZip;
   $("btn-play-stop").onclick = async () => {
     await api(`/api/play/${encodeURIComponent($("play-project").value)}/stop`, { method: "POST" });
     loadPlayState();

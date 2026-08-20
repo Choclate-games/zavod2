@@ -36,7 +36,7 @@ def _npm_command() -> str:
     return "npm.cmd" if sys.platform == "win32" else "npm"
 
 
-def _read_scripts(project_dir: Path) -> dict:
+def read_scripts(project_dir: Path) -> dict:
     pkg = project_dir / "package.json"
     if not pkg.exists():
         return {}
@@ -48,7 +48,7 @@ def _read_scripts(project_dir: Path) -> dict:
 
 def detect_start_command(project_dir: Path) -> Optional[list[str]]:
     """Возвращает команду запуска dev-сервера или None, если проект не Node-овый."""
-    scripts = _read_scripts(project_dir)
+    scripts = read_scripts(project_dir)
     for script in ("dev", "start", "preview"):
         if script in scripts:
             return [_npm_command(), "run", script]
@@ -57,7 +57,7 @@ def detect_start_command(project_dir: Path) -> Optional[list[str]]:
 
 def _dev_script(project_dir: Path) -> Optional[tuple]:
     """Имя скрипта запуска и его команда — нужны, чтобы понять, это Vite или нет."""
-    scripts = _read_scripts(project_dir)
+    scripts = read_scripts(project_dir)
     for script in ("dev", "start", "preview"):
         if script in scripts:
             return script, str(scripts[script])
