@@ -1995,6 +1995,7 @@ function renderSettings() {
   $("set-notify").checked = settings.notifications;
   $("chk-notify").checked = settings.notifications;
   $("set-reset-launch").checked = !!settings.reset_game_on_launch;
+  $("set-template-mixing").checked = !!settings.allow_template_mixing;
 
   const fish = settings.fish_audio || {};
   $("set-fish-key").value = fish.api_key || "";
@@ -2022,6 +2023,7 @@ async function saveSettings() {
       workspace_dir: $("set-workspace").value.trim(),
       notifications: $("set-notify").checked,
       reset_game_on_launch: $("set-reset-launch").checked,
+      allow_template_mixing: $("set-template-mixing").checked,
       fish_audio: { api_key: $("set-fish-key").value.trim(), model: $("set-fish-model").value },
     },
   });

@@ -1,277 +1,213 @@
-# Rapier: машина на raycast-подвеске (и груз, который не вылетает)
+# Three.js + Rapier 3D: Dynamic Raycast Vehicle Controller (Эталонная физика)
 
-Всё ниже проверено на реальной сборке `@dimforge/rapier3d-compat@0.13` + Three.js
-r170 в игре про доставку брёвен. Каждый пункт соответствует багу, который дошёл
-до игрока: «колёса не двигаются», «машина не едет», «детали наслаиваются».
+> 💡 **Интерактивное демо**: Протестируйте работу этой физики в `workspace/knowledge-showcase/` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D 1:1)»*).
 
----
-
-## 1. Не пишите свою «физику машины» поверх RigidBody
-
-Самая дорогая ошибка: взять один динамический бокс и каждый кадр назначать ему
-скорость.
-
-```ts
-// ❌ так машина не едет, а телепортируется; подвески нет, колёса — декорация
-const nextZ = current.z + clamp(target - current.z, -a * dt, a * dt);
-body.setLinvel({ x: current.x * 0.92 + steer * 0.22, y: current.y, z: nextZ }, true);
-```
-
-Почему это не работает:
-
-- `setLinvel` затирает то, что насчитал солвер, — сцепление, отдачу подвески,
-  реакцию на уклон. Машина одинаково едет в горку и с горки.
-- Скорость задаётся в **мировых** осях, поэтому машина всегда едет вдоль `+Z`
-  независимо от того, куда смотрит нос.
-- Колёс в симуляции нет вообще, значит их вращение и ход подвески приходится
-  выдумывать — отсюда «колёса не крутятся».
-
-В Rapier для этого есть штатный контроллер: `DynamicRayCastVehicleController`.
-Кузов — один `RigidBody`, каждое колесо — луч подвески, а не отдельное тело.
-Никаких joint'ов, никаких четырёх шаров с трением.
+Настоящая, проверенная в продакшене физика грузовика/автомобиля на связке **Three.js** и физического движка **Rapier3D (WebAssembly)** через `RAPIER.DynamicRayCastVehicleController`.
 
 ---
 
-## 2. Минимальная рабочая сборка
+## 1. Архитектура физического мира (`PhysicsWorld.ts`)
 
-```ts
-const chassis = world.createRigidBody(
-  RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(x, y, z)
-    .setLinearDamping(0.08)
-    .setAngularDamping(0.9)   // без этого кузов рыскает на кочках
-    .setCcdEnabled(true),
-);
+```typescript
+import RAPIER from '@dimforge/rapier3d-compat';
+import * as THREE from 'three';
 
-// Составной коллайдер: рама + кабина + борта кузова, массы задаются явно.
-world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setMass(360), chassis);
+const groups = (membership: number, filter: number): number => (membership << 16) | filter;
 
-const vehicle = world.createVehicleController(chassis);
-vehicle.indexUpAxis = 1;
-vehicle.setIndexForwardAxis = 2;      // ← это СЕТТЕР, а не метод, см. §3
-
-for (const z of [frontZ, rearZ]) {
-  for (const x of [-offsetX, offsetX]) {
-    vehicle.addWheel(
-      { x, y: connectionY, z },       // точка крепления в осях кузова
-      { x: 0, y: -1, z: 0 },          // направление луча подвески
-      { x: -1, y: 0, z: 0 },          // ось вращения колеса
-      suspensionRestLength,
-      wheelRadius,
-    );
-  }
-}
-```
-
-Порядок в цикле задаёт индексы колёс — держите их в именованных константах
-(`FRONT_WHEELS = [0, 1]`, `REAR_WHEELS = [2, 3]`), иначе руль однажды окажется
-на задней оси.
-
----
-
-## 3. Три ловушки API, на которых теряется час
-
-1. **`setIndexForwardAxis` объявлен как сеттер, а не метод.** Правильно
-   `vehicle.setIndexForwardAxis = 2;`. Вызов `vehicle.setIndexForwardAxis(2)`
-   падает в рантайме, а не на типизации.
-2. **`updateVehicle(dt)` вызывается ДО `world.step()`.** Контроллер пишет
-   скорость в кузов, которую затем интегрирует солвер. После шага — эффект
-   через кадр и рассинхрон с рендером.
-3. **Геттеры колёс возвращают `T | null`.** `wheelSuspensionLength(i)`,
-   `wheelSteering(i)`, `wheelRotation(i)` — всегда с фолбэком
-   (`?? restLength`), иначе первый же кадр до первого `updateVehicle` роняет
-   рендер.
-
-```ts
-fixedUpdate(dt) {
-  applySteering(vehicle, dt, input);
-  applyDrive(vehicle, input);
-  vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);  // до шага мира
-  world.step();
-  syncMeshesFromBodies();
-}
-```
-
----
-
-## 4. Лучи подвески обязаны видеть только грунт
-
-Луч колеса летит вниз от точки крепления и цепляет **любой** коллайдер на пути.
-Без фильтра он ловит собственный кузов или бревно в кузове, машина «встаёт на
-собственный груз», подпрыгивает и опрокидывается.
-
-```ts
-const groups = (membership: number, filter: number) => (membership << 16) | filter;
 export const GROUP_GROUND = 0x0001;
 export const GROUP_VEHICLE = 0x0002;
 export const GROUP_CARGO = 0x0004;
 
 export const GROUND_GROUPS = groups(GROUP_GROUND, GROUP_VEHICLE | GROUP_CARGO);
-export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_CARGO);
-export const CARGO_GROUPS = groups(GROUP_CARGO, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO);
-/** Луч колеса: принадлежит машине, пересекается только с грунтом. */
 export const WHEEL_RAY_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND);
 
-vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+export class PhysicsWorld {
+  world: RAPIER.World | null = null;
+
+  async initialize(): Promise<void> {
+    await RAPIER.init();
+    // Гравитация y = -14 для плотного и динамичного аркадного сцепления
+    this.world = new RAPIER.World({ x: 0, y: -14, z: 0 });
+    this.world.timestep = 1 / 60;
+  }
+
+  createTerrain(vertices: Float32Array, indices: Uint32Array): RAPIER.RigidBody {
+    const world = this.world!;
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    world.createCollider(
+      RAPIER.ColliderDesc.trimesh(vertices, indices).setFriction(1).setCollisionGroups(GROUND_GROUPS),
+      body,
+    );
+    return body;
+  }
+
+  createChassis(object: THREE.Object3D, position: THREE.Vector3): RAPIER.RigidBody {
+    const world = this.world!;
+    return world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(position.x, position.y, position.z)
+        .setLinearDamping(0.08)
+        .setAngularDamping(0.9)
+        .setCcdEnabled(true),
+    );
+  }
+
+  createVehicle(chassis: RAPIER.RigidBody): RAPIER.DynamicRayCastVehicleController {
+    return this.world!.createVehicleController(chassis);
+  }
+
+  step(): void {
+    this.world?.step();
+  }
+}
 ```
 
 ---
 
-## 5. Тюнинг подвески: цифры, а не «на глаз»
+## 2. Контроллер транспортного средства (`TruckController.ts`)
 
-Rapier наследует формулу подвески у Bullet: сила пружины домножается на массу
-кузова, поэтому **жёсткость задаётся на единицу массы**. Отсюда прикидка
-статического проседания:
+```typescript
+import * as THREE from 'three';
+import type RAPIER from '@dimforge/rapier3d-compat';
+import { PhysicsWorld, WHEEL_RAY_GROUPS } from './PhysicsWorld';
 
+export interface VehicleInput {
+  throttle: number; // 0..1
+  brake: number;    // 0..1
+  steer: number;    // -1..1
+  handbrake: boolean;
+  recover: boolean;
+}
+
+export class TruckController {
+  readonly chassis = new THREE.Group();
+  readonly position = new THREE.Vector3();
+  readonly rotation = new THREE.Quaternion();
+  readonly forward = new THREE.Vector3(0, 0, 1);
+  speed = 0; // км/ч
+
+  private body: RAPIER.RigidBody | null = null;
+  private vehicle: RAPIER.DynamicRayCastVehicleController | null = null;
+  private steerAngle = 0;
+
+  // Параметры подвески и шин (ЗиЛ-130 / Урал)
+  private config = {
+    wheelRadius: 0.44,
+    wheelHalfWidth: 0.22,
+    suspension: {
+      connectionY: 0.5,
+      restLength: 0.35,
+      stiffness: 28.0,
+      compression: 2.4,
+      relaxation: 3.2,
+      maxTravel: 0.28,
+      maxForce: 8500.0,
+    },
+    tire: {
+      frictionSlip: 1.8,
+      sideFrictionStiffness: 14.0,
+    },
+    engine: {
+      baseForce: 2400.0,
+      maxSpeed: 30.0, // м/с
+      brakeForce: 3600.0,
+    }
+  };
+
+  constructor(
+    private readonly physics: PhysicsWorld,
+    private readonly scene: THREE.Scene
+  ) {}
+
+  build(position: THREE.Vector3): void {
+    this.body = this.physics.createChassis(this.chassis, position);
+    this.vehicle = this.physics.createVehicle(this.body);
+
+    this.vehicle.indexUpAxis = 1;
+    this.vehicle.setIndexForwardAxis = 2;
+
+    const direction = { x: 0, y: -1, z: 0 };
+    const axle = { x: -1, y: 0, z: 0 };
+
+    // 4 колеса: FL, FR, RL, RR
+    const wheelPositions = [
+      { x: -1.05, y: this.config.suspension.connectionY, z: 1.4 },
+      { x: 1.05,  y: this.config.suspension.connectionY, z: 1.4 },
+      { x: -1.05, y: this.config.suspension.connectionY, z: -1.1 },
+      { x: 1.05,  y: this.config.suspension.connectionY, z: -1.1 },
+    ];
+
+    for (let i = 0; i < 4; i++) {
+      const w = wheelPositions[i];
+      this.vehicle.addWheel(w, direction, axle, this.config.suspension.restLength, this.config.wheelRadius);
+      this.vehicle.setWheelSuspensionStiffness(i, this.config.suspension.stiffness);
+      this.vehicle.setWheelSuspensionCompression(i, this.config.suspension.compression);
+      this.vehicle.setWheelSuspensionRelaxation(i, this.config.suspension.relaxation);
+      this.vehicle.setWheelMaxSuspensionTravel(i, this.config.suspension.maxTravel);
+      this.vehicle.setWheelMaxSuspensionForce(i, this.config.suspension.maxForce);
+      this.vehicle.setWheelFrictionSlip(i, this.config.tire.frictionSlip);
+      this.vehicle.setWheelSideFrictionStiffness(i, this.config.tire.sideFrictionStiffness);
+    }
+  }
+
+  fixedUpdate(dt: number, input: VehicleInput): void {
+    if (!this.vehicle || !this.body) return;
+
+    const currentSpeed = this.vehicle.currentVehicleSpeed();
+    this.speed = Math.abs(currentSpeed) * 3.6;
+
+    // 1. Руление с пружинным возвратом
+    const targetSteer = input.steer * 0.55;
+    this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteer, 8.0 * dt);
+    this.vehicle.setWheelSteering(0, this.steerAngle);
+    this.vehicle.setWheelSteering(1, this.steerAngle);
+
+    // 2. Двигатель и тормоза (задний/полный привод)
+    const forwardSpeed = this.vehicle.currentVehicleSpeed();
+    for (let i = 0; i < 4; i++) {
+      if (input.throttle > 0 && forwardSpeed < this.config.engine.maxSpeed) {
+        this.vehicle.setWheelEngineForce(i, input.throttle * this.config.engine.baseForce);
+        this.vehicle.setWheelBrake(i, 0);
+      } else if (input.brake > 0) {
+        if (forwardSpeed > 0.5) {
+          this.vehicle.setWheelBrake(i, input.brake * this.config.engine.brakeForce);
+          this.vehicle.setWheelEngineForce(i, 0);
+        } else {
+          // Задний ход
+          this.vehicle.setWheelEngineForce(i, -input.brake * this.config.engine.baseForce * 0.5);
+          this.vehicle.setWheelBrake(i, 0);
+        }
+      } else {
+        this.vehicle.setWheelEngineForce(i, 0);
+        this.vehicle.setWheelBrake(i, 15.0); // Легкое торможение двигателем
+      }
+    }
+
+    // 3. Шаг лучевой системы колес с фильтрацией групп
+    this.vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+
+    // 4. Считывание позиции тела
+    const p = this.body.translation();
+    const r = this.body.rotation();
+    this.position.set(p.x, p.y, p.z);
+    this.rotation.set(r.x, r.y, r.z, r.w);
+    this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
+  }
+
+  render(alpha: number): void {
+    this.chassis.position.copy(this.position);
+    this.chassis.quaternion.copy(this.rotation);
+  }
+}
 ```
-просадка ≈ gravity / stiffness
-```
-
-При `gravity = 14` и `stiffness = 70` это ≈ 0.2 м. Берите `restLength` заметно
-больше просадки, иначе подвеска на кочке упирается в упор и машина козлит.
-
-Рабочий набор для гружёного грузовика (~480 кг пустой, ~670 кг с грузом):
-
-| Параметр | Значение | Что ломается при неверном |
-|---|---|---|
-| `suspensionRestLength` | 0.5 | меньше просадки → пробои на каждой кочке |
-| `suspensionStiffness` | 70 | мало → кузов лежит на дороге; много → машина скачет |
-| `suspensionCompression` | 3.4 | мало → раскачка после каждой ямы |
-| `suspensionRelaxation` | 5.2 | мало → подвеска «выстреливает» и подбрасывает |
-| `maxSuspensionTravel` | 0.35 | мало → колёса отрываются на неровностях |
-| `maxSuspensionForce` | 40000 | мало → тяжёлый груз продавливает подвеску насквозь |
-| `frictionSlip` | 2.6 | много → машина кувыркается при торможении |
-| `sideFrictionStiffness` | 0.8 | много → нет скольжения, руль «на рельсах» |
-
-Ориентир для приёмки: в покое `wheelSuspensionLength(i)` у всех колёс
-одинаковая, лежит между 0 и `restLength + maxTravel`, и все четыре
-`wheelIsInContact(i)` = `true`.
 
 ---
 
-## 6. Тяга: не жёсткий клэмп скорости, а спад силы
+## 3. Ключевые преимущества Rapier3D DynamicRayCastVehicleController
 
-```ts
-// ✅ сила падает к нулю на максималке — в горку машина честно теряет ход
-const force = power * throttle * Math.max(0, 1 - Math.max(0, speed) / maxSpeed);
-for (const i of REAR_WHEELS) vehicle.setWheelEngineForce(i, force);
-```
-
-Жёсткое ограничение `speed = min(speed, maxSpeed)` даёт машину, которая
-одинаково валит в подъём и под уклон, и убивает всю ценность рельефа.
-
-Тормоз, задний ход и ручник разводятся по знаку `currentVehicleSpeed()`:
-
-- газ и `speed > -0.6` → тяга вперёд;
-- тормоз и `speed < 0.6` → тяга назад (задний ход), не тормоз;
-- иначе тормоз → `setWheelBrake` на все четыре;
-- ничего не нажато → маленький `idle`-тормоз, иначе машина ползёт на уклоне;
-- ручник → тяга в ноль, большой тормоз.
-
-Руль доводится к цели с ограниченной скоростью (рад/с) и **сужается с ростом
-скорости** (`lock / (1 + |speed| * k)`), иначе на максималке одно нажатие
-переворачивает машину.
-
----
-
-## 7. Груз в кузове
-
-- **Борта — часть составного коллайдера кузова**, а не декорация. Без бортов
-  груз уезжает на первом же повороте, сколько трения ни ставь.
-- **Точка спавна груза не должна пересекать коллайдеры машины.** Пересечение на
-  старте Rapier разрешает выталкиванием: груз выстреливает из кузова на первом
-  кадре. Считайте слоты от пола кузова (`floorY + radius + зазор`) и проверяйте
-  это отдельным ассертом.
-- **Спавнить груз только в локальных осях кузова** и переводить в мир через
-  поворот тела. Абсолютные координаты «как на старте» — это те самые
-  «наслаивающиеся детали» после первого же респавна.
-- **Груз тоже с CCD**: бревно на кочке легко пролетает сквозь борт за один шаг.
-- **Потерю груза определяйте по высоте над рельефом**
-  (`p.y < terrainHeight(p.x, p.z) + порог`), а не по разнице координат с
-  машиной: эвристика «дальше N метров по Z» ломается на любом повороте.
-
----
-
-## 8. Респавн: телепорт тела, а не пересборка сцены
-
-```ts
-// ❌ пересобирать меши и тела на каждый заезд
-scene.clearGroup(truckGroup); physics.resetDynamic(); truck.build();
-
-// ✅ тела и меши живут весь сеанс, заезд только переставляет их
-body.setTranslation(spawn, true);
-body.setRotation(yawQuat, true);
-body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-body.resetForces(true); body.resetTorques(true); body.wakeUp();
-```
-
-Пересборка на каждом заезде — источник целого класса багов: старое тело
-остаётся в мире и продолжает двигать выброшенный меш, `dispose()` убивает
-геометрию, которую делят другие меши, а контроллер машины теряет ссылку на
-кузов. Выбывший груз **выключайте** (`setEnabled(false)`), а не удаляйте, —
-тогда сброс заезда это просто `setEnabled(true)` + телепорт.
-
-И обнуляйте состояние ввода контроллера: `setWheelEngineForce/Brake/Steering`
-в ноль, иначе на старте нового заезда машина трогается с зажатым рулём.
-
----
-
-## 9. Дорога: одна лента, а не набор коробок
-
-Дорога из отдельных повёрнутых `BoxGeometry`-сегментов — гарантированные
-ступеньки на стыках: при повороте вокруг центра края соседних коробок
-расходятся, машина спотыкается о невидимый порог и подкидывает груз.
-
-```ts
-// ✅ одна лента вершин, смещённых по высоте, и коллайдер из ТЕХ ЖЕ буферов
-const geometry = new THREE.PlaneGeometry(width, length, segX, segZ);
-geometry.rotateX(-Math.PI / 2);
-// ...displace position.y = heightAt(x, z), vertex colors для дороги и обочины
-world.createCollider(
-  RAPIER.ColliderDesc.trimesh(
-    geometry.getAttribute('position').array as Float32Array,
-    new Uint32Array(geometry.getIndex()!.array),
-  ),
-  groundBody,
-);
-```
-
-Trimesh в Rapier допустим **только для статических тел** — для грунта это ровно
-то, что нужно, и физика по построению совпадает с картинкой. Обочины поднимайте
-той же функцией высоты (`(|x| - roadHalf)² * k`): земляной вал удерживает машину
-на дороге без невидимых стен.
-
----
-
-## 10. Головной свет и камера
-
-- Тень от `DirectionalLight` живёт в своей ортокамере. На маршруте в 300 м
-  фрустум обязан **ехать за машиной** (`sun.position`/`sun.target` каждый кадр),
-  иначе тени пропадают через 50 метров. Держите бокс тесным (±28 м) — это ещё и
-  вчетверо более чёткая тень.
-- Вектор «вперёд» для чейз-камеры проецируйте на плоскость XZ. Сырой вектор
-  кузова наклоняется вместе с подвеской, и камера качается на каждой яме.
-- На старте заезда камеру **ставьте**, а не лерпите: иначе первый заезд
-  начинается с полёта через всю карту.
-
----
-
-## 11. Головная проверка без браузера
-
-Физику машины можно и нужно проверять хедлессно: `rapier3d-compat` работает в
-Node, рендер для этого не нужен. Держите спеку машины (габариты, массы, тюнинг,
-слоты груза) в отдельном модуле без импорта Three.js-рендера, и гоняйте по ней
-скрипт, который прогоняет мир на N шагов и печатает результат:
-
-- в покое: все четыре колеса в контакте, ход подвески одинаковый и внутри хода;
-- полный газ 8 с: пройдено > 40 м, `wheelRotation` растёт **положительно**,
-  максималка в районе тюнинга;
-- крен: `up.y` кузова > 0.8, то есть машина не легла;
-- груз: 8/8 на месте;
-- руль: положительный угол уводит машину в **+X** (проверка на зеркальность);
-- тормоз: со скорости до полной остановки < 3 с.
-
-Это ловит «машина не едет» и «руль инвертирован» за секунды и до того, как
-что-то увидит игрок. В игре про доставку такой скрипт живёт как
-`npm run check:physics`.
+| Параметр | Почему это важно |
+|---|---|
+| **`WHEEL_RAY_GROUPS`** | Лучи колёс видят *только* землю (`GROUP_GROUND`), игнорируя собственный кузов и груз в кузове. |
+| **`trimesh` коллайдер** | Земля представляет собой честный полигональный меш, по которому колеса едут с натуральными кочками и уклонами. |
+| **`frictionSlip`** | Контролирует проскальзывание шин и управляемый занос без переворачивания. |
+| **`Linear/Angular Damping`** | Защищает машину от бесконечного вращения в воздухе после прыжков с трамплинов. |

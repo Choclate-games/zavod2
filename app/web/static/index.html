@@ -357,11 +357,15 @@
 
           <label class="check"><input type="checkbox" id="set-notify" /> 🔔 Уведомления Windows о завершении чатов</label>
 
+          <label class="check"><input type="checkbox" id="set-template-mixing" /> 🧩 Подмешивать шаблонные механики (эвристики)</label>
+          <div class="dim">
+            Когда выключено: ИИ проектирует 100% уникальные механики без базовых заготовок, а все новые механики автоматически дополняют базу <code>config/mechanics.yaml</code>.
+          </div>
+
           <label class="check"><input type="checkbox" id="set-reset-launch" /> ♻️ Сбрасывать кеш и прогресс игры при каждом запуске</label>
           <div class="dim">
             Перед стартом сносятся <code>node_modules/.vite</code>, <code>dist</code> и прочие кеши сборщика,
-            Vite поднимается с <code>--force</code>, а игра открывается на новом порту — значит с пустым
-            <code>localStorage</code>, то есть без прошлого прогресса и сохранений.
+            Vite поднимается с <code>--force</code>, а игра открывается на новом порту.
           </div>
 
           <button class="btn ok big" id="btn-save-settings">💾 СОХРАНИТЬ НАСТРОЙКИ В .ENV</button>

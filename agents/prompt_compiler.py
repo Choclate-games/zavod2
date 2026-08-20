@@ -1,3 +1,4 @@
+import re
 from app import knowledge
 from app.config import DESIGN_OS_ENABLED
 from app.context import GenerationContext
@@ -277,6 +278,64 @@ class PromptCompilerAgent:
             parts.append("**Мета-прогрессия**:\n" + "\n".join(f"- {i}" for i in core.meta_progression))
         return "\n\n".join(parts)
 
+    @classmethod
+    def _generate_module_map(cls, concept) -> str:
+        """Динамическая карта модулей под архитектуру и системы именно этой игры."""
+        is_3d = concept.renderer == "threejs"
+        physics_desc = "Rapier3D / Physics world manager & colliders" if is_3d else "Matter.js / Physics world manager"
+
+        # Системы из концепции или механик
+        systems_lines = []
+        if concept.gameplay_systems:
+            for s in concept.gameplay_systems[:5]:
+                name_clean = re.sub(r"[^a-zA-Z0-9]+", "", s.name.title())
+                if not name_clean.endswith("System") and not name_clean.endswith("Manager"):
+                    name_clean += "System"
+                purpose = s.purpose[:45] if s.purpose else "Game logic execution"
+                systems_lines.append(f"│   ├── {name_clean}.ts{' ' * max(1, 22 - len(name_clean))}# {purpose}")
+        else:
+            for m in concept.mechanics[:4]:
+                name_clean = re.sub(r"[^a-zA-Z0-9]+", "", m.name.title())
+                if not name_clean.endswith("System") and not name_clean.endswith("Manager"):
+                    name_clean += "System"
+                desc = m.description[:45] if m.description else "Core mechanic logic"
+                systems_lines.append(f"│   ├── {name_clean}.ts{' ' * max(1, 22 - len(name_clean))}# {desc}")
+
+        if not systems_lines:
+            systems_lines = [
+                "│   ├── GameplayManager.ts     # Core loop controller",
+                "│   └── ProgressionManager.ts  # Level state & progression",
+            ]
+        systems_block = "\n".join(systems_lines)
+
+        scene_desc = "Three.js scene graph, lights, camera lerp" if is_3d else "PixiJS stage, container layers, camera"
+
+        return f"""src/
+├── main.ts                    # Bootstrap, Playgama Bridge init, Game launch
+├── core/
+│   ├── Game.ts                # Main coordinator & state machine
+│   ├── GameLoop.ts            # 60Hz fixed update loop with delta clamping
+│   └── EventBus.ts            # Typed publish/subscribe event dispatcher
+├── platform/
+│   ├── PlaygamaService.ts     # Wrapper for @playgama/bridge (Ads, Save, Leaderboards)
+│   └── StorageService.ts      # Cloud & LocalStorage sync with debouncing
+├── physics/
+│   └── PhysicsWorld.ts        # {physics_desc}
+├── entities/
+│   ├── Player.ts              # Player entity & input handling
+│   └── EntityManager.ts       # Dynamic entity pool & lifecycle
+├── systems/
+{systems_block}
+├── rendering/
+│   ├── SceneManager.ts        # {scene_desc}
+│   ├── ProceduralModels.ts    # Styled models / geometry for {concept.title}
+│   └── ParticleSystem.ts      # Particle effects & visual feedback
+├── ui/
+│   ├── UIManager.ts           # HUD overlay, state transitions
+│   └── TouchControls.ts       # Mobile touch input adapter
+└── audio/
+    └── AudioManager.ts        # Sound effects pool & dynamic audio feedback"""
+
     def compile(self, ctx: GenerationContext) -> str:
         concept = ctx.concept
         log_agent("PromptCompiler", f"Compiling definitive AI Developer Prompt for '{concept.title}'")
@@ -402,6 +461,15 @@ class PromptCompilerAgent:
 
 {mechanics_items}
 
+---
+
+## 3b. ⚠️ СТРОГИЙ ЗАПРЕТ ЖАНРОВЫХ ШАБЛОНОВ И КЛОНОВ (CRITICAL ANTI-CLICHÉ RULES)
+Кодовый агент ОБЯЗАН реализовать уникальную игру, спроектированную в этом ТЗ, а не шаблонный автошутер:
+1. **ЗАПРЕТ ШАБЛОННЫХ РОГАЛИКОВ И КАРТОЧЕК**: Если игра прямо не требует карточный драфт в GDD, **КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО** добавлять спам волн врагов и всплывающее окно «Выберите 1 из 3 карт апгрейда».
+2. **ЗАПРЕТ СЕРЫХ ПРИМИТИВОВ НА ПУСТОЙ ПЛОСКОСТИ**: Создавай выразительную процедурную низкополигональную 3D/2D графику, точно соответствующую `ART_DIRECTION.md` (тематические персонажи, рельеф, модули, объекты окружения, частицы), а не бегающий куб на сером полу.
+3. **ТОЧНОЕ СОБЛЮДЕНИЕ МЕХАНИК**: Реализуй все состояния, формулы, тайминги и слои отклика из `MECHANICS.md` (включая Web Audio звуки, импульсы камеры, визуал и тач-инпут).
+4. **СПЕЦИФИЧЕСКОЕ УПРАВЛЕНИЕ**: Реализуй схему управления под конкретную механику этой игры (свайпы, жесты, траектории, физический дрифт, прицеливание), а не стандартный стик.
+
 {density_section}
 ---
 
@@ -412,37 +480,7 @@ The game must be built with a clean, decoupled layer architecture:
 
 ### Module Map (`src/`):
 ```text
-src/
-├── main.ts                    # Bootstrap, Playgama Bridge init, Game launch
-├── core/
-│   ├── Game.ts                # Main coordinator & state machine
-│   ├── GameLoop.ts            # 60Hz fixed update loop with delta clamping
-│   └── EventBus.ts            # Typed publish/subscribe event dispatcher
-├── platform/
-│   ├── PlaygamaService.ts     # Wrapper for @playgama/bridge (Ads, Save, Leaderboards)
-│   └── StorageService.ts      # Cloud & LocalStorage sync with debouncing
-├── physics/
-│   ├── PhysicsWorld.ts        # Rapier3D / Physics world manager
-│   └── RagdollController.ts    # Joint solver, balance spring torque, knockback
-├── entities/
-│   ├── Player.ts              # Player character entity & input impulses
-│   ├── Enemy.ts               # Enemy AI behavior tree & ragdoll death
-│   └── Weapon.ts              # Weapon mass, hitboxes, collision queries
-├── systems/
-│   ├── CombatSystem.ts        # Hitbox resolution, parry timing, damage formulas
-│   ├── WaveManager.ts         # Spawning curves, elite bosses, wave clears
-│   ├── UpgradeManager.ts      # 3-card roguelite selection & stat application
-│   └── CrowdFavorSystem.ts    # Hype calculation and dynamic drop rewards
-├── rendering/
-│   ├── SceneManager.ts        # Three.js / PixiJS scene graph, lighting, camera lerp
-│   ├── MeshPool.ts            # InstancedMesh pooling for debris & effects
-│   └── Shaders.ts             # Optimized mobile shaders & materials
-├── ui/
-│   ├── UIManager.ts           # DOM HUD overlay, screen transitions
-│   ├── VirtualJoystick.ts     # Mobile touch floating joystick
-│   └── CardModal.ts           # 3-choice upgrade modal
-└── audio/
-    └── AudioManager.ts        # Sound effects pool & dynamic battle BGM
+{self._generate_module_map(concept)}
 ```
 
 ---

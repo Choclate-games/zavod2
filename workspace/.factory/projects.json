@@ -131,8 +131,22 @@
   },
   "ideya-kick-shoot": {
     "rating": 0,
-    "archived": false,
+    "archived": true,
     "created_at": "2026-08-20T21:19:08",
+    "archived_at": "2026-08-20T21:48:40",
+    "title": ""
+  },
+  "arkadnyy-fps-uporom-pinki": {
+    "rating": 0,
+    "archived": false,
+    "created_at": "2026-08-20T21:50:36",
+    "archived_at": "",
+    "title": ""
+  },
+  "knowledge-showcase": {
+    "rating": 0,
+    "archived": false,
+    "created_at": "2026-08-20T22:29:45",
     "archived_at": "",
     "title": ""
   }

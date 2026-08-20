@@ -18,7 +18,10 @@ from providers.cli_agents import AGENT_CLASSES, make_cli_agent
 class ProviderFactory:
     @staticmethod
     def get_ai_provider(provider_name: Optional[str] = None) -> AIProvider:
-        name = (provider_name or os.getenv("DEFAULT_PROVIDER", "local")).lower().strip()
+        default_agent = (os.getenv("DEFAULT_PROVIDER") or os.getenv("DEFAULT_AGENT") or "opencode").lower().strip()
+        name = (provider_name or default_agent).lower().strip()
+        if name in ("default", "auto", ""):
+            name = default_agent
 
         if name in ("agy", "antigravity", "gemini-cli"):
             cli_path = os.getenv("AGY_CLI_PATH", "agy")
@@ -29,26 +32,13 @@ class ProviderFactory:
             # Терминальные агенты: claude (Claude Code), codex, kimi, opencode.
             # Путь к CLI и модель берутся из <PREFIX>_CLI_PATH / <PREFIX>_MODEL.
             return make_cli_agent(name)
-        # ── API-провайдеры отключены (плохо кодят), включатся раскомментированием ──
-        # elif name in ("opencode_go", "opencode-zen", "zen"):
-        #     api_key = os.getenv("OPENCODE_API_KEY") or os.getenv("OPENCODE_GO_KEY")
-        #     base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
-        #     model = os.getenv("OPENCODE_MODEL", "opencode-zen")
-        #     return OpenCodeProvider(api_key=api_key, base_url=base_url, model=model)
-        # elif name == "openai":
-        #     api_key = os.getenv("OPENAI_API_KEY")
-        #     model = os.getenv("OPENAI_MODEL", "gpt-4o")
-        #     return OpenAIProvider(api_key=api_key, model=model)
-        # elif name == "anthropic":
-        #     api_key = os.getenv("ANTHROPIC_API_KEY")
-        #     model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
-        #     return AnthropicProvider(api_key=api_key, model=model)
-        # elif name == "google":
-        #     api_key = os.getenv("GEMINI_API_KEY")
-        #     model = os.getenv("GOOGLE_MODEL", "gemini-1.5-pro")
-        #     return GoogleProvider(api_key=api_key, model=model)
-        else:
+        elif name == "local":
             return LocalAIProvider()
+        elif default_agent in AGENT_CLASSES:
+            return make_cli_agent(default_agent)
+        else:
+            cli_path = os.getenv("AGY_CLI_PATH", "agy")
+            return AGYProvider(cli_path=cli_path)
 
     @staticmethod
     def get_image_provider(provider_name: Optional[str] = None) -> ImageProvider:

@@ -103,7 +103,15 @@ class SkillGeneratorAgent:
                     "Shadow map renders crisp without artifact acne.",
                     "The quality auto-tuner converges and locks instead of oscillating."
                 ],
-                knowledge_refs=knowledge.topics_for_renderer(concept.renderer)
+                knowledge_refs=[
+                    *knowledge.topics_for_renderer(concept.renderer),
+                    "threejs/procedural_mesh_builder.md",
+                    "threejs/juice_and_vfx_pool.md",
+                    "audio/procedural_sound_synthesizer.md"
+                ] if concept.renderer == "threejs" else [
+                    *knowledge.topics_for_renderer(concept.renderer),
+                    "audio/procedural_sound_synthesizer.md"
+                ]
             ))
 
         if "playgama_skill" not in skill_ids:
@@ -151,9 +159,6 @@ class SkillGeneratorAgent:
             ))
 
         if "controls_skill" not in skill_ids:
-            # Тач-управление раньше жило одной строкой в общем UX-разделе, и агент
-            # регулярно ограничивался джойстиком в углу. Отдельный скилл с
-            # встроенной базой знаний закрывает этот пробел.
             log_agent("SkillGenerator", "Injecting core skill: controls_skill")
             concept.skills.append(SkillDoc(
                 skill_id="controls_skill",
@@ -207,39 +212,147 @@ class SkillGeneratorAgent:
         # Динамические скиллы под специфические механики проекта
         haystack = self._concept_haystack(ctx)
 
+        # 1. FPS / Шуттеры
+        if "fps_skill" not in skill_ids and any(w in haystack for w in ("fps", "шуттер", "стрельб", "пул", "винтовк", "пистолет", "револьвер", "shooter", "gun")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: fps_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="fps_skill",
+                name="FPS Weapons, Recoil & Spartan Kick",
+                filename="FPS_SKILL.md",
+                purpose="Реализация First-Person шуттера: PointerLock, отдача ствола, раскачивание при ходьбе, трассеры и пинок.",
+                when_to_use="При разработке шуттера от первого лица, оружия, баллистики и ближнего удара ногой.",
+                rules=[
+                    "PointerLock на ПК и плавающий тач-пад обзора на мобильных экранах.",
+                    "Weapon Bobbing синхронизируется с шагами персонажа.",
+                    "Отдача воздействует на положение и угол ствола с пружинным возвратом (Snappiness).",
+                    "Физический пинок передает кинетический импульс телам и врагам."
+                ],
+                architecture="FPSController управляет камерой, WeaponSystem обрабатывает стрельбу, SpartanKick наносит импульсный урон.",
+                implementation_guidance="Используй Web Audio синтезатор для выстрелов и вспышек без загрузки MP3 файлов.",
+                common_mistakes=[
+                    "Жесткая привязка оружия к камере без инерции и раскачивания делает шутер безжизненным.",
+                ],
+                checklist=[
+                    "Оружие эффектно дергается назад при выстреле и плавно возвращается в исходную позицию.",
+                ],
+                knowledge_refs=[
+                    "threejs/fps_controller_and_shooting.md",
+                    "audio/procedural_sound_synthesizer.md",
+                    "threejs/juice_and_vfx_pool.md"
+                ]
+            ))
+
+        # 2. Гонки и дрифт
         if "vehicle_skill" not in skill_ids and self._is_driving_game(ctx):
             log_agent("SkillGenerator", "Injecting core skill: vehicle_skill")
             concept.skills.append(SkillDoc(
                 skill_id="vehicle_skill",
-                name="Physics Vehicle & Cargo Controller",
+                name="Physics Vehicle, Drift & Skidmarks",
                 filename="VEHICLE_SKILL.md",
                 purpose=(
-                    "Задаёт обязательную архитектуру машины на физике: raycast-подвеска, "
-                    "риг колёс внутри кузова, составной коллайдер с бортами и груз, "
-                    "который остаётся в кузове."
+                    "Задаёт архитектуру аркадной машины: занос, следы шин на асфальте, "
+                    "нитро-ускорение и звук мотора."
                 ),
-                when_to_use="Use for any drivable vehicle: truck, car, buggy, tank, mech.",
+                when_to_use="Use for any drivable vehicle: truck, car, buggy, tank, mech, racing.",
                 rules=[
-                    "Кузов — один RigidBody + DynamicRayCastVehicleController; колёса это лучи подвески, а не тела.",
-                    "Никогда не назначать скорость кузову каждый кадр (setLinvel) — это затирает солвер.",
-                    "updateVehicle(dt) вызывается ДО world.step(), лучи колёс фильтруются на группу грунта.",
-                    "Визуальные колёса — дети группы кузова; ход подвески, руль и качение читаются у контроллера.",
-                    "Рестарт заезда телепортирует существующие тела, а не пересобирает сцену.",
+                    "Газ и руль — раздельные элементы управления.",
+                    "Угол заноса (Slip Angle) рассчитывается из соотношения продольной и поперечной скорости.",
+                    "Следы шин формируются полигональными Quad-лентами чуть выше асфальта (Y=0.02) без Z-fighting.",
+                    "Звук мотора модулирует частоту и срез фильтра по шкале оборотов (RPM)."
                 ],
-                architecture="TruckController владеет chassis RigidBody, составным коллайдером и DynamicRayCastVehicleController.",
-                implementation_guidance="Тюнинг подвески: статическая просадка ≈ gravity / stiffness, restLength > просадки.",
+                architecture="VehicleController управляет динамикой на базе Rapier 3D DynamicRayCastVehicleController, TireTracksManager генерирует следы, SceneManager ведет обзор.",
+                implementation_guidance="Используй @dimforge/rapier3d-compat и DynamicRayCastVehicleController с TriMesh-коллайдером дороги.",
                 common_mistakes=[
-                    "setLinvel каждый кадр: машина едет вдоль мировой оси, подвески нет.",
-                    "Луч колеса без фильтра групп — машина встаёт на собственный груз.",
+                    "Использование упрощенной pure-JS физики без Rapier3D приводит к дерганию кузова и провалам.",
                 ],
                 checklist=[
-                    "Все четыре колеса в контакте с грунтом, подвеска сжимается и разжимается.",
-                    "Машина разгоняется, поворачивает и останавливается без переворота.",
+                    "Машина устойчиво едет по 3D рельефу, подвеска отрабатывает кочки, занос управляется через frictionSlip.",
                 ],
                 knowledge_refs=[
                     "threejs/rapier_vehicle_controller.md",
-                    "threejs/vehicle_wheel_rig.md",
-                    "threejs/physics_integration.md",
+                    "threejs/arcade_racing_and_drift.md",
+                    "audio/procedural_sound_synthesizer.md",
+                ]
+            ))
+
+        # 3. Слэшеры, комбо и парирование
+        if "melee_skill" not in skill_ids and any(w in haystack for w in ("слэшер", "меч", "комбо", "парир", "удар", "рубк", "slash", "sword", "melee", "combat")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: melee_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="melee_skill",
+                name="Melee Combat, Hit-Stop & Parry System",
+                filename="MELEE_SKILL.md",
+                purpose="Реализация комбо-атак холодным оружием, точного окна парирования и микро-заморозки времени (Hit-Stop).",
+                when_to_use="При разработке слэшеров, битв на мечах, рукопашных драк и дуэлей.",
+                rules=[
+                    "Каждый удар проходит фазы: Windup -> Active (хитбокс) -> Recovery.",
+                    "Попадание по цели вызывает Hit-Stop на 40-60 мс для ощущения сочности удара.",
+                    "Идеальное парирование сопровождается звуком скрежета металла и вспышкой искр."
+                ],
+                architecture="MeleeCombatSystem управляет цепочкой атак, HitStopManager замораживает кадр.",
+                implementation_guidance="Публикуй 'combat:hit', 'combat:parry' в EventBus для триггера тряски камеры.",
+                common_mistakes=[
+                    "Мгновенный урон без фазы подготовки (Windup) лишает игрока возможности реагировать.",
+                ],
+                checklist=[
+                    "Удары в серии плавно переходят из одного в другой при своевременном клике.",
+                ],
+                knowledge_refs=[
+                    "threejs/melee_combat_and_ragdoll.md",
+                    "threejs/juice_and_vfx_pool.md",
+                    "audio/procedural_sound_synthesizer.md"
+                ]
+            ))
+
+        # 4. 2D Рисование путей
+        if "path_drawing_skill" not in skill_ids and any(w in haystack for w in ("траектор", "путь", "рисова", "улитк", "мурав", "draw", "path", "spline")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: path_drawing_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="path_drawing_skill",
+                name="Catmull-Rom Path Drawing & Movement",
+                filename="PATH_DRAWING_SKILL.md",
+                purpose="Рисование маршрутов пальцем/курсором, сглаживание сплайнами и перемещение юнитов по траектории.",
+                when_to_use="При создании игр с рисованием линий, логистических головоломок и управления роем.",
+                rules=[
+                    "Сглаживание точек алгоритмом Catmull-Rom Spline для исключения изломов.",
+                    "Юниты плавно поворачиваются по касательной к траектории движения.",
+                ],
+                architecture="PathDrawer захватывает ввод и строит кривую, PathFollower перемещает объект.",
+                implementation_guidance="Отрисовывай неоновый шлейф линии с помощью PIXI.Graphics.",
+                common_mistakes=[
+                    "Движение по сырым несоглаженным точкам приводит к дерганию спрайта.",
+                ],
+                checklist=[
+                    "Нарисованная линия плавно направляет юнита к цели.",
+                ],
+                knowledge_refs=[
+                    "pixijs/path_drawing_and_movement.md"
+                ]
+            ))
+
+        # 5. Детективная доска и Drag & Drop
+        if "detective_skill" not in skill_ids and any(w in haystack for w in ("детектив", "улик", "доск", "нит", "clue", "evidence", "detective", "board")):
+            log_agent("SkillGenerator", "Injecting specialized mechanic skill: detective_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="detective_skill",
+                name="Evidence Board & Connecting Strings",
+                filename="DETECTIVE_SKILL.md",
+                purpose="Интерактивная доска расследований: перетаскивание карточек и натяжение соединительных красных нитей.",
+                when_to_use="При создании детективных квестов, связывания фактов и карточных столов.",
+                rules=[
+                    "Карточки перетаскиваются через Pointer Events с пружинным масштабированием.",
+                    "Нити отрисовываются квадратичными кривыми Безье с учетом провисания под гравитацией."
+                ],
+                architecture="EvidenceCard обрабатывает ввод, ConnectingThreads динамически перерисовывает связи.",
+                implementation_guidance="Воспроизводи звук втыкания булавки при создании новой связи.",
+                common_mistakes=[
+                    "Прямые жесткие линии связей выглядят неестественно без расчета провисания.",
+                ],
+                checklist=[
+                    "При перетаскивании любой карточки все соединенные нити эластично тянутся за ней.",
+                ],
+                knowledge_refs=[
+                    "pixijs/card_drag_and_evidence_board.md"
                 ]
             ))
 

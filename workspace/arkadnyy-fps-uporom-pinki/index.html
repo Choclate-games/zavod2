@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👢</text></svg>" />
+  <title>Аркадный FPS: Упором Пинки</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #121418;
+      font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+      touch-action: none;
+    }
+
+    #game-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    /* Crosshair */
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 24px;
+      height: 24px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255, 255, 255, 0.85);
+    }
+    #crosshair::before {
+      top: 11px; left: 0; width: 24px; height: 2px;
+    }
+    #crosshair::after {
+      top: 0; left: 11px; width: 2px; height: 24px;
+    }
+    #crosshair-dot {
+      position: absolute;
+      top: 10px; left: 10px;
+      width: 4px; height: 4px;
+      background: #f2cc8f;
+      border-radius: 50%;
+    }
+
+    /* HUD Layer */
+    #gameplay-hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 20;
+      display: none;
+      padding: calc(14px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+    }
+
+    .hud-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      width: 100%;
+    }
+
+    /* Left Stats: HP & Shield */
+    .hud-bars-box {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: rgba(20, 24, 30, 0.75);
+      backdrop-filter: blur(4px);
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      min-width: 200px;
+    }
+
+    .bar-container {
+      width: 100%;
+      height: 14px;
+      background: rgba(0, 0, 0, 0.6);
+      border-radius: 7px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #hud-hp-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #d62828, #e07a5f);
+      transition: width 0.15s ease-out;
+    }
+
+    #hud-shield-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #3a86ff, #4cc9f0);
+      transition: width 0.15s ease-out;
+    }
+
+    .bar-label {
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Center Sector & Combo */
+    .hud-center-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #hud-sector-text {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: rgba(20, 24, 30, 0.85);
+      padding: 6px 16px;
+      border-radius: 20px;
+      border: 1px solid #f2cc8f;
+      color: #f2cc8f;
+      text-transform: uppercase;
+    }
+
+    #hud-enemies-text {
+      font-size: 13px;
+      font-weight: bold;
+      color: #ff6b6b;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+
+    #hud-combo-badge {
+      display: none;
+      font-size: 18px;
+      font-weight: 900;
+      color: #fca311;
+      text-shadow: 0 0 12px rgba(252, 163, 17, 0.8);
+      background: rgba(0,0,0,0.7);
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px solid #fca311;
+    }
+    #hud-combo-timer {
+      width: 100%;
+      height: 4px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+    #hud-combo-fill {
+      height: 100%;
+      width: 100%;
+      background: #fca311;
+    }
+
+    /* Right Stats & Controls */
+    .hud-right-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto;
+    }
+
+    .hud-currency-tag {
+      font-size: 14px;
+      font-weight: bold;
+      background: rgba(20, 24, 30, 0.75);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .hud-btn {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    .hud-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Weapon & Ammo Box Bottom Right */
+    #hud-weapon-box {
+      position: absolute;
+      right: calc(18px + env(safe-area-inset-right));
+      bottom: calc(130px + env(safe-area-inset-bottom));
+      background: rgba(20, 24, 30, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 8px 16px;
+      text-align: right;
+      pointer-events: none;
+    }
+
+    #hud-weapon-name {
+      font-size: 12px;
+      font-weight: bold;
+      color: #aaa;
+      letter-spacing: 0.5px;
+    }
+
+    #hud-ammo-text {
+      font-size: 26px;
+      font-weight: 900;
+      color: #fff;
+    }
+
+    #hud-trickshot-badge {
+      display: none;
+      font-size: 11px;
+      font-weight: 900;
+      color: #f2cc8f;
+      background: rgba(242, 204, 143, 0.2);
+      border: 1px solid #f2cc8f;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 4px;
+      animation: pulseGlow 0.8s infinite alternate;
+    }
+
+    @keyframes pulseGlow {
+      from { box-shadow: 0 0 4px #f2cc8f; }
+      to { box-shadow: 0 0 12px #f2cc8f; }
+    }
+
+    /* Kick Cooldown Gauge (Center Bottom) */
+    #hud-kick-gauge {
+      position: absolute;
+      bottom: calc(18px + env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      width: 140px;
+      height: 6px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    #hud-kick-bar {
+      height: 100%;
+      width: 100%;
+      background: #d62828;
+    }
+
+    /* Floating Text Layer */
+    #floating-text-layer {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 30;
+      overflow: hidden;
+    }
+
+    .floating-damage-text {
+      position: absolute;
+      font-size: 22px;
+      font-weight: 900;
+      text-shadow: 0 0 6px #000, 0 0 12px rgba(0,0,0,0.8);
+      animation: floatUpFade 1.0s forwards ease-out;
+    }
+
+    @keyframes floatUpFade {
+      0% { opacity: 1; transform: translateY(0) scale(1.1); }
+      50% { opacity: 1; transform: translateY(-35px) scale(1.0); }
+      100% { opacity: 0; transform: translateY(-65px) scale(0.85); }
+    }
+
+    /* Modal / Screen Overlay Base */
+    .screen-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(10, 12, 16, 0.88);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* Main Menu */
+    .title-banner {
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      text-align: center;
+      background: linear-gradient(90deg, #d62828, #fca311, #4c9f70);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .subtitle-banner {
+      font-size: 16px;
+      color: #ccc;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    .menu-stats-row {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 28px;
+      font-size: 15px;
+      font-weight: bold;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 10px 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-main-action {
+      background: linear-gradient(135deg, #d62828, #fca311);
+      border: none;
+      color: #fff;
+      font-size: 22px;
+      font-weight: 900;
+      padding: 16px 48px;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(214, 40, 40, 0.5);
+      transition: transform 0.15s, box-shadow 0.15s;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+    }
+    .btn-main-action:hover {
+      transform: scale(1.04);
+      box-shadow: 0 8px 25px rgba(214, 40, 40, 0.7);
+    }
+
+    .btn-secondary-action {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      padding: 12px 32px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 12px;
+    }
+    .btn-secondary-action:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    /* 3-Card Upgrade Modal */
+    #draft-cards-container {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 900px;
+    }
+
+    .upgrade-card {
+      width: 240px;
+      height: 320px;
+      background: #1e222b;
+      border-radius: 14px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      position: relative;
+    }
+    .upgrade-card:hover {
+      transform: translateY(-8px) scale(1.02);
+    }
+
+    .upgrade-card.rarity-common {
+      border: 2px solid #4c9f70;
+      box-shadow: 0 4px 14px rgba(76, 159, 112, 0.3);
+    }
+    .upgrade-card.rarity-rare {
+      border: 2px solid #3a86ff;
+      box-shadow: 0 4px 16px rgba(58, 134, 255, 0.4);
+    }
+    .upgrade-card.rarity-epic {
+      border: 2px solid #fca311;
+      box-shadow: 0 4px 20px rgba(252, 163, 17, 0.5);
+    }
+
+    .card-rarity-badge {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      background: rgba(255,255,255,0.1);
+    }
+    .card-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+    .card-title {
+      font-size: 17px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    .card-tag {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 14px;
+    }
+    .card-desc {
+      font-size: 13px;
+      line-height: 1.4;
+      color: #ddd;
+    }
+
+    /* Workshop Upgrades List */
+    #workshop-upgrades-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 550px;
+      max-height: 55vh;
+      overflow-y: auto;
+      margin: 16px 0;
+      padding-right: 6px;
+    }
+    .workshop-item {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .workshop-item-title {
+      font-size: 15px;
+      font-weight: bold;
+    }
+    .badge-tier {
+      font-size: 11px;
+      color: #fca311;
+      margin-left: 6px;
+    }
+    .workshop-item-desc {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 2px;
+    }
+    .btn-workshop-buy {
+      background: #4c9f70;
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-workshop-buy.disabled {
+      background: #444;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    /* Responsive scaling */
+    @media (max-width: 768px) {
+      .title-banner { font-size: 30px; }
+      .upgrade-card { width: 180px; height: 260px; padding: 12px; }
+      .card-icon { font-size: 36px; }
+      .card-title { font-size: 14px; }
+      .card-desc { font-size: 11px; }
+      .hud-bars-box { min-width: 150px; padding: 6px 10px; }
+      #hud-weapon-box { bottom: calc(100px + env(safe-area-inset-bottom)); }
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D WebGL Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- FPS Crosshair -->
+  <div id="crosshair">
+    <div id="crosshair-dot"></div>
+  </div>
+
+  <!-- Floating Text Layer -->
+  <div id="floating-text-layer"></div>
+
+  <!-- In-game Gameplay HUD -->
+  <div id="gameplay-hud">
+    <div class="hud-top-row">
+      <!-- Health & Shield -->
+      <div class="hud-bars-box">
+        <div class="bar-label"><span>ЗДОРОВЬЕ</span><span id="hud-hp-text">100 / 100</span></div>
+        <div class="bar-container"><div id="hud-hp-fill"></div></div>
+
+        <div class="bar-label" style="margin-top: 4px;"><span>ЩИТ</span></div>
+        <div class="bar-container"><div id="hud-shield-fill"></div></div>
+      </div>
+
+      <!-- Sector & Combo Info -->
+      <div class="hud-center-box">
+        <div id="hud-sector-text">СЕКТОР 1 — КОМНАТА 1/4</div>
+        <div id="hud-enemies-text">ВРАГИ: 4</div>
+        <div id="hud-combo-badge">
+          COMBO x1.5!
+          <div id="hud-combo-timer"><div id="hud-combo-fill"></div></div>
+        </div>
+      </div>
+
+      <!-- Currency & Pause -->
+      <div class="hud-right-box">
+        <div class="hud-currency-tag" id="hud-score-text">ОЧКИ: 0</div>
+        <div class="hud-currency-tag" id="hud-scrap-text">⚙️ 0</div>
+        <button class="hud-btn" id="btn-hud-pause">⏸️ ПАУЗА</button>
+      </div>
+    </div>
+
+    <!-- Weapon Info Bottom Right -->
+    <div id="hud-weapon-box">
+      <div id="hud-weapon-name">РЕВОЛЬВЕР .44</div>
+      <div id="hud-ammo-text">12</div>
+      <div id="hud-trickshot-badge">⚡ TRICKSHOT x2.2</div>
+    </div>
+
+    <!-- Kick Cooldown Gauge Bottom Center -->
+    <div id="hud-kick-gauge">
+      <div id="hud-kick-bar"></div>
+    </div>
+  </div>
+
+  <!-- Screen: Main Menu -->
+  <div id="screen-main-menu" class="screen-overlay">
+    <div class="title-banner">АРКАДНЫЙ FPS: УПОРОМ ПИНКИ</div>
+    <div class="subtitle-banner">Выбивай двери, пинай врагов в стены и лови оружие на лету!</div>
+
+    <div class="menu-stats-row">
+      <div id="menu-highscore">РЕКОРД: 0</div>
+      <div id="menu-scrap">⚙️ ШЕСТЕРНИ: 0</div>
+    </div>
+
+    <button class="btn-main-action" id="btn-start-run">В БОЙ ⚡</button>
+    <button class="btn-secondary-action" id="btn-open-workshop">МАСТЕРСКАЯ 🛠️</button>
+    <button class="btn-secondary-action btn-sound-toggle">🔊 ЗВУК: ВКЛ</button>
+  </div>
+
+  <!-- Modal: Workshop Meta Upgrades -->
+  <div id="modal-workshop" class="screen-overlay" style="display: none;">
+    <div class="title-banner" style="font-size: 32px;">МАСТЕРСКАЯ КОНТРАБАНДИСТА</div>
+    <div id="workshop-scrap-count" style="font-size: 16px; color: #fca311; font-weight: bold; margin-bottom: 12px;">⚙️ ШЕСТЕРНИ: 0</div>
+    <div id="workshop-upgrades-list"></div>
+    <button class="btn-secondary-action" id="btn-close-workshop">НАЗАД В МЕНЮ</button>
+  </div>
+
+  <!-- Modal: 3-Card Roguelite Upgrade Draft -->
+  <div id="modal-upgrade-draft" class="screen-overlay" style="display: none;">
+    <div class="title-banner" style="font-size: 32px;">ВЫБЕРИТЕ УЛУЧШЕНИЕ</div>
+    <div class="subtitle-banner">Зачистка комнаты завершена! Выберите тактический модуль:</div>
+    <div id="draft-cards-container"></div>
+    <button class="btn-secondary-action" id="btn-reroll-cards" style="background: #e07a5f;">🎲 ПЕРЕБРОС КАРТ (РЕКЛАМА)</button>
+  </div>
+
+  <!-- Modal: Pause Menu -->
+  <div id="modal-pause" class="screen-overlay" style="display: none;">
+    <div class="title-banner" style="font-size: 34px;">ПАУЗА</div>
+    <button class="btn-main-action" id="btn-pause-resume" style="margin-top: 20px;">ПРОДОЛЖИТЬ ▶️</button>
+    <button class="btn-secondary-action btn-sound-toggle">🔊 ЗВУК: ВКЛ</button>
+    <button class="btn-secondary-action" id="btn-pause-restart">ЗАНОВО 🔄</button>
+    <button class="btn-secondary-action" id="btn-pause-menu">В МЕНЮ 🏠</button>
+  </div>
+
+  <!-- Modal: Game Over -->
+  <div id="modal-game-over" class="screen-overlay" style="display: none;">
+    <div class="title-banner" style="font-size: 36px; color: #d62828;">ВЫ ПОГИБЛИ</div>
+    <div style="display: flex; flex-direction: column; gap: 8px; margin: 16px 0 24px 0; text-align: center; font-size: 16px;">
+      <div id="go-score" style="font-weight: bold;">Очки: 0</div>
+      <div id="go-scrap" style="color: #fca311; font-weight: bold;">⚙️ Шестеренки: 0</div>
+      <div id="go-kills">Уничтожено врагов: 0</div>
+      <div id="go-splats">Сплэт-ударов о стены: 0</div>
+      <div id="go-sector">Достигнут сектор: 1</div>
+    </div>
+    <button class="btn-main-action" id="btn-go-revive" style="background: linear-gradient(135deg, #4c9f70, #2a9d8f); margin-bottom: 12px;">
+      ❤️ ВТОРОЕ ДЫХАНИЕ (РЕКЛАМА)
+    </button>
+    <button class="btn-secondary-action" id="btn-go-double" style="background: #fca311; color: #000; font-weight: 900;">
+      ⚙️ УДВОИТЬ ШЕСТЕРНИ (x2 РЕКЛАМА)
+    </button>
+    <button class="btn-secondary-action" id="btn-go-restart">СНОВА В БОЙ 🔄</button>
+    <button class="btn-secondary-action" id="btn-go-menu">ГЛАВНОЕ МЕНЮ 🏠</button>
+  </div>
+
+  <!-- Modal: Victory Screen -->
+  <div id="modal-victory" class="screen-overlay" style="display: none;">
+    <div class="title-banner" style="font-size: 38px; color: #fca311;">ПОБЕДА! СЕКТОРЫ ЗАЧИЩЕНЫ! 🏆</div>
+    <div class="subtitle-banner">Механоид повержен, все этажи комплекса зачищены!</div>
+    <div style="margin: 16px 0 24px 0; text-align: center; font-size: 18px; font-weight: bold;">
+      <div id="vic-score">Итоговые очки: 0</div>
+      <div id="vic-scrap" style="color: #fca311; margin-top: 6px;">Добыто шестерней: 0</div>
+    </div>
+    <button class="btn-main-action" id="btn-vic-restart">НОВЫЙ ЗАБЕГ ⚡</button>
+    <button class="btn-secondary-action" id="btn-vic-menu">ГЛАВНОЕ МЕНЮ 🏠</button>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

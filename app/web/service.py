@@ -76,7 +76,6 @@ AGENT_LABELS: Dict[str, str] = {
 AGENT_KEYS = tuple(AGENT_LABELS)
 
 PROVIDER_OPTIONS = [{"key": key, "label": label} for key, label in AGENT_LABELS.items()]
-PROVIDER_OPTIONS.append({"key": "local", "label": "💻 local (Offline Expert)"})
 
 RENDERER_OPTIONS = [
     {"key": "auto", "label": "✨ auto (Smart Decision)"},
@@ -2052,6 +2051,7 @@ class FactoryService:
             "notifications": notify.notifications_enabled(),
             "sandbox_root": str(sandbox.workspace_root()),
             "reset_game_on_launch": bool(config.reset_game_on_launch),
+            "allow_template_mixing": bool(config.allow_template_mixing),
             "fish_audio": {
                 "api_key": config.fish_audio_api_key or "",
                 "model": config.fish_audio_model or TTS_FREE_MODEL,
@@ -2112,6 +2112,11 @@ class FactoryService:
             reset = bool(payload["reset_game_on_launch"])
             config.reset_game_on_launch = reset
             env_lines["RESET_GAME_ON_LAUNCH"] = "1" if reset else "0"
+
+        if "allow_template_mixing" in payload:
+            mixing = bool(payload["allow_template_mixing"])
+            config.allow_template_mixing = mixing
+            env_lines["ALLOW_TEMPLATE_MIXING"] = "1" if mixing else "0"
 
         fish = payload.get("fish_audio") or {}
         if "api_key" in fish:

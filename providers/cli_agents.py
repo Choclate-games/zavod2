@@ -673,6 +673,9 @@ def _extract_json_string(text: str) -> str:
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end > start:
         return text[start:end + 1].strip()
+    start_arr, end_arr = text.find("["), text.rfind("]")
+    if start_arr != -1 and end_arr > start_arr:
+        return text[start_arr:end_arr + 1].strip()
     return text
 
 

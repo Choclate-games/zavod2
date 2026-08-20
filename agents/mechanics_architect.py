@@ -9,8 +9,10 @@ import re
 from typing import List, Dict, Any
 
 from agents.design_os_base import RU_SYSTEM_SUFFIX, ask_model, merge_filled
+from app.config import config
 from app.context import GenerationContext
 from app.logging import log_agent
+from app.mechanics_repo import MechanicsRepository
 from app.models import CoreDesignSpec, LoopStep, MechanicDeepSpec, MechanicParameter, MechanicSpec
 
 SYSTEM_PROMPT = (
@@ -56,6 +58,16 @@ class MechanicsArchitectAgent:
         # Синхронизация плоского списка механик concept.mechanics с глубокими спецификациями
         self._sync_concept_mechanics(concept, core)
 
+        # Автоматическое сохранение новых уникальных механик в каталог
+        repo = MechanicsRepository.get_instance()
+        saved_count = repo.register_and_persist_mechanics(
+            core.mechanics,
+            genre=concept.genre or "",
+            renderer=concept.renderer or "threejs"
+        )
+        if saved_count > 0:
+            log_agent("MechanicsArchitect", f"Сохранено {saved_count} новых механик в config/mechanics.yaml")
+
         log_agent(
             "MechanicsArchitect",
             f"Ядро готово: {len(core.mechanics)} механик с числами и псевдокодом, "
@@ -75,6 +87,11 @@ class MechanicsArchitectAgent:
             f"- {r.name}: чему учит — {r.lessons or '—'}; чего избегать — {r.what_to_avoid or '—'}"
             for r in c.references[:4]
         ) or "- референсы не заданы"
+
+        repo = MechanicsRepository.get_instance()
+        matched = repo.find_relevant(f"{ctx.raw_prompt} {c.genre} {c.hook}", limit=4)
+        catalog_inspiration = repo.format_for_prompt(matched)
+
         return (
             f"Игра: {c.title}\nЖанр: {c.genre} ({c.subgenre})\n"
             f"Крючок: {c.hook}\nФантазия игрока: {c.player_fantasy}\n"
@@ -86,6 +103,7 @@ class MechanicsArchitectAgent:
             f"Рендерер: {c.renderer}\nАудитория: {c.target_audience}\n"
             f"Игровые системы: {systems}\n"
             f"Текущие механики концепции:\n{mechanics}\n"
+            f"Каталог проверенных механик (для вдохновения/адаптации):\n{catalog_inspiration}\n"
             f"Референсы:\n{refs}\n"
             f"Исходная идея пользователя: {ctx.raw_prompt}"
         )
@@ -94,9 +112,15 @@ class MechanicsArchitectAgent:
     def _merge_mechanics(
         base: List[MechanicDeepSpec], extra: List[MechanicDeepSpec]
     ) -> List[MechanicDeepSpec]:
-        """Слияние по имени: ответ модели главнее, но пустые поля добираются из базы."""
+        """Слияние механик: если подмешивание шаблонов выключено, доверяем модели на 100%."""
         if not extra:
             return base
+
+        # Если подмешивание шаблонов выключено (по умолчанию), берем только сгенерированные ИИ механики
+        if not getattr(config, "allow_template_mixing", False):
+            return extra
+
+        # Иначе — режим слияния с базовыми эвристическими шаблонами
         by_name = {b.name.strip().lower(): b for b in base if b.name}
         merged: List[MechanicDeepSpec] = []
         seen = set()

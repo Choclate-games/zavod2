@@ -1,37 +1,40 @@
-# Mechanic: Arcade Vehicle & Mech Physics
+# Vehicle Physics & Handling (Three.js + Rapier 3D)
 
-Name: Arcade Vehicle & Mech Physics
-Category: Movement & Physics
-Description: Physics-based raycast or sphere-cast vehicle controller with simulated wheel suspension, lateral tire friction, drift mechanics, steering inertia, and ramming force against enemies.
+> 💡 **Интерактивное демо**: `workspace/knowledge-showcase/index.html` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D 1:1)»*).
 
-Player interaction:
-Steering, throttle/brake, boost button, and weapon turret aiming (either locked to vehicle facing or twin-stick independent aim).
+## Единый стандарт фабрики для транспортных средств: Rapier 3D WASM
 
-Feedback:
-- Tire skid marks via pooled quad strip meshes.
-- Smoke/exhaust particle bursts on boost.
-- Engine audio RPM modulation.
-- Heavy collision shudder on ramming targets.
+Во всех 3D-проектах фабрики, содержащих автомобили, грузовики или гоночные болиды, **обязательно используется физический движок Rapier 3D (`@dimforge/rapier3d-compat`) с `DynamicRayCastVehicleController`**.
 
-Strengths:
-- High kinetic energy and movement speed thrill.
-- Direct physical gratification from ramming swarms.
+Любые упрощенные самодельные аналитические реализации (Pure JS) **запрещены**, так как они приводят к неестественному поведению кузова, провалам сквозь рельеф и неестественным скачкам на кочках.
 
-Weaknesses:
-- Can become hard to control in tight arenas without high turning torque and handbrake.
+---
 
-Good combinations:
-- Swarm survival.
-- Destructible arena elements.
+## Архитектура реализации
 
-Technical complexity:
-Moderate to High. Raycast vehicle simulation with traction curves.
+1. **Физический мир (`PhysicsWorld.ts`)**:
+   * Документация и эталонный код: [`knowledge/threejs/rapier_vehicle_controller.md`](file:///c:/Users/Eduard/Desktop/zavod2/knowledge/threejs/rapier_vehicle_controller.md).
+   * Инициализация `@dimforge/rapier3d-compat` (WASM).
+   * TriMesh-коллайдер ландшафта (`RAPIER.ColliderDesc.trimesh(vertices, indices)`).
+   * Фильтрация лучей колёс через группы `WHEEL_RAY_GROUPS` (лучи видят только землю, исключая кузов и груз).
 
-Three.js suitability:
-Very High (9.5/10).
+2. **Контроллер машины (`TruckController.ts`)**:
+   * Настоящая динамическая лучевая подвеска (`DynamicRayCastVehicleController`).
+   * Пружинный возврат руля к нейтрали:
+     ```typescript
+     this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteer, 8.0 * dt);
+     this.vehicle.setWheelSteering(0, this.steerAngle);
+     this.vehicle.setWheelSteering(1, this.steerAngle);
+     ```
+   * Честный расчет тяги и торможения на ведущие колеса (`setWheelEngineForce`, `setWheelBrake`).
+   * Боковое трение и занос (`setWheelFrictionSlip`, `setWheelSideFrictionStiffness`).
 
-PixiJS suitability:
-Moderate (6/10).
+---
 
-Retention potential:
-High.
+## Обязательный чек-лист качества:
+* [x] Использование `@dimforge/rapier3d-compat` и `DynamicRayCastVehicleController`.
+* [x] TriMesh-коллайдер для дорожного покрытия и холмов.
+* [x] Пружинный возврат рулевого колеса в центр.
+* [x] Естественный ход подвески каждого колеса на неровностях.
+* [x] Дым из выхлопной трубы при нажатии на газ.
+* [x] Процедурный синтез звука мотора Web Audio с оборотами RPM (`knowledge/audio/procedural_sound_synthesizer.md`).

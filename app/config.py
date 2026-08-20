@@ -48,8 +48,10 @@ class AppConfig:
         self.references_cfg = load_yaml(CONFIG_DIR / "references.yaml")
         self.playgama_cfg = load_yaml(CONFIG_DIR / "playgama.yaml")
         
-        self.default_provider = os.getenv("DEFAULT_PROVIDER", "local")
+        self.default_agent = os.getenv("DEFAULT_AGENT", "opencode")
+        self.default_provider = os.getenv("DEFAULT_PROVIDER", self.default_agent)
         self.default_mode = os.getenv("DEFAULT_MODE", "standard")
+        self.allow_template_mixing = _flag("ALLOW_TEMPLATE_MIXING", False)
         
         # Provider & GUI settings
         # OpenCode Zen REST API отключён вместе с остальными API-моделями:
