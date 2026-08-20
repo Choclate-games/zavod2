@@ -1097,9 +1097,36 @@ class FactoryService:
                 "session": self._session_summary(session)}
 
     def stop_chat(self, session_id: str) -> Dict[str, Any]:
-        if self.chat_jobs.request_stop(session_id):
-            return {"status": "success", "message": "Останавливаю..."}
-        return {"status": "error", "message": "В этом чате нет работающей задачи."}
+        job = self.chat_jobs.get(session_id)
+        outcome = self.chat_jobs.request_stop(session_id)
+        if not outcome:
+            return {"status": "error", "message": "В этом чате нет работающей задачи."}
+
+        forced = outcome == "forced"
+        # Остановка занимает до нескольких секунд (снимаем всё дерево процессов
+        # агента), поэтому подтверждаем её прямо в ленте — иначе кажется, что
+        # кнопка не сработала. Повторное нажатие освобождает чат принудительно.
+        if job:
+            event = {"kind": "system", "icon": "⏹️",
+                     "text": ("Чат освобождён принудительно: задача отвязана, "
+                              "можно писать новую. Если процесс агента всё ещё жив, "
+                              "закройте его в диспетчере задач.")
+                             if forced else
+                             "Остановка запрошена — снимаю процесс агента…"}
+            job.record(event)
+            bus.publish("chat.event", slug=job.slug, session_id=session_id, event=event)
+
+        if forced:
+            bus.publish("chat.finished", slug=job.slug if job else "", session_id=session_id,
+                        status="stopped", icon="⏹", text="Чат освобождён принудительно",
+                        duration=job.duration_str if job else "—",
+                        title=job.title if job else "", playable=False)
+            bus.publish("chats.changed", slug=job.slug if job else "")
+            return {"status": "success", "message": "Задача отвязана, чат свободен."}
+
+        return {"status": "success",
+                "message": "Останавливаю… Нажмите «Стоп» ещё раз через 10 с, "
+                           "чтобы освободить чат принудительно."}
 
     def running_chats(self) -> List[Dict[str, Any]]:
         return [

@@ -31,6 +31,8 @@ class ChatJob:
     finished_at: Optional[datetime] = None
     events: List[Dict[str, Any]] = field(default_factory=list)
     answer: str = ""
+    stop_requested_at: Optional[datetime] = None
+    detached: bool = False
     _stop: bool = False
 
     def should_stop(self) -> bool:
@@ -38,6 +40,14 @@ class ChatJob:
 
     def request_stop(self) -> None:
         self._stop = True
+        if self.stop_requested_at is None:
+            self.stop_requested_at = datetime.now()
+
+    def stopping_for(self) -> float:
+        """Сколько секунд назад запросили остановку (0 — не запрашивали)."""
+        if self.stop_requested_at is None:
+            return 0.0
+        return (datetime.now() - self.stop_requested_at).total_seconds()
 
     def record(self, event: Dict[str, Any]) -> None:
         """Складывает событие в буфер, чтобы лента восстановилась при возврате."""
@@ -101,7 +111,7 @@ class ChatJobManager:
                 exit_code, answer = work(job)
                 job.exit_code = exit_code
                 job.answer = answer
-                if job.should_stop():
+                if job.detached or job.should_stop():
                     job.status = "stopped"
                 else:
                     job.status = "done" if exit_code == 0 else "failed"
@@ -116,12 +126,33 @@ class ChatJobManager:
         threading.Thread(target=runner, daemon=True).start()
         return job
 
-    def request_stop(self, session_id: str) -> bool:
+    # Через сколько секунд после первого «Стоп» повторное нажатие отвязывает
+    # задачу принудительно: агент, который не умер даже после снятия дерева
+    # процессов, не должен запирать чат навсегда.
+    FORCE_RELEASE_AFTER_SECONDS = 10.0
+
+    def request_stop(self, session_id: str) -> str:
+        """
+        Просит задачу остановиться.
+
+        Возвращает "requested" (остановка запрошена), "forced" (повторное
+        нажатие — чат освобождён принудительно) или "" (останавливать нечего).
+        """
         job = self._jobs.get(session_id)
         if not job or job.status != "running":
-            return False
+            return ""
+
+        if job.should_stop() and job.stopping_for() >= self.FORCE_RELEASE_AFTER_SECONDS:
+            # Поток агента живёт своей жизнью (daemon), но чат отдаём пользователю
+            # прямо сейчас: он сможет удалить беседу или поставить новую задачу.
+            job.status = "stopped"
+            job.detached = True
+            job.finished_at = datetime.now()
+            self._jobs.pop(session_id, None)
+            return "forced"
+
         job.request_stop()
-        return True
+        return "requested"
 
     def forget(self, session_id: str) -> None:
         self._jobs.pop(session_id, None)

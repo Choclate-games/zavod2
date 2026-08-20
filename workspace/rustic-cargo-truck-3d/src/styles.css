@@ -69,6 +69,7 @@ h1 { margin: 10px 0 12px; font-family: Georgia, serif; font-weight: 700; font-si
 .level-card .num { font-size: 18px; font-weight: 900; }
 .level-card .name { font-size: 11px; margin: 3px 0; color: var(--cream); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-card .cargo-tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 6px; font-weight: 800; background: rgba(232,120,50,.3); color: #ffd699; margin-bottom: 3px; }
+.level-card .fork-tag { display: inline-block; font-size: 9px; padding: 2px 5px; border-radius: 6px; font-weight: 800; background: rgba(61,126,166,.45); border: 1px solid rgba(147,203,214,.4); color: #b8e6f0; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .level-card .tag { display: inline-block; font-size: 9px; padding: 2px 6px; border-radius: 8px; font-weight: 800; background: rgba(0,0,0,.35); color: #e8ad61; }
 .level-card .stars { font-size: 12px; margin-top: 3px; color: #ffca36; }
 

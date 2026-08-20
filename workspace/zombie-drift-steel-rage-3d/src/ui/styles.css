@@ -35,6 +35,21 @@ body, html {
   top: 0;
   left: 0;
   overflow: hidden;
+  /* Холст игры не должен сам перехватывать жесты: весь ввод идёт через
+     слой тач-управления поверх, а здесь гасим скролл, зум и выделение. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* WebGL-холст Three.js — отмена любых браузерных жестов поверх рендера. */
+#game-container canvas {
+  display: block;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #ui-layer {

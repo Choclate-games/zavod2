@@ -584,8 +584,15 @@ class AGYProvider(AIProvider):
         `on_conversation_id` — вызывается, когда CLI сообщил ID своей беседы;
                                его нужно сохранить, чтобы продолжить чат позже.
         """
-        import io
         import time
+
+        from providers.proc_stream import (
+            env_seconds,
+            iter_process_lines,
+            kill_process_tree,
+            popen_kwargs,
+            wait_quietly,
+        )
 
         cli = self.resolve_cli()
         if not cli:
@@ -617,7 +624,6 @@ class AGYProvider(AIProvider):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
         seen_conversation: Dict[str, str] = {}
 
@@ -660,7 +666,7 @@ class AGYProvider(AIProvider):
                     cwd=work_dir,
                     env=env,
                     bufsize=0,
-                    creationflags=creationflags
+                    **popen_kwargs()
                 )
             except OSError as exc:
                 raise RuntimeError(
@@ -668,26 +674,50 @@ class AGYProvider(AIProvider):
                 ) from exc
 
             collected: List[str] = []
-            reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
             stopped = False
+            hung = False
             effort_rejected = False
             reported_error = False
+            started_at = time.monotonic()
+
+            # По умолчанию не обрываем: см. пояснение в providers/cli_agents.py
+            idle_timeout = env_seconds("AGENT_IDLE_TIMEOUT_SECONDS", 0.0)
+            idle_ping = env_seconds("AGENT_IDLE_PING_SECONDS", 60.0)
 
             try:
-                while True:
-                    if stop_check_fn and stop_check_fn():
+                # Чтение идёт через отдельный поток (providers.proc_stream):
+                # блокирующий readline не давал нажать «Стоп», пока агент молчит.
+                for item, payload in iter_process_lines(
+                    proc,
+                    stop_check_fn=stop_check_fn,
+                    idle_ping=idle_ping,
+                    idle_timeout=idle_timeout,
+                ):
+                    if item == "stop":
                         stopped = True
-                        proc.kill()
-                        emit({"kind": "system", "icon": "⏹️", "text": "Процесс принудительно остановлен."})
+                        kill_process_tree(proc)
+                        emit({"kind": "system", "icon": "⏹️",
+                              "text": "Процесс и все его дочерние процессы остановлены."})
                         break
 
-                    line = reader.readline()
-                    if not line:
-                        if proc.poll() is not None:
-                            break
-                        time.sleep(0.02)
+                    if item == "timeout":
+                        hung = True
+                        kill_process_tree(proc)
+                        reported_error = True
+                        emit({"kind": "error",
+                              "text": f"AGY CLI не выдал ни строки за {int(payload or 0)} с и "
+                                      f"считается зависшим — процесс снят.\n"
+                                      f"Порог задаётся переменной AGENT_IDLE_TIMEOUT_SECONDS "
+                                      f"(сейчас {int(idle_timeout)} с, 0 — не обрывать)."})
+                        break
+
+                    if item == "idle":
+                        emit({"kind": "meta",
+                              "text": f"⏳ агент молчит {int(payload or 0)} с "
+                                      f"(всего в работе {int(time.monotonic() - started_at)} с)"})
                         continue
 
+                    line = str(payload)
                     collected.append(line)
                     capture_conversation(line)
                     event = self.parse_stream_event(line)
@@ -706,11 +736,14 @@ class AGYProvider(AIProvider):
                         proc.stdout.close()
                     except Exception:
                         pass
-                proc.wait()
+                wait_quietly(proc)
 
             raw = "".join(collected)
             if effort_rejected:
                 return proc.returncode, raw, stopped, True
+
+            if hung:
+                return proc.returncode or 1, raw, stopped, False
 
             if proc.returncode not in (0, None) and not stopped:
                 if reported_error:

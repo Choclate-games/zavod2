@@ -12,6 +12,25 @@ export interface WaterZoneConfig {
   depth: number;
 }
 
+export interface ForkConfig {
+  startZ: number;
+  endZ: number;
+  leftOffset: number;
+  rightOffset: number;
+  leftTag: string;
+  rightTag: string;
+  leftElevation?: number;
+  rightElevation?: number;
+  leftMudIntensity?: number;
+  rightMudIntensity?: number;
+  leftWaterDepth?: number;
+  rightWaterDepth?: number;
+  leftBumpsAmp?: number;
+  rightBumpsAmp?: number;
+  leftBoulders?: number;
+  rightBoulders?: number;
+}
+
 export interface LevelConfig {
   id: number;
   title: string;
@@ -19,6 +38,9 @@ export interface LevelConfig {
   tag: string;
   cargoPackage?: CargoPackageType;
   length: number;
+  curveAmp?: number;
+  curveFreq?: number;
+  forks?: ForkConfig[];
   mudZones: MudZoneConfig[];
   waterZones: WaterZoneConfig[];
   bumpFreq: number;
@@ -34,502 +56,665 @@ export const LEVELS: LevelConfig[] = [
   {
     "id": 1,
     "title": "01. Деревенский просёлок",
-    "subtitle": "Укатанная грунтовка с лёгкими лужицами. Знакомство с управлением.",
+    "subtitle": "Извилистая грунтовка с мягкими виражами и лужицами. Знакомство с управлением.",
     "tag": "Легко",
+    "cargoPackage": "logs",
     "length": 220,
+    "curveAmp": 3.2,
+    "curveFreq": 0.038,
     "mudZones": [
       {
-        "startZ": 73,
-        "endZ": 150,
-        "intensity": 0.6
+        "startZ": 75,
+        "endZ": 145,
+        "intensity": 0.55
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.18,
-    "camberAmp": 0.1,
-    "hillsAmp": 0.6,
-    "boulderCount": 4,
-    "rewardCoins": 50,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.128,
+    "camberAmp": 0.157,
+    "hillsAmp": 1.65,
+    "boulderCount": 7,
+    "rewardCoins": 105,
     "parTime": 31
   },
   {
     "id": 2,
     "title": "02. Лесная колея",
-    "subtitle": "Мягкие волны рельефа и первая промоина среди старых сосен.",
+    "subtitle": "Извилистая колея среди старых сосен с волнообразными поворотами.",
     "tag": "Легко",
+    "cargoPackage": "logs",
     "length": 226,
+    "curveAmp": 3.29,
+    "curveFreq": 0.0379,
     "mudZones": [],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.19,
-    "camberAmp": 0.11,
-    "hillsAmp": 0.64,
-    "boulderCount": 5,
-    "rewardCoins": 68,
-    "parTime": 31
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.136,
+    "camberAmp": 0.164,
+    "hillsAmp": 1.7,
+    "boulderCount": 7,
+    "rewardCoins": 130,
+    "parTime": 32
   },
   {
     "id": 3,
     "title": "03. Топи у ручья",
-    "subtitle": "Заболоченная низина с вязким илом. Не бросай газ!",
+    "subtitle": "Заболоченная низина на крутом лесном вираже. Не бросай газ!",
     "tag": "Грязь",
+    "cargoPackage": "barrels",
     "length": 232,
+    "curveAmp": 3.38,
+    "curveFreq": 0.0377,
     "mudZones": [
       {
-        "startZ": 75,
-        "endZ": 156,
-        "intensity": 0.61
+        "startZ": 65,
+        "endZ": 128,
+        "intensity": 0.6
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.19,
-    "camberAmp": 0.11,
-    "hillsAmp": 0.67,
-    "boulderCount": 5,
-    "rewardCoins": 86,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.144,
+    "camberAmp": 0.171,
+    "hillsAmp": 1.75,
+    "boulderCount": 8,
+    "rewardCoins": 155,
     "parTime": 32
   },
   {
     "id": 4,
     "title": "04. Брод через ручей",
-    "subtitle": "Водная преграда с брызгами. Снижай скорость перед въездом в воду.",
+    "subtitle": "Водная преграда на повороте у ручья. Снижай скорость перед въездом в воду.",
     "tag": "Вода",
+    "cargoPackage": "barrels",
     "length": 239,
-    "mudZones": [
-      {
-        "startZ": 76,
-        "endZ": 160,
-        "intensity": 0.62
-      }
-    ],
+    "curveAmp": 3.46,
+    "curveFreq": 0.0376,
+    "mudZones": [],
     "waterZones": [
       {
-        "startZ": 98,
-        "endZ": 134,
-        "depth": 0.36
+        "startZ": 86,
+        "endZ": 115,
+        "depth": 0.38
       }
     ],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.2,
-    "camberAmp": 0.12,
-    "hillsAmp": 0.7,
-    "boulderCount": 6,
-    "rewardCoins": 104,
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.152,
+    "camberAmp": 0.178,
+    "hillsAmp": 1.8,
+    "boulderCount": 9,
+    "rewardCoins": 180,
     "parTime": 33
   },
   {
     "id": 5,
     "title": "05. Каменистый спуск",
-    "subtitle": "Каменистая тропа с ухабами. Следи за скоростью на крутом спуске.",
+    "subtitle": "Извилистый каменистый спуск с ухабами. Следи за скоростью на крутых виражах.",
     "tag": "Кочки",
+    "cargoPackage": "construction",
     "length": 245,
+    "curveAmp": 3.55,
+    "curveFreq": 0.0374,
     "mudZones": [
       {
-        "startZ": 86,
+        "startZ": 69,
         "endZ": 135,
-        "intensity": 0.47
+        "intensity": 0.61
       }
     ],
     "waterZones": [],
-    "bumpFreq": 1.36,
-    "bumpAmp": 0.32,
-    "camberAmp": 0.12,
-    "hillsAmp": 0.74,
-    "boulderCount": 6,
-    "rewardCoins": 122,
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.16,
+    "camberAmp": 0.185,
+    "hillsAmp": 1.85,
+    "boulderCount": 10,
+    "rewardCoins": 205,
     "parTime": 34
   },
   {
     "id": 6,
     "title": "06. Грязевой серпантин",
-    "subtitle": "Извилистый подъём по раскисшей глине. Потребуется запас тяги.",
+    "subtitle": "Извилистый подъём по раскисшей глине. Потребуется запас тяги на дуге.",
     "tag": "Грязь",
+    "cargoPackage": "logs",
     "length": 251,
-    "mudZones": [
-      {
-        "startZ": 78,
-        "endZ": 166,
-        "intensity": 0.64
-      }
-    ],
+    "curveAmp": 3.64,
+    "curveFreq": 0.0373,
+    "mudZones": [],
     "waterZones": [],
     "bumpFreq": 0.45,
-    "bumpAmp": 0.21,
-    "camberAmp": 0.13,
-    "hillsAmp": 0.78,
-    "boulderCount": 7,
-    "rewardCoins": 140,
+    "bumpAmp": 0.168,
+    "camberAmp": 0.192,
+    "hillsAmp": 1.9,
+    "boulderCount": 10,
+    "rewardCoins": 230,
     "parTime": 35
   },
   {
     "id": 7,
     "title": "07. Сосновый бор",
-    "subtitle": "Живописная лесная трасса с корнями и плотными рядами деревьев.",
+    "subtitle": "Живописная извилистая трасса с выступающими корнями и плотными рядами сосен.",
     "tag": "Легко",
+    "cargoPackage": "farm",
     "length": 257,
+    "curveAmp": 3.73,
+    "curveFreq": 0.0372,
     "mudZones": [
       {
-        "startZ": 79,
-        "endZ": 169,
-        "intensity": 0.64
+        "startZ": 72,
+        "endZ": 141,
+        "intensity": 0.63
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.22,
-    "camberAmp": 0.13,
-    "hillsAmp": 0.81,
-    "boulderCount": 8,
-    "rewardCoins": 158,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.176,
+    "camberAmp": 0.199,
+    "hillsAmp": 1.95,
+    "boulderCount": 11,
+    "rewardCoins": 255,
     "parTime": 36
   },
   {
     "id": 8,
     "title": "08. Болото Лесорубов",
-    "subtitle": "Огромная протяжённая топь с коварными колеями. Колёса буксуют.",
+    "subtitle": "Огромная протяжённая топь с коварными S-образными колеями. Колёса буксуют.",
     "tag": "Грязь",
+    "cargoPackage": "logs",
     "length": 263,
-    "mudZones": [
-      {
-        "startZ": 79,
-        "endZ": 172,
-        "intensity": 0.65
-      }
-    ],
+    "curveAmp": 3.82,
+    "curveFreq": 0.037,
+    "mudZones": [],
     "waterZones": [
       {
-        "startZ": 103,
-        "endZ": 142,
-        "depth": 0.39
+        "startZ": 95,
+        "endZ": 126,
+        "depth": 0.4
       }
     ],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.22,
-    "camberAmp": 0.14,
-    "hillsAmp": 0.84,
-    "boulderCount": 8,
-    "rewardCoins": 176,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.184,
+    "camberAmp": 0.206,
+    "hillsAmp": 2,
+    "boulderCount": 12,
+    "rewardCoins": 280,
     "parTime": 37
   },
   {
     "id": 9,
     "title": "09. Ухабистая гряда",
-    "subtitle": "Ритмичные моголы и поперечный крен, раскачивающий кузов.",
+    "subtitle": "Ритмичные моголы и поперечный крен на виражах, раскачивающий кузов.",
     "tag": "Кочки",
+    "cargoPackage": "farm",
     "length": 270,
+    "curveAmp": 3.9,
+    "curveFreq": 0.0369,
     "mudZones": [
       {
-        "startZ": 95,
+        "startZ": 76,
         "endZ": 149,
-        "intensity": 0.5
+        "intensity": 0.64
       }
     ],
     "waterZones": [],
-    "bumpFreq": 1.22,
-    "bumpAmp": 0.35,
-    "camberAmp": 0.14,
-    "hillsAmp": 0.88,
-    "boulderCount": 9,
-    "rewardCoins": 194,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.192,
+    "camberAmp": 0.213,
+    "hillsAmp": 2.05,
+    "boulderCount": 12,
+    "rewardCoins": 305,
     "parTime": 38
   },
   {
     "id": 10,
     "title": "10. Тайга после ливня",
-    "subtitle": "После дождя вся дорога превратилась в сплошное грязевое месиво.",
-    "tag": "Грязь",
+    "subtitle": "Широкая развилка: опасная срезка через глубокую топь или сухой песчаный объезд.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 276,
+    "curveAmp": 3.99,
+    "curveFreq": 0.0367,
+    "forks": [
+      {
+        "startZ": 70,
+        "endZ": 185,
+        "leftOffset": -14.5,
+        "rightOffset": 14.5,
+        "leftTag": "💥 ТОПЬ",
+        "rightTag": "✨ ОБЪЕЗД",
+        "leftElevation": -1.2,
+        "rightElevation": 1.8,
+        "leftMudIntensity": 0.95,
+        "rightMudIntensity": 0,
+        "rightBumpsAmp": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 81,
-        "endZ": 178,
-        "intensity": 0.66
+        "startZ": 77,
+        "endZ": 152,
+        "intensity": 0.65
       }
     ],
     "waterZones": [],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.23,
-    "camberAmp": 0.15,
-    "hillsAmp": 0.92,
-    "boulderCount": 9,
-    "rewardCoins": 212,
-    "parTime": 38
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.2,
+    "camberAmp": 0.22,
+    "hillsAmp": 2.1,
+    "boulderCount": 13,
+    "rewardCoins": 330,
+    "parTime": 39
   },
   {
     "id": 11,
     "title": "11. Речной брод",
-    "subtitle": "Глубокий брод через лесную речку. Держи тягу, преодолевая сопротивление воды.",
+    "subtitle": "Глубокий брод через лесную речку с плавным изгибом русла.",
     "tag": "Вода",
+    "cargoPackage": "barrels",
     "length": 282,
+    "curveAmp": 4.08,
+    "curveFreq": 0.0366,
     "mudZones": [
       {
-        "startZ": 99,
+        "startZ": 79,
         "endZ": 155,
-        "intensity": 0.51
+        "intensity": 0.66
       }
     ],
     "waterZones": [
       {
-        "startZ": 106,
-        "endZ": 149,
-        "depth": 0.4
+        "startZ": 102,
+        "endZ": 135,
+        "depth": 0.41
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.24,
-    "camberAmp": 0.15,
-    "hillsAmp": 0.95,
-    "boulderCount": 10,
-    "rewardCoins": 230,
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.208,
+    "camberAmp": 0.227,
+    "hillsAmp": 2.15,
+    "boulderCount": 14,
+    "rewardCoins": 355,
     "parTime": 39
   },
   {
     "id": 12,
     "title": "12. Каменный каньон",
-    "subtitle": "Узкий проход с крупными валунами на полосе движения.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: ровный песчаник слева или каменистый каньон с валунами справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 288,
+    "curveAmp": 4.17,
+    "curveFreq": 0.0365,
+    "forks": [
+      {
+        "startZ": 75,
+        "endZ": 200,
+        "leftOffset": -15,
+        "rightOffset": 15,
+        "leftTag": "✨ ПЕСЧАНИК",
+        "rightTag": "💥 ВАЛУНЫ",
+        "leftElevation": 1.2,
+        "rightElevation": 0.2,
+        "leftMudIntensity": 0,
+        "leftBoulders": 0,
+        "leftBumpsAmp": 0.05,
+        "rightBoulders": 14,
+        "rightBumpsAmp": 0.55
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 101,
+        "startZ": 81,
         "endZ": 158,
-        "intensity": 0.52
+        "intensity": 0.66
       }
     ],
-    "waterZones": [
-      {
-        "startZ": 108,
-        "endZ": 151,
-        "depth": 0.4
-      }
-    ],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.25,
-    "camberAmp": 0.15,
-    "hillsAmp": 0.98,
-    "boulderCount": 19,
-    "rewardCoins": 248,
+    "waterZones": [],
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.216,
+    "camberAmp": 0.234,
+    "hillsAmp": 2.2,
+    "boulderCount": 14,
+    "rewardCoins": 380,
     "parTime": 40
   },
   {
     "id": 13,
     "title": "13. Чёрная топь",
-    "subtitle": "Вязкий чёрный торфяник. Минимальное сцепление шин.",
+    "subtitle": "Вязкий чёрный торфяник на S-образном участке. Минимальное сцепление шин.",
     "tag": "Грязь",
+    "cargoPackage": "fragile",
     "length": 294,
+    "curveAmp": 4.26,
+    "curveFreq": 0.0363,
     "mudZones": [
       {
-        "startZ": 84,
-        "endZ": 187,
-        "intensity": 0.68
+        "startZ": 82,
+        "endZ": 162,
+        "intensity": 0.67
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.25,
-    "camberAmp": 0.16,
-    "hillsAmp": 1.02,
-    "boulderCount": 11,
-    "rewardCoins": 266,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.224,
+    "camberAmp": 0.241,
+    "hillsAmp": 2.25,
+    "boulderCount": 15,
+    "rewardCoins": 405,
     "parTime": 41
   },
   {
     "id": 14,
     "title": "14. Крутой перевал",
-    "subtitle": "Затяжные крутые подъёмы, ямы и обрывистые гребни.",
-    "tag": "Сложно",
+    "subtitle": "Широкая развилка: крутой скользкий подъём слева или пологий гравийный объезд справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 301,
+    "curveAmp": 4.34,
+    "curveFreq": 0.0362,
+    "forks": [
+      {
+        "startZ": 80,
+        "endZ": 215,
+        "leftOffset": -15,
+        "rightOffset": 15,
+        "leftTag": "💥 ПОДЪЁМ",
+        "rightTag": "✨ СЕРПАНТИН",
+        "leftElevation": 3.8,
+        "rightElevation": 1,
+        "leftMudIntensity": 0.85,
+        "rightMudIntensity": 0.05,
+        "leftBumpsAmp": 0.45,
+        "rightBumpsAmp": 0.08
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 105,
+        "startZ": 84,
         "endZ": 166,
-        "intensity": 0.53
+        "intensity": 0.68
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.26,
-    "camberAmp": 0.17,
-    "hillsAmp": 1.06,
-    "boulderCount": 12,
-    "rewardCoins": 284,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.232,
+    "camberAmp": 0.248,
+    "hillsAmp": 2.3,
+    "boulderCount": 16,
+    "rewardCoins": 430,
     "parTime": 42
   },
   {
     "id": 15,
     "title": "15. Затопленная колея",
-    "subtitle": "Глубокие затопленные промоины, смывающие налипшую грязь.",
-    "tag": "Вода",
+    "subtitle": "Широкая развилка: ровная бревенчатая гать слева или глубокий затопленный брод справа.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 307,
+    "curveAmp": 4.43,
+    "curveFreq": 0.036,
+    "forks": [
+      {
+        "startZ": 85,
+        "endZ": 220,
+        "leftOffset": -15.5,
+        "rightOffset": 15.5,
+        "leftTag": "✨ ГАТЬ",
+        "rightTag": "💥 БРОД",
+        "leftElevation": 1.2,
+        "rightElevation": -1.2,
+        "leftWaterDepth": 0,
+        "rightWaterDepth": 0.65,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.88,
+        "leftBumpsAmp": 0.06
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 107,
+        "startZ": 86,
         "endZ": 169,
-        "intensity": 0.53
+        "intensity": 0.68
       }
     ],
     "waterZones": [
       {
         "startZ": 111,
-        "endZ": 157,
-        "depth": 0.42
+        "endZ": 147,
+        "depth": 0.43
       }
     ],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.26,
-    "camberAmp": 0.17,
-    "hillsAmp": 1.09,
-    "boulderCount": 12,
-    "rewardCoins": 302,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.24,
+    "camberAmp": 0.255,
+    "hillsAmp": 2.35,
+    "boulderCount": 17,
+    "rewardCoins": 455,
     "parTime": 43
   },
   {
     "id": 16,
     "title": "16. Топкая низина",
-    "subtitle": "Гигантское грязевое озеро с глубокими промоинами.",
-    "tag": "Грязь",
+    "subtitle": "Широкая развилка: коварная топкая низина слева или сухой высокий гребень справа.",
+    "tag": "Развилка",
+    "cargoPackage": "logs",
     "length": 313,
+    "curveAmp": 4.52,
+    "curveFreq": 0.0359,
+    "forks": [
+      {
+        "startZ": 85,
+        "endZ": 225,
+        "leftOffset": -15.5,
+        "rightOffset": 15.5,
+        "leftTag": "💥 НИЗИНА",
+        "rightTag": "✨ ГРЕБЕНЬ",
+        "leftElevation": -1.5,
+        "rightElevation": 2.4,
+        "leftMudIntensity": 0.96,
+        "rightMudIntensity": 0,
+        "leftBumpsAmp": 0.4,
+        "rightBumpsAmp": 0.06
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 87,
-        "endZ": 197,
-        "intensity": 0.7
+        "startZ": 88,
+        "endZ": 172,
+        "intensity": 0.69
       }
     ],
     "waterZones": [
       {
         "startZ": 113,
-        "endZ": 160,
-        "depth": 0.42
+        "endZ": 150,
+        "depth": 0.44
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.27,
-    "camberAmp": 0.17,
-    "hillsAmp": 1.13,
-    "boulderCount": 13,
-    "rewardCoins": 320,
-    "parTime": 43
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.248,
+    "camberAmp": 0.262,
+    "hillsAmp": 2.4,
+    "boulderCount": 17,
+    "rewardCoins": 480,
+    "parTime": 44
   },
   {
     "id": 17,
     "title": "17. Лесовозный большак",
-    "subtitle": "Разбитый лесовозами большак: глубокая колея, брёвна и ямы.",
+    "subtitle": "Разбитый лесовозами большак: глубокая колея, брёвна и извилистые промоины.",
     "tag": "Сложно",
+    "cargoPackage": "logs",
     "length": 319,
+    "curveAmp": 4.61,
+    "curveFreq": 0.0358,
     "mudZones": [
       {
-        "startZ": 112,
+        "startZ": 89,
         "endZ": 175,
-        "intensity": 0.55
+        "intensity": 0.7
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.28,
-    "camberAmp": 0.18,
-    "hillsAmp": 1.16,
-    "boulderCount": 14,
-    "rewardCoins": 338,
-    "parTime": 44
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.256,
+    "camberAmp": 0.269,
+    "hillsAmp": 2.45,
+    "boulderCount": 18,
+    "rewardCoins": 505,
+    "parTime": 45
   },
   {
     "id": 18,
     "title": "18. Каменная осыпь",
-    "subtitle": "Множество валунов, преграждающих путь прямо посреди трассы.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: расчищенная просека слева или опасный скальный распадок с валунами справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 325,
+    "curveAmp": 4.7,
+    "curveFreq": 0.0356,
+    "forks": [
+      {
+        "startZ": 90,
+        "endZ": 240,
+        "leftOffset": -15.8,
+        "rightOffset": 15.8,
+        "leftTag": "✨ ПРОСЕКА",
+        "rightTag": "💥 СКАЛЫ",
+        "leftElevation": 0.8,
+        "rightElevation": 2.2,
+        "leftMudIntensity": 0.05,
+        "rightBoulders": 16,
+        "leftBoulders": 0,
+        "rightBumpsAmp": 0.6
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 114,
+        "startZ": 91,
         "endZ": 179,
-        "intensity": 0.55
+        "intensity": 0.71
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.28,
-    "camberAmp": 0.18,
-    "hillsAmp": 1.2,
-    "boulderCount": 22,
-    "rewardCoins": 356,
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.264,
+    "camberAmp": 0.276,
+    "hillsAmp": 2.5,
+    "boulderCount": 19,
+    "rewardCoins": 530,
     "parTime": 45
   },
   {
     "id": 19,
     "title": "19. Гиблое урочище",
-    "subtitle": "Коварная смесь моголов, глубоких ям, топей и грязи.",
+    "subtitle": "Коварная смесь моголов, глубоких ям, топей и грязи на извилистом рельефе.",
     "tag": "Грязь",
+    "cargoPackage": "fragile",
     "length": 332,
+    "curveAmp": 4.78,
+    "curveFreq": 0.0355,
     "mudZones": [
       {
-        "startZ": 90,
-        "endZ": 206,
-        "intensity": 0.73
+        "startZ": 93,
+        "endZ": 183,
+        "intensity": 0.71
       },
       {
-        "startZ": 199,
+        "startZ": 212,
         "endZ": 292,
-        "intensity": 0.79
+        "intensity": 0.74
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.29,
-    "camberAmp": 0.19,
-    "hillsAmp": 1.23,
-    "boulderCount": 15,
-    "rewardCoins": 374,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.272,
+    "camberAmp": 0.283,
+    "hillsAmp": 2.55,
+    "boulderCount": 19,
+    "rewardCoins": 555,
     "parTime": 46
   },
   {
     "id": 20,
     "title": "20. Таёжный перевал",
-    "subtitle": "Высокий горный хребет с крутыми оврагами и грязевыми колеями.",
-    "tag": "Сложно",
+    "subtitle": "Широкая развилка: бурный глубокий брод слева или сухой горный перевал справа.",
+    "tag": "Развилка",
+    "cargoPackage": "mixed",
     "length": 338,
+    "curveAmp": 4.87,
+    "curveFreq": 0.0353,
+    "forks": [
+      {
+        "startZ": 95,
+        "endZ": 250,
+        "leftOffset": -16,
+        "rightOffset": 16,
+        "leftTag": "💥 БРОД",
+        "rightTag": "✨ ПЕРЕВАЛ",
+        "leftElevation": -1.2,
+        "rightElevation": 3,
+        "leftWaterDepth": 0.7,
+        "rightWaterDepth": 0,
+        "leftMudIntensity": 0.9,
+        "rightMudIntensity": 0,
+        "rightBumpsAmp": 0.08
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 118,
+        "startZ": 95,
         "endZ": 186,
-        "intensity": 0.56
+        "intensity": 0.72
+      },
+      {
+        "startZ": 216,
+        "endZ": 297,
+        "intensity": 0.75
       }
     ],
     "waterZones": [
       {
-        "startZ": 118,
-        "endZ": 168,
-        "depth": 0.44
+        "startZ": 122,
+        "endZ": 162,
+        "depth": 0.46
       }
     ],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.29,
-    "camberAmp": 0.2,
-    "hillsAmp": 1.27,
-    "boulderCount": 15,
-    "rewardCoins": 392,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.28,
+    "camberAmp": 0.29,
+    "hillsAmp": 2.6,
+    "boulderCount": 20,
+    "rewardCoins": 580,
     "parTime": 47
   },
   {
     "id": 21,
     "title": "21. Озёрный перешеек",
-    "subtitle": "Узкая насыпь между двумя таёжными озёрами с глубокими лужами.",
+    "subtitle": "Узкая извилистая насыпь между двумя таёжными озёрами с глубокими лужами.",
     "tag": "Вода",
+    "cargoPackage": "barrels",
     "length": 344,
+    "curveAmp": 4.96,
+    "curveFreq": 0.0352,
     "mudZones": [
       {
-        "startZ": 120,
+        "startZ": 96,
         "endZ": 189,
-        "intensity": 0.57
+        "intensity": 0.73
+      },
+      {
+        "startZ": 220,
+        "endZ": 303,
+        "intensity": 0.76
       }
     ],
     "waterZones": [
       {
-        "startZ": 119,
-        "endZ": 170,
-        "depth": 0.45
+        "startZ": 124,
+        "endZ": 165,
+        "depth": 0.46
       },
       {
         "startZ": 224,
@@ -537,119 +722,183 @@ export const LEVELS: LevelConfig[] = [
         "depth": 0.45
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.3,
-    "camberAmp": 0.2,
-    "hillsAmp": 1.3,
-    "boulderCount": 16,
-    "rewardCoins": 410,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.288,
+    "camberAmp": 0.297,
+    "hillsAmp": 2.65,
+    "boulderCount": 21,
+    "rewardCoins": 605,
     "parTime": 48
   },
   {
     "id": 22,
     "title": "22. Скальный гребень",
-    "subtitle": "Острые каменистые выступы и валуны на опасных виражах.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: песчаная терраса слева или вязкая чёрная топь справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 350,
+    "curveAmp": 5.05,
+    "curveFreq": 0.0351,
+    "forks": [
+      {
+        "startZ": 100,
+        "endZ": 260,
+        "leftOffset": -16,
+        "rightOffset": 16,
+        "leftTag": "✨ ТЕРРАСА",
+        "rightTag": "💥 ТОПЬ",
+        "leftElevation": 1.6,
+        "rightElevation": -1.6,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.98,
+        "rightBumpsAmp": 0.45,
+        "leftBumpsAmp": 0.06
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 93,
-        "endZ": 215,
-        "intensity": 0.75
+        "startZ": 98,
+        "endZ": 193,
+        "intensity": 0.73
       },
       {
-        "startZ": 210,
+        "startZ": 224,
         "endZ": 308,
-        "intensity": 0.8
+        "intensity": 0.76
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.31,
-    "camberAmp": 0.21,
-    "hillsAmp": 1.33,
-    "boulderCount": 25,
-    "rewardCoins": 428,
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.296,
+    "camberAmp": 0.304,
+    "hillsAmp": 2.7,
+    "boulderCount": 21,
+    "rewardCoins": 630,
     "parTime": 49
   },
   {
     "id": 23,
     "title": "23. Глинистый овраг",
-    "subtitle": "Крутой спуск в размытый овраг с тяжёлым выездом.",
+    "subtitle": "Крутой спуск в размытый глинистый овраг с тяжёлым поворотом на выезде.",
     "tag": "Грязь",
+    "cargoPackage": "farm",
     "length": 356,
+    "curveAmp": 5.14,
+    "curveFreq": 0.0349,
     "mudZones": [
       {
-        "startZ": 93,
-        "endZ": 218,
-        "intensity": 0.75
+        "startZ": 100,
+        "endZ": 196,
+        "intensity": 0.74
       },
       {
-        "startZ": 214,
+        "startZ": 228,
         "endZ": 313,
-        "intensity": 0.81
+        "intensity": 0.77
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.31,
-    "camberAmp": 0.21,
-    "hillsAmp": 1.37,
-    "boulderCount": 17,
-    "rewardCoins": 446,
-    "parTime": 49
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.304,
+    "camberAmp": 0.311,
+    "hillsAmp": 2.75,
+    "boulderCount": 22,
+    "rewardCoins": 655,
+    "parTime": 50
   },
   {
     "id": 24,
     "title": "24. Гребёнка лесорубов",
-    "subtitle": "Экстремальные волнообразные кочки, норовящие вытряхнуть весь груз.",
-    "tag": "Кочки",
+    "subtitle": "Широкая развилка: жестокая могольная гребёнка слева или ровная расчищенная просека справа.",
+    "tag": "Развилка",
+    "cargoPackage": "logs",
     "length": 363,
+    "curveAmp": 5.22,
+    "curveFreq": 0.0348,
+    "forks": [
+      {
+        "startZ": 105,
+        "endZ": 270,
+        "leftOffset": -16.2,
+        "rightOffset": 16.2,
+        "leftTag": "💥 МОГОЛЫ",
+        "rightTag": "✨ ПРОСЕКА",
+        "leftElevation": 1.5,
+        "rightElevation": 0.6,
+        "leftBumpsAmp": 0.75,
+        "rightBumpsAmp": 0.06,
+        "rightMudIntensity": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 127,
+        "startZ": 102,
         "endZ": 200,
-        "intensity": 0.59
+        "intensity": 0.75
+      },
+      {
+        "startZ": 232,
+        "endZ": 319,
+        "intensity": 0.77
       }
     ],
     "waterZones": [
       {
-        "startZ": 123,
-        "endZ": 177,
-        "depth": 0.46
+        "startZ": 131,
+        "endZ": 174,
+        "depth": 0.48
       }
     ],
-    "bumpFreq": 1.22,
-    "bumpAmp": 0.44,
-    "camberAmp": 0.22,
-    "hillsAmp": 1.41,
-    "boulderCount": 18,
-    "rewardCoins": 464,
-    "parTime": 50
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.312,
+    "camberAmp": 0.318,
+    "hillsAmp": 2.8,
+    "boulderCount": 23,
+    "rewardCoins": 680,
+    "parTime": 51
   },
   {
     "id": 25,
     "title": "25. Речная пойма",
-    "subtitle": "Широкая затопленная пойма: брызги, аквапланирование и скользкое дно.",
-    "tag": "Вода",
+    "subtitle": "Широкая развилка: ровный бревенчатый настил слева или глубокий озёрный ил справа.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 369,
+    "curveAmp": 5.31,
+    "curveFreq": 0.0346,
+    "forks": [
+      {
+        "startZ": 105,
+        "endZ": 275,
+        "leftOffset": -16.2,
+        "rightOffset": 16.2,
+        "leftTag": "✨ НАСТИЛ",
+        "rightTag": "💥 ИЛ",
+        "leftElevation": 1.4,
+        "rightElevation": -1.4,
+        "leftWaterDepth": 0,
+        "rightWaterDepth": 0.68,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.92
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 95,
-        "endZ": 225,
-        "intensity": 0.77
+        "startZ": 103,
+        "endZ": 203,
+        "intensity": 0.76
       },
       {
-        "startZ": 221,
+        "startZ": 236,
         "endZ": 325,
-        "intensity": 0.82
+        "intensity": 0.78
       }
     ],
     "waterZones": [
       {
-        "startZ": 124,
-        "endZ": 179,
-        "depth": 0.47
+        "startZ": 133,
+        "endZ": 177,
+        "depth": 0.48
       },
       {
         "startZ": 240,
@@ -657,179 +906,249 @@ export const LEVELS: LevelConfig[] = [
         "depth": 0.45
       }
     ],
-    "bumpFreq": 1.01,
+    "bumpFreq": 0.49,
     "bumpAmp": 0.32,
-    "camberAmp": 0.22,
-    "hillsAmp": 1.44,
-    "boulderCount": 18,
-    "rewardCoins": 482,
-    "parTime": 51
+    "camberAmp": 0.325,
+    "hillsAmp": 2.85,
+    "boulderCount": 24,
+    "rewardCoins": 855,
+    "parTime": 52
   },
   {
     "id": 26,
     "title": "26. Медвежий угол",
-    "subtitle": "Густой лес со сплошными стволами и сложными поворотами.",
-    "tag": "Сложно",
+    "subtitle": "Широкая развилка: бурелом со скалами слева или ровный укатанный тракт справа.",
+    "tag": "Развилка",
+    "cargoPackage": "fragile",
     "length": 375,
+    "curveAmp": 5.4,
+    "curveFreq": 0.0345,
+    "forks": [
+      {
+        "startZ": 110,
+        "endZ": 280,
+        "leftOffset": -16.5,
+        "rightOffset": 16.5,
+        "leftTag": "💥 ЗАВАЛ",
+        "rightTag": "✨ ТРАКТ",
+        "leftElevation": 1.8,
+        "rightElevation": 0.8,
+        "leftBoulders": 18,
+        "rightBoulders": 0,
+        "leftBumpsAmp": 0.55,
+        "rightMudIntensity": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 131,
+        "startZ": 105,
         "endZ": 206,
-        "intensity": 0.6
+        "intensity": 0.76
+      },
+      {
+        "startZ": 240,
+        "endZ": 330,
+        "intensity": 0.78
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.33,
-    "camberAmp": 0.23,
-    "hillsAmp": 1.48,
-    "boulderCount": 19,
-    "rewardCoins": 500,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.328,
+    "camberAmp": 0.332,
+    "hillsAmp": 2.9,
+    "boulderCount": 24,
+    "rewardCoins": 880,
     "parTime": 52
   },
   {
     "id": 27,
     "title": "27. Глубокая колея",
-    "subtitle": "Двухполосная разбитая колея: рули точно по верхушкам колей.",
+    "subtitle": "Двухполосная разбитая колея: рули точно по верхушкам извилистых колей.",
     "tag": "Грязь",
+    "cargoPackage": "farm",
     "length": 381,
+    "curveAmp": 5.49,
+    "curveFreq": 0.0344,
     "mudZones": [
       {
-        "startZ": 97,
-        "endZ": 231,
-        "intensity": 0.78
+        "startZ": 107,
+        "endZ": 210,
+        "intensity": 0.77
       },
       {
-        "startZ": 229,
+        "startZ": 244,
         "endZ": 335,
-        "intensity": 0.83
+        "intensity": 0.79
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.34,
-    "camberAmp": 0.23,
-    "hillsAmp": 1.51,
-    "boulderCount": 20,
-    "rewardCoins": 518,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.336,
+    "camberAmp": 0.339,
+    "hillsAmp": 2.95,
+    "boulderCount": 25,
+    "rewardCoins": 905,
     "parTime": 53
   },
   {
     "id": 28,
     "title": "28. Валунный лабиринт",
-    "subtitle": "Плотные группы массивных камней на полотне дороги.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: сухой гравийный холм слева или глубокий вязкий ил справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 387,
+    "curveAmp": 5.58,
+    "curveFreq": 0.0342,
+    "forks": [
+      {
+        "startZ": 110,
+        "endZ": 290,
+        "leftOffset": -16.5,
+        "rightOffset": 16.5,
+        "leftTag": "✨ ХОЛМ",
+        "rightTag": "💥 ИЛ",
+        "leftElevation": 2.5,
+        "rightElevation": -1.4,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.97,
+        "leftBumpsAmp": 0.06
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 98,
-        "endZ": 234,
-        "intensity": 0.79
+        "startZ": 108,
+        "endZ": 213,
+        "intensity": 0.78
       },
       {
-        "startZ": 232,
+        "startZ": 248,
         "endZ": 341,
-        "intensity": 0.83
+        "intensity": 0.79
       }
     ],
     "waterZones": [
       {
-        "startZ": 127,
-        "endZ": 185,
-        "depth": 0.48
+        "startZ": 139,
+        "endZ": 186,
+        "depth": 0.5
       }
     ],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.34,
-    "camberAmp": 0.24,
-    "hillsAmp": 1.54,
-    "boulderCount": 28,
-    "rewardCoins": 536,
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.344,
+    "camberAmp": 0.346,
+    "hillsAmp": 3,
+    "boulderCount": 26,
+    "rewardCoins": 930,
     "parTime": 54
   },
   {
     "id": 29,
     "title": "29. Моховое болото",
-    "subtitle": "Мягкий вязкий мох и топь, поглощающие импульс движения.",
+    "subtitle": "Мягкий вязкий мох и топь на затяжном повороте, поглощающие импульс движения.",
     "tag": "Грязь",
+    "cargoPackage": "mixed",
     "length": 394,
+    "curveAmp": 5.66,
+    "curveFreq": 0.0341,
     "mudZones": [
       {
-        "startZ": 99,
-        "endZ": 237,
-        "intensity": 0.8
+        "startZ": 110,
+        "endZ": 217,
+        "intensity": 0.78
       },
       {
-        "startZ": 236,
+        "startZ": 252,
         "endZ": 347,
-        "intensity": 0.84
+        "intensity": 0.8
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.35,
-    "camberAmp": 0.24,
-    "hillsAmp": 1.58,
-    "boulderCount": 21,
-    "rewardCoins": 554,
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.352,
+    "camberAmp": 0.353,
+    "hillsAmp": 3.05,
+    "boulderCount": 26,
+    "rewardCoins": 955,
     "parTime": 55
   },
   {
     "id": 30,
     "title": "30. Вершина кряжа",
-    "subtitle": "Открытый продуваемый гребень с резкими перепадами высоты.",
-    "tag": "Экстрим",
+    "subtitle": "Широкая развилка: скалистый кряж с валунами слева или ровный песчаный обход справа.",
+    "tag": "Развилка",
+    "cargoPackage": "mixed",
     "length": 400,
+    "curveAmp": 5.75,
+    "curveFreq": 0.0339,
+    "forks": [
+      {
+        "startZ": 115,
+        "endZ": 300,
+        "leftOffset": -16.8,
+        "rightOffset": 16.8,
+        "leftTag": "💥 СКАЛЫ",
+        "rightTag": "✨ ОБХОД",
+        "leftElevation": 3.2,
+        "rightElevation": 0.8,
+        "leftBoulders": 18,
+        "rightBoulders": 0,
+        "leftBumpsAmp": 0.65,
+        "rightMudIntensity": 0.08
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 100,
-        "endZ": 240,
-        "intensity": 0.8
+        "startZ": 112,
+        "endZ": 220,
+        "intensity": 0.79
       },
       {
-        "startZ": 240,
+        "startZ": 256,
         "endZ": 352,
-        "intensity": 0.84
+        "intensity": 0.8
       }
     ],
     "waterZones": [
       {
-        "startZ": 130,
-        "endZ": 190,
-        "depth": 0.49
+        "startZ": 144,
+        "endZ": 192,
+        "depth": 0.51
       }
     ],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.35,
-    "camberAmp": 0.24,
-    "hillsAmp": 1.62,
-    "boulderCount": 21,
-    "rewardCoins": 572,
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.36,
+    "camberAmp": 0.36,
+    "hillsAmp": 3.1,
+    "boulderCount": 27,
+    "rewardCoins": 980,
     "parTime": 56
   },
   {
     "id": 31,
     "title": "31. Бурный приток",
-    "subtitle": "Каменистый брод с сильным течением и глубокими ямами.",
+    "subtitle": "Каменистый брод с сильным течением и глубокими ямами на дуге реки.",
     "tag": "Вода",
+    "cargoPackage": "logs",
     "length": 406,
+    "curveAmp": 5.84,
+    "curveFreq": 0.0338,
     "mudZones": [
       {
-        "startZ": 101,
-        "endZ": 243,
-        "intensity": 0.81
+        "startZ": 114,
+        "endZ": 223,
+        "intensity": 0.8
       },
       {
-        "startZ": 244,
+        "startZ": 260,
         "endZ": 357,
-        "intensity": 0.85
+        "intensity": 0.81
       }
     ],
     "waterZones": [
       {
-        "startZ": 131,
-        "endZ": 192,
-        "depth": 0.5
+        "startZ": 146,
+        "endZ": 195,
+        "depth": 0.52
       },
       {
         "startZ": 264,
@@ -837,141 +1156,229 @@ export const LEVELS: LevelConfig[] = [
         "depth": 0.45
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.36,
-    "camberAmp": 0.25,
-    "hillsAmp": 1.65,
-    "boulderCount": 22,
-    "rewardCoins": 590,
-    "parTime": 56
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.368,
+    "camberAmp": 0.367,
+    "hillsAmp": 3.15,
+    "boulderCount": 28,
+    "rewardCoins": 1005,
+    "parTime": 57
   },
   {
     "id": 32,
     "title": "32. Крутояр",
-    "subtitle": "Обрывистый береговой серпантин с резкими спусками и грязевыми ловушками.",
-    "tag": "Сложно",
+    "subtitle": "Широкая развилка: сухой высокий карниз слева или размытый затопленный овраг справа.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 412,
+    "curveAmp": 5.93,
+    "curveFreq": 0.0337,
+    "forks": [
+      {
+        "startZ": 120,
+        "endZ": 310,
+        "leftOffset": -16.8,
+        "rightOffset": 16.8,
+        "leftTag": "✨ КАРНИЗ",
+        "rightTag": "💥 ОВРАГ",
+        "leftElevation": 2.4,
+        "rightElevation": -1.7,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.96,
+        "rightWaterDepth": 0.45
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 144,
+        "startZ": 115,
         "endZ": 227,
-        "intensity": 0.64
+        "intensity": 0.8
+      },
+      {
+        "startZ": 264,
+        "endZ": 363,
+        "intensity": 0.81
       }
     ],
     "waterZones": [
       {
-        "startZ": 132,
-        "endZ": 194,
-        "depth": 0.51
+        "startZ": 148,
+        "endZ": 198,
+        "depth": 0.52
       }
     ],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.37,
-    "camberAmp": 0.26,
-    "hillsAmp": 1.69,
-    "boulderCount": 23,
-    "rewardCoins": 608,
-    "parTime": 57
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.376,
+    "camberAmp": 0.374,
+    "hillsAmp": 3.2,
+    "boulderCount": 28,
+    "rewardCoins": 1030,
+    "parTime": 58
   },
   {
     "id": 33,
     "title": "33. Размытая гать",
-    "subtitle": "Старая деревянная гать, наполовину ушедшая в трясину.",
+    "subtitle": "Старая деревянная гать на S-образном повороте, наполовину ушедшая в трясину.",
     "tag": "Грязь",
+    "cargoPackage": "construction",
     "length": 418,
+    "curveAmp": 6.02,
+    "curveFreq": 0.0335,
     "mudZones": [
       {
-        "startZ": 103,
-        "endZ": 249,
-        "intensity": 0.82
+        "startZ": 117,
+        "endZ": 230,
+        "intensity": 0.81
       },
       {
-        "startZ": 251,
+        "startZ": 268,
         "endZ": 368,
-        "intensity": 0.86
+        "intensity": 0.82
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.37,
-    "camberAmp": 0.26,
-    "hillsAmp": 1.72,
-    "boulderCount": 23,
-    "rewardCoins": 626,
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.384,
+    "camberAmp": 0.381,
+    "hillsAmp": 3.25,
+    "boulderCount": 29,
+    "rewardCoins": 1055,
     "parTime": 58
   },
   {
     "id": 34,
     "title": "34. Камнепадный распадок",
-    "subtitle": "Скалистое ущелье с упавшими на дорогу глыбами.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: опасный камнепад слева или пологий безопасный траверс справа.",
+    "tag": "Развилка",
+    "cargoPackage": "farm",
     "length": 425,
+    "curveAmp": 6.1,
+    "curveFreq": 0.0334,
+    "forks": [
+      {
+        "startZ": 120,
+        "endZ": 320,
+        "leftOffset": -17,
+        "rightOffset": 17,
+        "leftTag": "💥 КАМНЕПАД",
+        "rightTag": "✨ ТРАВЕРС",
+        "leftElevation": 2,
+        "rightElevation": 1.2,
+        "leftBoulders": 22,
+        "rightBoulders": 0,
+        "leftBumpsAmp": 0.6,
+        "rightMudIntensity": 0.08
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 104,
-        "endZ": 253,
-        "intensity": 0.83
+        "startZ": 119,
+        "endZ": 234,
+        "intensity": 0.82
       },
       {
-        "startZ": 255,
+        "startZ": 272,
         "endZ": 374,
-        "intensity": 0.86
+        "intensity": 0.82
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.38,
-    "camberAmp": 0.27,
-    "hillsAmp": 1.75,
-    "boulderCount": 32,
-    "rewardCoins": 644,
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.392,
+    "camberAmp": 0.388,
+    "hillsAmp": 3.3,
+    "boulderCount": 30,
+    "rewardCoins": 1080,
     "parTime": 59
   },
   {
     "id": 35,
     "title": "35. Торфяной карьер",
-    "subtitle": "Густая чёрная жижа, требующая максимальной мощности двигателя.",
-    "tag": "Грязь",
+    "subtitle": "Широкая развилка: жидкий торфяной карьер слева или высокая сухая насыпь справа.",
+    "tag": "Развилка",
+    "cargoPackage": "fragile",
     "length": 431,
+    "curveAmp": 6.19,
+    "curveFreq": 0.0332,
+    "forks": [
+      {
+        "startZ": 125,
+        "endZ": 325,
+        "leftOffset": -17,
+        "rightOffset": 17,
+        "leftTag": "💥 ТОРФЯНИК",
+        "rightTag": "✨ НАСЫПЬ",
+        "leftElevation": -1.6,
+        "rightElevation": 2.2,
+        "leftMudIntensity": 0.98,
+        "rightMudIntensity": 0,
+        "leftBumpsAmp": 0.35,
+        "rightBumpsAmp": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 105,
-        "endZ": 256,
-        "intensity": 0.84
+        "startZ": 121,
+        "endZ": 237,
+        "intensity": 0.82
       },
       {
-        "startZ": 259,
+        "startZ": 276,
         "endZ": 379,
-        "intensity": 0.87
+        "intensity": 0.83
       }
     ],
     "waterZones": [],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.38,
-    "camberAmp": 0.27,
-    "hillsAmp": 1.79,
-    "boulderCount": 24,
-    "rewardCoins": 662,
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.4,
+    "camberAmp": 0.395,
+    "hillsAmp": 3.35,
+    "boulderCount": 31,
+    "rewardCoins": 1105,
     "parTime": 60
   },
   {
     "id": 36,
     "title": "36. Затопленный просек",
-    "subtitle": "Затопленная километровая просека с каскадом бродов.",
-    "tag": "Вода",
+    "subtitle": "Широкая развилка: высокий сухой объезд слева или каскад глубоких бродов справа.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 437,
+    "curveAmp": 6.28,
+    "curveFreq": 0.0331,
+    "forks": [
+      {
+        "startZ": 125,
+        "endZ": 335,
+        "leftOffset": -17,
+        "rightOffset": 17,
+        "leftTag": "✨ ОБЪЕЗД",
+        "rightTag": "💥 БРОДЫ",
+        "leftElevation": 2.8,
+        "rightElevation": -1.4,
+        "leftWaterDepth": 0,
+        "rightWaterDepth": 0.72,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.92
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 153,
+        "startZ": 122,
         "endZ": 240,
-        "intensity": 0.66
+        "intensity": 0.83
+      },
+      {
+        "startZ": 280,
+        "endZ": 385,
+        "intensity": 0.83
       }
     ],
     "waterZones": [
       {
-        "startZ": 137,
-        "endZ": 203,
-        "depth": 0.53
+        "startZ": 157,
+        "endZ": 210,
+        "depth": 0.54
       },
       {
         "startZ": 284,
@@ -980,140 +1387,196 @@ export const LEVELS: LevelConfig[] = [
       }
     ],
     "bumpFreq": 0.45,
-    "bumpAmp": 0.39,
-    "camberAmp": 0.28,
-    "hillsAmp": 1.83,
-    "boulderCount": 25,
-    "rewardCoins": 680,
+    "bumpAmp": 0.408,
+    "camberAmp": 0.402,
+    "hillsAmp": 3.4,
+    "boulderCount": 31,
+    "rewardCoins": 1130,
     "parTime": 61
   },
   {
     "id": 37,
     "title": "37. Холмы дровосеков",
-    "subtitle": "Непрерывная череда моголов и трамплинов.",
+    "subtitle": "Непрерывная череда моголов и трамплинов на извилистых таёжных холмах.",
     "tag": "Кочки",
+    "cargoPackage": "logs",
     "length": 443,
+    "curveAmp": 6.37,
+    "curveFreq": 0.033,
     "mudZones": [
       {
-        "startZ": 106,
-        "endZ": 262,
-        "intensity": 0.85
+        "startZ": 124,
+        "endZ": 244,
+        "intensity": 0.84
       },
       {
-        "startZ": 266,
+        "startZ": 284,
         "endZ": 390,
-        "intensity": 0.88
+        "intensity": 0.83
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.94,
-    "bumpAmp": 0.52,
-    "camberAmp": 0.28,
-    "hillsAmp": 1.86,
-    "boulderCount": 26,
-    "rewardCoins": 698,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.416,
+    "camberAmp": 0.409,
+    "hillsAmp": 3.45,
+    "boulderCount": 32,
+    "rewardCoins": 1155,
     "parTime": 62
   },
   {
     "id": 38,
     "title": "38. Тёмный распадок",
-    "subtitle": "Узкая тропа сквозь глухую чащу со скальными завалами.",
-    "tag": "Сложно",
+    "subtitle": "Широкая развилка: тёмное ущелье с валунами слева или светлая песчаная поляна справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 449,
+    "curveAmp": 6.46,
+    "curveFreq": 0.0328,
+    "forks": [
+      {
+        "startZ": 130,
+        "endZ": 345,
+        "leftOffset": -17.2,
+        "rightOffset": 17.2,
+        "leftTag": "💥 УЩЕЛЬЕ",
+        "rightTag": "✨ ПОЛЯНА",
+        "leftElevation": -1.2,
+        "rightElevation": 1.5,
+        "leftBoulders": 20,
+        "rightBoulders": 0,
+        "leftMudIntensity": 0.88,
+        "rightMudIntensity": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 157,
+        "startZ": 126,
         "endZ": 247,
-        "intensity": 0.67
+        "intensity": 0.85
+      },
+      {
+        "startZ": 287,
+        "endZ": 395,
+        "intensity": 0.84
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.4,
-    "camberAmp": 0.29,
-    "hillsAmp": 1.9,
-    "boulderCount": 26,
-    "rewardCoins": 716,
-    "parTime": 62
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.424,
+    "camberAmp": 0.416,
+    "hillsAmp": 3.5,
+    "boulderCount": 33,
+    "rewardCoins": 1180,
+    "parTime": 63
   },
   {
     "id": 39,
     "title": "39. Грязевой капкан",
-    "subtitle": "Коварная яма с илом перед самым подъёмом на холм.",
+    "subtitle": "Коварная яма с илом перед самым подъёмом на извилистый холм.",
     "tag": "Грязь",
+    "cargoPackage": "farm",
     "length": 456,
+    "curveAmp": 6.54,
+    "curveFreq": 0.0327,
     "mudZones": [
       {
-        "startZ": 108,
-        "endZ": 268,
-        "intensity": 0.87
+        "startZ": 128,
+        "endZ": 251,
+        "intensity": 0.85
       },
       {
-        "startZ": 274,
+        "startZ": 292,
         "endZ": 401,
-        "intensity": 0.89
+        "intensity": 0.84
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.41,
-    "camberAmp": 0.29,
-    "hillsAmp": 1.93,
-    "boulderCount": 27,
-    "rewardCoins": 734,
-    "parTime": 63
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.432,
+    "camberAmp": 0.423,
+    "hillsAmp": 3.55,
+    "boulderCount": 33,
+    "rewardCoins": 1205,
+    "parTime": 64
   },
   {
     "id": 40,
     "title": "40. Высокогорная просека",
-    "subtitle": "Экстремальный набор высоты по разбитому скалистому склону.",
-    "tag": "Экстрим",
+    "subtitle": "Широкая развилка: высокий скальный карниз слева или гиблое топкое болото справа.",
+    "tag": "Развилка",
+    "cargoPackage": "fragile",
     "length": 462,
+    "curveAmp": 6.63,
+    "curveFreq": 0.0325,
+    "forks": [
+      {
+        "startZ": 135,
+        "endZ": 355,
+        "leftOffset": -17.2,
+        "rightOffset": 17.2,
+        "leftTag": "✨ КАРНИЗ",
+        "rightTag": "💥 БОЛОТО",
+        "leftElevation": 3,
+        "rightElevation": -1.8,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.99,
+        "rightBumpsAmp": 0.45
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 109,
-        "endZ": 271,
-        "intensity": 0.87
+        "startZ": 129,
+        "endZ": 254,
+        "intensity": 0.86
       },
       {
-        "startZ": 277,
+        "startZ": 296,
         "endZ": 407,
-        "intensity": 0.9
+        "intensity": 0.85
       }
     ],
     "waterZones": [
       {
-        "startZ": 142,
-        "endZ": 212,
-        "depth": 0.54
+        "startZ": 166,
+        "endZ": 222,
+        "depth": 0.56
       }
     ],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.41,
-    "camberAmp": 0.3,
-    "hillsAmp": 1.97,
-    "boulderCount": 27,
-    "rewardCoins": 752,
-    "parTime": 64
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.44,
+    "camberAmp": 0.43,
+    "hillsAmp": 3.6,
+    "boulderCount": 34,
+    "rewardCoins": 1530,
+    "parTime": 65
   },
   {
     "id": 41,
     "title": "41. Брод через быстрину",
-    "subtitle": "Мощная водная преграда: проверь баланс грузовика.",
+    "subtitle": "Мощная водная преграда на горном вираже: проверь баланс грузовика.",
     "tag": "Вода",
+    "cargoPackage": "mixed",
     "length": 468,
+    "curveAmp": 6.72,
+    "curveFreq": 0.0324,
     "mudZones": [
       {
-        "startZ": 164,
+        "startZ": 131,
         "endZ": 257,
-        "intensity": 0.69
+        "intensity": 0.87
+      },
+      {
+        "startZ": 300,
+        "endZ": 412,
+        "intensity": 0.85
       }
     ],
     "waterZones": [
       {
-        "startZ": 144,
-        "endZ": 214,
-        "depth": 0.55
+        "startZ": 168,
+        "endZ": 225,
+        "depth": 0.56
       },
       {
         "startZ": 304,
@@ -1121,146 +1584,213 @@ export const LEVELS: LevelConfig[] = [
         "depth": 0.45
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.42,
-    "camberAmp": 0.3,
-    "hillsAmp": 2,
-    "boulderCount": 28,
-    "rewardCoins": 770,
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.448,
+    "camberAmp": 0.437,
+    "hillsAmp": 3.65,
+    "boulderCount": 35,
+    "rewardCoins": 1555,
     "parTime": 65
   },
   {
     "id": 42,
     "title": "42. Каменный рубеж",
-    "subtitle": "Частокол из валунов, требующий филигранного руления.",
-    "tag": "Камни",
+    "subtitle": "Широкая развилка: частокол валунов слева или ровная расчищенная полоса справа.",
+    "tag": "Развилка",
+    "cargoPackage": "construction",
     "length": 474,
+    "curveAmp": 6.81,
+    "curveFreq": 0.0323,
+    "forks": [
+      {
+        "startZ": 135,
+        "endZ": 365,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "💥 ВАЛУНЫ",
+        "rightTag": "✨ ТРАКТ",
+        "leftElevation": 1.8,
+        "rightElevation": 1,
+        "leftBoulders": 24,
+        "rightBoulders": 0,
+        "leftBumpsAmp": 0.7,
+        "rightMudIntensity": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 166,
+        "startZ": 133,
         "endZ": 261,
-        "intensity": 0.7
+        "intensity": 0.87
+      },
+      {
+        "startZ": 303,
+        "endZ": 417,
+        "intensity": 0.86
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.43,
-    "camberAmp": 0.31,
-    "hillsAmp": 2.04,
-    "boulderCount": 37,
-    "rewardCoins": 788,
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.456,
+    "camberAmp": 0.444,
+    "hillsAmp": 3.7,
+    "boulderCount": 35,
+    "rewardCoins": 1580,
     "parTime": 66
   },
   {
     "id": 43,
     "title": "43. Великая топь",
-    "subtitle": "Бескрайнее болото: 80% маршрута в глубокой жиже.",
+    "subtitle": "Бескрайнее болото на извилистом плато: 80% маршрута в глубокой жиже.",
     "tag": "Грязь",
+    "cargoPackage": "fragile",
     "length": 480,
+    "curveAmp": 6.9,
+    "curveFreq": 0.0321,
     "mudZones": [
       {
-        "startZ": 112,
-        "endZ": 280,
-        "intensity": 0.89
+        "startZ": 134,
+        "endZ": 264,
+        "intensity": 0.88
       },
       {
-        "startZ": 288,
+        "startZ": 307,
         "endZ": 422,
-        "intensity": 0.91
+        "intensity": 0.86
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.43,
-    "camberAmp": 0.31,
-    "hillsAmp": 2.07,
-    "boulderCount": 29,
-    "rewardCoins": 806,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.464,
+    "camberAmp": 0.451,
+    "hillsAmp": 3.75,
+    "boulderCount": 36,
+    "rewardCoins": 1605,
     "parTime": 67
   },
   {
     "id": 44,
     "title": "44. Скалистый хребет",
-    "subtitle": "Опасные каменные ступени и крутые крены.",
-    "tag": "Экстрим",
+    "subtitle": "Широкая развилка: высокий сухой хребет слева или вязкая грязевая впадина справа.",
+    "tag": "Развилка",
+    "cargoPackage": "barrels",
     "length": 487,
+    "curveAmp": 6.98,
+    "curveFreq": 0.032,
+    "forks": [
+      {
+        "startZ": 140,
+        "endZ": 375,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "✨ ХРЕБЕТ",
+        "rightTag": "💥 ВПАДИНА",
+        "leftElevation": 3.6,
+        "rightElevation": -1.8,
+        "leftMudIntensity": 0,
+        "rightMudIntensity": 0.98,
+        "rightBumpsAmp": 0.4
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 113,
-        "endZ": 284,
-        "intensity": 0.9
+        "startZ": 136,
+        "endZ": 268,
+        "intensity": 0.89
       },
       {
-        "startZ": 292,
+        "startZ": 312,
         "endZ": 429,
-        "intensity": 0.91
+        "intensity": 0.87
       }
     ],
     "waterZones": [
       {
-        "startZ": 147,
-        "endZ": 220,
-        "depth": 0.56
+        "startZ": 175,
+        "endZ": 234,
+        "depth": 0.58
       }
     ],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.44,
-    "camberAmp": 0.32,
-    "hillsAmp": 2.1,
-    "boulderCount": 30,
-    "rewardCoins": 824,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.472,
+    "camberAmp": 0.458,
+    "hillsAmp": 3.8,
+    "boulderCount": 37,
+    "rewardCoins": 1630,
     "parTime": 68
   },
   {
     "id": 45,
     "title": "45. Заболоченная долина",
-    "subtitle": "Длинная долина с чередой глубоких промоин и луж.",
+    "subtitle": "Длинная извилистая долина с чередой глубоких промоин и луж.",
     "tag": "Грязь",
+    "cargoPackage": "mixed",
     "length": 493,
+    "curveAmp": 7.07,
+    "curveFreq": 0.0318,
     "mudZones": [
       {
-        "startZ": 114,
-        "endZ": 287,
-        "intensity": 0.91
+        "startZ": 138,
+        "endZ": 271,
+        "intensity": 0.9
       },
       {
-        "startZ": 296,
+        "startZ": 316,
         "endZ": 434,
-        "intensity": 0.92
+        "intensity": 0.88
       }
     ],
     "waterZones": [],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.44,
-    "camberAmp": 0.32,
-    "hillsAmp": 2.14,
-    "boulderCount": 30,
-    "rewardCoins": 842,
-    "parTime": 68
+    "bumpFreq": 0.57,
+    "bumpAmp": 0.48,
+    "camberAmp": 0.465,
+    "hillsAmp": 3.85,
+    "boulderCount": 37,
+    "rewardCoins": 1655,
+    "parTime": 69
   },
   {
     "id": 46,
     "title": "46. Двойной брод",
-    "subtitle": "Два подряд глубоких водных участка на высокой скорости.",
-    "tag": "Вода",
+    "subtitle": "Широкая развилка: бурный двойной брод слева или сухой горный серпантин справа.",
+    "tag": "Развилка",
+    "cargoPackage": "farm",
     "length": 499,
+    "curveAmp": 7.16,
+    "curveFreq": 0.0317,
+    "forks": [
+      {
+        "startZ": 145,
+        "endZ": 385,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "💥 БРОД",
+        "rightTag": "✨ СЕРПАНТИН",
+        "leftElevation": -1.5,
+        "rightElevation": 2.2,
+        "leftWaterDepth": 0.75,
+        "rightWaterDepth": 0,
+        "leftMudIntensity": 0.92,
+        "rightMudIntensity": 0.05
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 115,
-        "endZ": 290,
-        "intensity": 0.92
+        "startZ": 140,
+        "endZ": 274,
+        "intensity": 0.9
       },
       {
-        "startZ": 299,
+        "startZ": 319,
         "endZ": 439,
-        "intensity": 0.92
+        "intensity": 0.88
       }
     ],
     "waterZones": [
       {
-        "startZ": 150,
-        "endZ": 225,
-        "depth": 0.57
+        "startZ": 180,
+        "endZ": 240,
+        "depth": 0.59
       },
       {
         "startZ": 324,
@@ -1268,203 +1798,200 @@ export const LEVELS: LevelConfig[] = [
         "depth": 0.45
       }
     ],
-    "bumpFreq": 0.45,
-    "bumpAmp": 0.45,
-    "camberAmp": 0.33,
-    "hillsAmp": 2.18,
-    "boulderCount": 31,
-    "rewardCoins": 860,
-    "parTime": 69
+    "bumpFreq": 0.61,
+    "bumpAmp": 0.488,
+    "camberAmp": 0.472,
+    "hillsAmp": 3.9,
+    "boulderCount": 38,
+    "rewardCoins": 1680,
+    "parTime": 70
   },
   {
     "id": 47,
     "title": "47. Чёртово урочище",
-    "subtitle": "Моголы, топи и камни, сменяющие друг друга каждые 20 метров.",
+    "subtitle": "Моголы, топи и камни на связке резких поворотов каждые 20 метров.",
     "tag": "Экстрим",
+    "cargoPackage": "construction",
     "length": 505,
+    "curveAmp": 7.25,
+    "curveFreq": 0.0316,
     "mudZones": [
       {
-        "startZ": 116,
-        "endZ": 293,
-        "intensity": 0.92
+        "startZ": 141,
+        "endZ": 278,
+        "intensity": 0.91
       },
       {
-        "startZ": 303,
+        "startZ": 323,
         "endZ": 444,
-        "intensity": 0.93
+        "intensity": 0.89
       }
     ],
     "waterZones": [
       {
-        "startZ": 151,
-        "endZ": 227,
-        "depth": 0.58
+        "startZ": 182,
+        "endZ": 242,
+        "depth": 0.59
       }
     ],
-    "bumpFreq": 0.59,
-    "bumpAmp": 0.46,
-    "camberAmp": 0.33,
-    "hillsAmp": 2.21,
-    "boulderCount": 32,
-    "rewardCoins": 878,
-    "parTime": 70
+    "bumpFreq": 0.65,
+    "bumpAmp": 0.496,
+    "camberAmp": 0.479,
+    "hillsAmp": 3.95,
+    "boulderCount": 39,
+    "rewardCoins": 1705,
+    "parTime": 71
   },
   {
     "id": 48,
     "title": "48. Таёжный шторм",
-    "subtitle": "Размытый до основания тракт с тяжелейшими колеями.",
-    "tag": "Грязь",
+    "subtitle": "Широкая развилка: расчищенный тракт слева или штормовой размыв с валунами справа.",
+    "tag": "Развилка",
+    "cargoPackage": "fragile",
     "length": 511,
+    "curveAmp": 7.34,
+    "curveFreq": 0.0314,
+    "forks": [
+      {
+        "startZ": 150,
+        "endZ": 395,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "✨ ТРАКТ",
+        "rightTag": "💥 РАЗМЫВ",
+        "leftElevation": 1.6,
+        "rightElevation": -1.4,
+        "leftMudIntensity": 0.05,
+        "rightMudIntensity": 0.98,
+        "rightBoulders": 16,
+        "rightBumpsAmp": 0.65
+      }
+    ],
     "mudZones": [
       {
-        "startZ": 117,
-        "endZ": 296,
-        "intensity": 0.93
+        "startZ": 143,
+        "endZ": 281,
+        "intensity": 0.92
       },
       {
-        "startZ": 307,
+        "startZ": 327,
         "endZ": 450,
-        "intensity": 0.93
+        "intensity": 0.89
       }
     ],
     "waterZones": [
       {
-        "startZ": 152,
-        "endZ": 229,
-        "depth": 0.58
+        "startZ": 184,
+        "endZ": 245,
+        "depth": 0.6
       }
     ],
-    "bumpFreq": 0.73,
-    "bumpAmp": 0.46,
-    "camberAmp": 0.34,
-    "hillsAmp": 2.25,
-    "boulderCount": 32,
-    "rewardCoins": 896,
+    "bumpFreq": 0.45,
+    "bumpAmp": 0.5,
+    "camberAmp": 0.486,
+    "hillsAmp": 4,
+    "boulderCount": 40,
+    "rewardCoins": 1730,
     "parTime": 71
   },
   {
     "id": 49,
     "title": "49. Скала Лесопильщика",
-    "subtitle": "Финальный каменистый подъём перед пилорамой.",
+    "subtitle": "Финальный каменистый подъём с острыми поворотами перед пилорамой.",
     "tag": "Камни",
+    "cargoPackage": "mixed",
     "length": 518,
+    "curveAmp": 7.42,
+    "curveFreq": 0.0313,
     "mudZones": [
       {
-        "startZ": 118,
-        "endZ": 299,
-        "intensity": 0.94
+        "startZ": 145,
+        "endZ": 285,
+        "intensity": 0.92
       },
       {
-        "startZ": 311,
+        "startZ": 332,
         "endZ": 456,
-        "intensity": 0.94
+        "intensity": 0.9
       }
     ],
     "waterZones": [],
-    "bumpFreq": 0.87,
-    "bumpAmp": 0.47,
-    "camberAmp": 0.34,
-    "hillsAmp": 2.28,
-    "boulderCount": 41,
-    "rewardCoins": 914,
+    "bumpFreq": 0.49,
+    "bumpAmp": 0.5,
+    "camberAmp": 0.493,
+    "hillsAmp": 4,
+    "boulderCount": 40,
+    "rewardCoins": 1755,
     "parTime": 72
   },
   {
     "id": 50,
     "title": "50. Таёжный экстремал 50",
-    "subtitle": "Кульминационный ультра-маршрут: 520 м дикой тайги, топей и скал.",
+    "subtitle": "Кульминационный ультра-маршрут: 524 м с двумя широкими развилками, топью, бродами и скалами.",
     "tag": "Экстрим",
+    "cargoPackage": "mixed",
     "length": 524,
-    "mudZones": [
+    "curveAmp": 7.51,
+    "curveFreq": 0.0311,
+    "forks": [
       {
-        "startZ": 119,
-        "endZ": 302,
-        "intensity": 0.94
+        "startZ": 85,
+        "endZ": 230,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "💥 ТОПЬ 50",
+        "rightTag": "✨ КАРНИЗ 50",
+        "leftElevation": -1.8,
+        "rightElevation": 3,
+        "leftMudIntensity": 0.99,
+        "rightMudIntensity": 0,
+        "rightBumpsAmp": 0.06
       },
       {
-        "startZ": 314,
+        "startZ": 285,
+        "endZ": 445,
+        "leftOffset": -17.5,
+        "rightOffset": 17.5,
+        "leftTag": "✨ ХРЕБЕТ",
+        "rightTag": "💥 КАНЬОН",
+        "leftElevation": 3.6,
+        "rightElevation": -1.6,
+        "leftMudIntensity": 0,
+        "rightWaterDepth": 0.75,
+        "rightMudIntensity": 0.96,
+        "rightBoulders": 16
+      }
+    ],
+    "mudZones": [
+      {
+        "startZ": 147,
+        "endZ": 288,
+        "intensity": 0.93
+      },
+      {
+        "startZ": 335,
         "endZ": 461,
-        "intensity": 0.94
+        "intensity": 0.9
       }
     ],
     "waterZones": [
       {
-        "startZ": 155,
-        "endZ": 233,
-        "depth": 0.59
+        "startZ": 189,
+        "endZ": 252,
+        "depth": 0.6
       }
     ],
-    "bumpFreq": 1.01,
-    "bumpAmp": 0.47,
-    "camberAmp": 0.34,
-    "hillsAmp": 2.31,
-    "boulderCount": 33,
-    "rewardCoins": 932,
+    "bumpFreq": 0.53,
+    "bumpAmp": 0.5,
+    "camberAmp": 0.5,
+    "hillsAmp": 4,
+    "boulderCount": 41,
+    "rewardCoins": 1780,
     "parTime": 73
   }
 ];
 
-export const LEVEL_CARGO_MAP: Record<number, CargoPackageType> = {
-  1: 'logs',
-  2: 'logs',
-  3: 'barrels',
-  4: 'barrels',
-  5: 'construction',
-  6: 'logs',
-  7: 'farm',
-  8: 'logs',
-  9: 'farm',
-  10: 'barrels',
-  11: 'barrels',
-  12: 'construction',
-  13: 'fragile',
-  14: 'construction',
-  15: 'barrels',
-  16: 'logs',
-  17: 'logs',
-  18: 'construction',
-  19: 'fragile',
-  20: 'mixed',
-  21: 'barrels',
-  22: 'construction',
-  23: 'farm',
-  24: 'logs',
-  25: 'barrels',
-  26: 'fragile',
-  27: 'farm',
-  28: 'construction',
-  29: 'mixed',
-  30: 'mixed',
-  31: 'logs',
-  32: 'barrels',
-  33: 'construction',
-  34: 'farm',
-  35: 'fragile',
-  36: 'barrels',
-  37: 'logs',
-  38: 'construction',
-  39: 'farm',
-  40: 'fragile',
-  41: 'mixed',
-  42: 'construction',
-  43: 'fragile',
-  44: 'barrels',
-  45: 'mixed',
-  46: 'farm',
-  47: 'construction',
-  48: 'fragile',
-  49: 'mixed',
-  50: 'mixed',
-};
-
-export function getLevelCargoPackage(levelId: number): CargoPackageType {
-  return LEVEL_CARGO_MAP[levelId] || 'logs';
-}
-
-export function getLevelConfig(levelId: number): LevelConfig & { cargoPackage: CargoPackageType } {
-  const found = LEVELS.find((l) => l.id === levelId) ?? LEVELS[0];
-  return {
-    ...found,
-    cargoPackage: found.cargoPackage || getLevelCargoPackage(found.id),
-  };
+export function getLevelConfig(id: number): LevelConfig {
+  const index = Math.max(1, Math.min(LEVELS.length, Math.floor(id))) - 1;
+  return LEVELS[index] ?? LEVELS[0];
 }

@@ -1445,7 +1445,12 @@ function bindChats() {
     if (!state.session) return;
     const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${state.session}/stop`, { method: "POST" });
     if (res.status === "error") toast("Стоп", res.message, "warn");
-    else setChatStatus("● Остановка...", "var(--err)");
+    else {
+      // Сервер отвечает по-разному: обычная остановка или принудительное
+      // освобождение чата по второму нажатию — сообщение стоит показать.
+      toast("Стоп", res.message, "warn");
+      setChatStatus("● Остановка...", "var(--err)");
+    }
   };
   $("btn-close-undo").onclick = closeUndoModal;
   $("btn-confirm-undo").onclick = confirmUndo;

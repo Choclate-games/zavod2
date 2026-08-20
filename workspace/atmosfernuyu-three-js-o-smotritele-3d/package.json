@@ -1,0 +1,25 @@
+{
+  "name": "atmosfernuyu-three-js-o-smotritele-3d",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Атмосферную three.js о смотрителе 3D — deep-sea descent survival game",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.13.1",
+    "@playgama/bridge": "^2.0.0",
+    "howler": "^2.2.4",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.11",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.10"
+  }
+}

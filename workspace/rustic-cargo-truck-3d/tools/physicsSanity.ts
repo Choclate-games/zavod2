@@ -1,5 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { buildTerrainGeometry, roadHeightAt } from '../src/world/terrain';
+import { buildTerrainGeometry, roadHeightAt, heightAt, setLevel, getActiveFork } from '../src/world/terrain';
+import { LEVELS } from '../src/world/levels';
 import {
   BED,
   BRAKE,
@@ -230,6 +231,30 @@ async function main(): Promise<void> {
     const overlaps = pkg.slots.filter((s) => s.y < BED.floorY + 0.15);
     check(`cargo package «${pkg.title}» (${pkg.tag}) slots are valid`, overlaps.length === 0 && pkg.slots.length === 8, `${pkg.slots.length} slots, ${overlaps.length} overlaps`);
   }
+
+  console.log('\nfork branching road sanity (Level 10 - Wide Separation & Distinct Paths)');
+  const lvl10 = LEVELS[9];
+  setLevel(lvl10);
+  const forkRig = buildRig('zil');
+  const forkInfo = getActiveFork(120);
+  const branchSeparation = forkInfo ? Math.abs(forkInfo.leftCX - forkInfo.rightCX) : 0;
+  check('level 10 contains wide distinct fork branches at z=120', !!forkInfo && branchSeparation > 24, `branches separated by ${branchSeparation.toFixed(1)} m`);
+  if (forkInfo) {
+    // Left branch (sunken swamp)
+    const expectedLeftY = heightAt(forkInfo.leftCX, 120) + RIDE_HEIGHT;
+    forkRig.chassis.setTranslation({ x: forkInfo.leftCX, y: expectedLeftY + 0.2, z: 120 }, true);
+    drive(forkRig, 60, 0, 0);
+    const forkLeftY = forkRig.chassis.translation().y;
+    check('truck rests solidly on left branch terrain', Math.abs(forkLeftY - expectedLeftY) < 0.45, `y=${forkLeftY.toFixed(2)} (expected ≈ ${expectedLeftY.toFixed(2)})`);
+
+    // Right branch (elevated dry bypass)
+    const expectedRightY = heightAt(forkInfo.rightCX, 120) + RIDE_HEIGHT;
+    forkRig.chassis.setTranslation({ x: forkInfo.rightCX, y: expectedRightY + 0.2, z: 120 }, true);
+    drive(forkRig, 60, 0, 0);
+    const forkRightY = forkRig.chassis.translation().y;
+    check('truck rests solidly on right branch terrain', Math.abs(forkRightY - expectedRightY) < 0.45, `y=${forkRightY.toFixed(2)} (expected ≈ ${expectedRightY.toFixed(2)})`);
+  }
+  setLevel(LEVELS[0]);
 
   console.log(failures.length === 0 ? '\nAll physics checks passed.\n' : `\n${failures.length} check(s) failed: ${failures.join('; ')}\n`);
   process.exit(failures.length === 0 ? 0 : 1);

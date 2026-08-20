@@ -14,6 +14,7 @@ interface HudState {
   mud?: number;
   water?: number;
   mudLevel?: number;
+  forkPrompt?: string;
 }
 
 const COLOR_PALETTE = [
@@ -444,10 +445,14 @@ export class UIManager {
 
       const card = document.createElement('div');
       card.className = `level-card ${isUnlocked ? '' : 'locked'} ${isCurrent ? 'current' : ''}`;
+      const forkTag = (fullLvl.forks && fullLvl.forks.length > 0)
+        ? `<div class="fork-tag">🔀 ${fullLvl.forks[0].leftTag} / ${fullLvl.forks[0].rightTag}</div>`
+        : '';
       card.innerHTML = `
         <div class="num">${lvl.id}</div>
         <div class="name">${lvl.title.replace(/^\d+\.\s*/, '')}</div>
         <div class="cargo-tag">${pkg.icon} ${pkg.tag}</div>
+        ${forkTag}
         <div class="tag">${lvl.tag} · ${lvl.length}м</div>
         <div class="stars">${starsStr}</div>
       `;
@@ -594,7 +599,10 @@ export class UIManager {
     this.cargoFill.style.background = ratio > .6 ? '#76bd6b' : ratio > .3 ? '#e8ad61' : '#d8574b';
     this.progressFill.style.width = `${Math.min(100, state.progress * 100)}%`;
 
-    if (state.water !== undefined && state.water > 0.18) {
+    if (state.forkPrompt) {
+      this.mudBadge.classList.remove('hidden');
+      this.mudBadge.textContent = `🔀 РАЗВИЛКА: ${state.forkPrompt}`;
+    } else if (state.water !== undefined && state.water > 0.18) {
       this.mudBadge.classList.remove('hidden');
       this.mudBadge.textContent = state.water > 0.5 ? 'ГЛУБОКИЙ БРОД · ВОДНАЯ ПРЕГРАДА' : 'АКВАПЛАНИРОВАНИЕ';
     } else if (state.mud !== undefined && state.mud > 0.22) {

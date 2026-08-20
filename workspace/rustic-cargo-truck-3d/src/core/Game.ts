@@ -115,7 +115,7 @@ export class Game implements FixedUpdateTarget {
 
       const result: RunResult = {
         levelId: this.currentLevelId,
-        cargoPackage: lvl.cargoPackage,
+        cargoPackage: lvl.cargoPackage || 'logs',
         delivered,
         total,
         coins,
@@ -129,6 +129,11 @@ export class Game implements FixedUpdateTarget {
 
     if (this.elapsed - this.lastHudUpdate > 0.1) {
       this.lastHudUpdate = this.elapsed;
+      const forkInfo = this.road.getActiveFork(this.truck.positionZ);
+      const forkPrompt = forkInfo
+        ? `⬅️ ${forkInfo.fork.leftTag} · ${forkInfo.fork.rightTag} ➡️`
+        : undefined;
+
       this.ui.updateHud({
         speed: this.truck.speed,
         cargo: this.cargo.remaining,
@@ -137,6 +142,7 @@ export class Game implements FixedUpdateTarget {
         mud: this.truck.currentMudFactor,
         water: this.truck.currentWaterFactor,
         mudLevel: this.truck.mudLevel,
+        forkPrompt,
       });
     }
   }

@@ -26,11 +26,17 @@ OpenCode CLI.
                                                        (у Kimi CLI такого флага нет)
     CLAUDE_EXTRA_ARGS / ...                            доп. аргументы к запуску
     KIMI_PRINT_FLAG                                    флаг неинтерактивного режима
+
+Общие для всех агентов сторожевые настройки (см. `providers.proc_stream`):
+
+    AGENT_IDLE_TIMEOUT_SECONDS   сколько секунд тишины считать зависанием
+                                 (по умолчанию 0 — не обрывать, снимать вручную)
+    AGENT_IDLE_PING_SECONDS      как часто писать в ленту «агент молчит N с»
+                                 (по умолчанию 60, 0 — не писать)
 """
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
@@ -45,6 +51,13 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from providers.agent_usage import AgentUsageTracker
 from providers.base import AIProvider, T
 from providers.local import LocalAIProvider
+from providers.proc_stream import (
+    env_seconds,
+    iter_process_lines,
+    kill_process_tree,
+    popen_kwargs,
+    wait_quietly,
+)
 
 
 def _split_args(raw: str) -> List[str]:
@@ -235,6 +248,21 @@ class CodingCLIAgent(AIProvider):
     def parse_json_event(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return self._generic_json_event(data)
 
+    def reset_stream_state(self) -> None:
+        """Сброс накопленного между прогонами (наследники — если оно у них есть)."""
+        return None
+
+    def finalize_events(
+        self, *, elapsed: float, tokens: int, returncode: int
+    ) -> List[Dict[str, Any]]:
+        """
+        События, дописываемые в ленту после завершения CLI.
+
+        Нужны агентам, которые не присылают собственную карточку итога: без неё
+        в чате не видно ни времени работы, ни суммарного расхода токенов.
+        """
+        return []
+
     def _generic_json_event(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Запасной разбор незнакомого JSON: достаём хоть какой-то текст."""
         for field in ("text", "message", "content", "delta", "response"):
@@ -331,7 +359,6 @@ class CodingCLIAgent(AIProvider):
         env = self.prepare_env(os.environ.copy())
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
         try:
             proc = subprocess.Popen(
@@ -344,35 +371,62 @@ class CodingCLIAgent(AIProvider):
                 cwd=work_dir,
                 env=env,
                 bufsize=0,
-                creationflags=creationflags,
+                **popen_kwargs(),
             )
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ({cli}): {exc}") from exc
 
         usage_key = self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
+        self.reset_stream_state()
 
         collected: List[str] = []
         spent_tokens = 0
         seen_conversation = False
         reported_error = False
         stopped = False
-        reader = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", line_buffering=True)
+        hung = False
+        started_at = time.monotonic()
+
+        # Сторож зависаний выключен по умолчанию: длинная задача может молчать
+        # часами, и обрывать её самим — хуже, чем ждать. Остановка вручную
+        # работает в любой момент, а «агент молчит N с» показывает, что
+        # происходит. Включается порогом в AGENT_IDLE_TIMEOUT_SECONDS.
+        idle_timeout = env_seconds("AGENT_IDLE_TIMEOUT_SECONDS", 0.0)
+        idle_ping = env_seconds("AGENT_IDLE_PING_SECONDS", 60.0)
 
         try:
-            while True:
-                if stop_check_fn and stop_check_fn():
+            for item, payload in iter_process_lines(
+                proc,
+                stop_check_fn=stop_check_fn,
+                idle_ping=idle_ping,
+                idle_timeout=idle_timeout,
+            ):
+                if item == "stop":
                     stopped = True
-                    proc.kill()
-                    emit({"kind": "system", "icon": "⏹️", "text": "Процесс принудительно остановлен."})
+                    kill_process_tree(proc)
+                    emit({"kind": "system", "icon": "⏹️",
+                          "text": "Процесс и все его дочерние процессы остановлены."})
                     break
 
-                line = reader.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        break
-                    time.sleep(0.02)
+                if item == "timeout":
+                    hung = True
+                    kill_process_tree(proc)
+                    emit({"kind": "error",
+                          "text": f"{self.title} не выдал ни строки за {int(payload or 0)} с и "
+                                  f"считается зависшим — процесс снят.\n"
+                                  f"Порог задаётся переменной AGENT_IDLE_TIMEOUT_SECONDS "
+                                  f"(сейчас {int(idle_timeout)} с, 0 — не обрывать)."})
+                    break
+
+                if item == "idle":
+                    # Тишина сама по себе не ошибка, но её должно быть видно:
+                    # иначе «работает 26 минут» и «завис» выглядят одинаково.
+                    emit({"kind": "meta",
+                          "text": f"⏳ агент молчит {int(payload or 0)} с "
+                                  f"(всего в работе {int(time.monotonic() - started_at)} с)"})
                     continue
 
+                line = str(payload)
                 collected.append(line)
 
                 if not seen_conversation and on_conversation_id and line.lstrip().startswith("{"):
@@ -389,26 +443,37 @@ class CodingCLIAgent(AIProvider):
                     continue
                 if event.get("kind") == "error":
                     reported_error = True
-                elif event.get("kind") == "result":
-                    spent_tokens += int(event.get("tokens") or 0)
+                spent_tokens += int(event.get("tokens") or 0)
                 emit(event)
         finally:
-            self.usage_tracker.add_tokens(usage_key, spent_tokens)
             if proc.stdout and not proc.stdout.closed:
                 try:
                     proc.stdout.close()
                 except Exception:
                     pass
-            proc.wait()
+            wait_quietly(proc)
 
-        if proc.returncode not in (0, None) and not stopped and not reported_error:
+        if not stopped and not hung:
+            for event in self.finalize_events(
+                elapsed=time.monotonic() - started_at,
+                tokens=spent_tokens,
+                returncode=proc.returncode or 0,
+            ):
+                emit(event)
+
+        self.usage_tracker.add_tokens(usage_key, spent_tokens)
+
+        if proc.returncode not in (0, None) and not stopped and not hung and not reported_error:
             tail = "".join(collected).strip()
             tail = tail[-800:] if tail else "(CLI не вернул ни одной строки вывода)"
             emit({"kind": "error",
                   "text": f"{self.title} завершился с кодом {proc.returncode}.\n"
                           f"Команда: {shown_cmd}\n\n{tail}"})
 
-        return proc.returncode, "".join(collected)
+        # Зависание — это провал задачи, а не успешное завершение: код возврата
+        # убитого процесса не должен выглядеть как «готово».
+        code = proc.returncode if not hung else (proc.returncode or 1)
+        return code, "".join(collected)
 
     def postprocess_plain_output(self, raw: str) -> str:
         """Приведение вывода «одним ответом» к чистому тексту (по умолчанию — как есть)."""
@@ -1099,6 +1164,35 @@ class OpenCodeCLIAgent(CodingCLIAgent):
     def extract_conversation_id(self, data: Dict[str, Any]) -> Optional[str]:
         return data.get("sessionID")
 
+    # Названия инструментов и параметр, который стоит показать рядом с ними:
+    # «Инструмент: bash» без команды не говорит о работе агента ничего.
+    _TOOL_TITLES = {
+        "bash": ("Выполнение команды", ("command",)),
+        "edit": ("Правка файла", ("filePath", "file_path", "path")),
+        "write": ("Создание файла", ("filePath", "file_path", "path")),
+        "read": ("Чтение файла", ("filePath", "file_path", "path")),
+        "list": ("Просмотр каталога", ("path",)),
+        "glob": ("Поиск файлов", ("pattern",)),
+        "grep": ("Поиск в файлах", ("pattern",)),
+        "webfetch": ("Загрузка страницы", ("url",)),
+        "task": ("Подзадача агента", ("description", "prompt")),
+        "todowrite": ("План задач", ("todos",)),
+    }
+
+    def reset_stream_state(self) -> None:
+        # Части инструментов приходят обновлениями (pending → running → completed):
+        # без учёта уже показанных id один вызов bash рисовал бы 3-4 карточки.
+        self._announced_tools: set = set()
+        self._steps = 0
+
+    def _tool_detail(self, name: str, params: Dict[str, Any]) -> str:
+        _, keys = self._TOOL_TITLES.get(name, ("", ()))
+        for key in keys:
+            value = params.get(key)
+            if value:
+                return str(value)
+        return ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
+
     def parse_json_event(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         etype = data.get("type")
         part = data.get("part") if isinstance(data.get("part"), dict) else {}
@@ -1123,21 +1217,37 @@ class OpenCodeCLIAgent(CodingCLIAgent):
         if ptype == "tool":
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             status = state.get("status")
-            name = part.get("tool") or "tool"
+            name = str(part.get("tool") or "tool").lower()
+            part_id = str(part.get("id") or part.get("callID") or "")
+            title, _ = self._TOOL_TITLES.get(name, (f"Инструмент: {name}", ()))
+
             if status in ("completed", "error"):
                 output = state.get("output") or state.get("error") or "готово"
-                return {"kind": "tool_result", "text": _shorten(str(output)), "meta": str(status)}
+                if isinstance(output, dict):
+                    output = output.get("message") or json.dumps(output, ensure_ascii=False)
+                return {"kind": "tool_result", "text": _shorten(str(output)),
+                        "meta": "ошибка" if status == "error" else "готово"}
+
+            # Карточку запуска показываем один раз на вызов инструмента
+            if part_id and part_id in getattr(self, "_announced_tools", set()):
+                return None
+            if part_id:
+                self._announced_tools.add(part_id)
+
             params = state.get("input") if isinstance(state.get("input"), dict) else {}
-            detail = ", ".join(f"{k}={v}" for k, v in list(params.items())[:2])
-            return {"kind": "tool", "tool": name,
-                    "title": f"Инструмент: {name}", "detail": _shorten(detail, 300)}
+            return {"kind": "tool", "tool": name, "title": title,
+                    "detail": _shorten(self._tool_detail(name, params), 300)}
 
         if ptype in ("step-finish", "step_finish"):
+            # Это конец шага модели, а не конец задачи. Раньше он рисовался
+            # карточкой «✅ Статус: SUCCESS · Время: —», и лента состояла из
+            # десятка одинаковых пустых карточек вместо содержательного отчёта.
             tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
             total = (int(tokens.get("input") or 0) + int(tokens.get("output") or 0)
                      + int(tokens.get("reasoning") or 0))
-            return {"kind": "result", "status": "SUCCESS", "text": "",
-                    "tokens": total, "duration": "—"}
+            self._steps = getattr(self, "_steps", 0) + 1
+            return {"kind": "meta", "tokens": total,
+                    "text": f"· шаг {self._steps} завершён · токенов {total}"}
 
         if etype == "error" or data.get("error"):
             error = data.get("error") or part.get("error") or data.get("message")
@@ -1145,6 +1255,21 @@ class OpenCodeCLIAgent(CodingCLIAgent):
             return {"kind": "error", "text": text or "OpenCode сообщил об ошибке."}
 
         return self._generic_json_event(data)
+
+    def finalize_events(
+        self, *, elapsed: float, tokens: int, returncode: int
+    ) -> List[Dict[str, Any]]:
+        """Единственная карточка итога: сколько шагов, токенов и времени ушло."""
+        steps = getattr(self, "_steps", 0)
+        minutes, seconds = divmod(int(elapsed), 60)
+        duration = f"{minutes}м {seconds:02d}с" if minutes else f"{seconds}с"
+        return [{
+            "kind": "result",
+            "status": "SUCCESS" if returncode == 0 else f"КОД {returncode}",
+            "text": "",
+            "tokens": tokens,
+            "duration": f"{duration} · шагов: {steps}",
+        }]
 
 
 AGENT_CLASSES: Dict[str, Type[CodingCLIAgent]] = {
