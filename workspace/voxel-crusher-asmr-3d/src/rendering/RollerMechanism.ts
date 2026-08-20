@@ -22,6 +22,7 @@ export class RollerMechanism {
   private separation = 1.62; // Distance between roller center axes
 
   private rotationAngle = 0;
+  private currentSpeedMultiplier = 1;
 
   constructor(scene: THREE.Scene) {
     this.group = new THREE.Group();
@@ -156,13 +157,32 @@ export class RollerMechanism {
     return 0.0;
   }
 
+  public getDamageMultiplier(): number {
+    return this.currentSpeedMultiplier;
+  }
+
+  public getContactMinX(): number {
+    return -1.55;
+  }
+
+  public getContactMaxX(): number {
+    return 1.55;
+  }
+
+  public getContactMinZ(): number {
+    return -(this.baseWidth * this.currentWidthMultiplier) / 2;
+  }
+
+  public getContactMaxZ(): number {
+    return (this.baseWidth * this.currentWidthMultiplier) / 2;
+  }
+
   public getContactBounds(): { minX: number; maxX: number; minZ: number; maxZ: number; nipY: number } {
-    const halfWidth = (this.baseWidth * this.currentWidthMultiplier) / 2;
     return {
-      minX: -1.2,
-      maxX: 1.2,
-      minZ: -halfWidth,
-      maxZ: halfWidth,
+      minX: this.getContactMinX(),
+      maxX: this.getContactMaxX(),
+      minZ: this.getContactMinZ(),
+      maxZ: this.getContactMaxZ(),
       nipY: 0.0
     };
   }
@@ -171,8 +191,9 @@ export class RollerMechanism {
     // Inward counter-rotation:
     // Left roller rotates clockwise (around +Z) to push downward at X = 0
     // Right roller rotates counter-clockwise (around -Z) to push downward at X = 0
+    this.currentSpeedMultiplier = speedMultiplier;
     const deltaRot = 4.0 * speedMultiplier * dt;
-    this.rotationAngle += deltaRot;
+    this.rotationAngle = (this.rotationAngle + deltaRot) % (Math.PI * 2);
 
     this.leftRollerGroup.rotation.z = -this.rotationAngle;
     this.rightRollerGroup.rotation.z = this.rotationAngle;

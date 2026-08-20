@@ -110,17 +110,26 @@ export class ShredderSystem {
     // Modulate audio motor hum
     this.audioManager.setMotorSpeed(comboMult);
 
-    // Descend model towards roller nip threshold plane
-    const baseFeedSpeed = 0.52 * speedMult;
-    this.currentModel.updateDescent(baseFeedSpeed, dt, isTurbo);
+    const hardness = this.currentModel.modelData.hardness;
+    const baseFeedSpeed = (0.28 * speedMult) / Math.sqrt(hardness);
 
-    // Calculate how many voxels to slice this frame
-    const nipY = this.roller.getNipPointY() + 0.35; // Contact height zone
-    const baseSliceRate = 6 + Math.floor(sharpnessMult * 8);
-    const maxSlice = Math.ceil(baseSliceRate * comboMult * (dt * 60));
+    const nipY = this.roller.getNipPointY() + 0.95; // Top of the roller teeth
+    this.currentModel.updateDescent(baseFeedSpeed, dt, isTurbo, nipY);
+    const bitePower = this.roller.getDamageMultiplier();
+    const contactHalfHeight = 0.38;
+    const baseDps = 28.0;
+    const damageThisFrame = baseDps * dt * sharpnessMult * Math.max(1.0, bitePower);
 
     // Slice voxels passing through contact nip
-    const detached = this.currentModel.sliceVoxels(nipY, maxSlice);
+    const detached = this.currentModel.sliceVoxels(
+      nipY,
+      this.roller.getContactMinX(),
+      this.roller.getContactMaxX(),
+      this.roller.getContactMinZ(),
+      this.roller.getContactMaxZ(),
+      contactHalfHeight,
+      damageThisFrame
+    );
 
     if (detached.length > 0) {
       // Spawn flying debris particles

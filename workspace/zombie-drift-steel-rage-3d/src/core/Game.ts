@@ -104,8 +104,35 @@ export class Game {
     });
   }
 
-  public startNewGame(): void {
-    gameStore.startRun();
+  public startCampaignLevel(levelId: number): void {
+    const levelCfg = gameStore.getCampaignLevelConfig(levelId);
+    if (levelCfg && levelCfg.biome) {
+      this.renderer.setBiome(levelCfg.biome);
+    } else {
+      this.renderer.setBiome('OUTSKIRTS');
+    }
+    gameStore.startRun('CAMPAIGN', levelId);
+    this.beginPlay();
+  }
+
+  public startSurvivalGame(): void {
+    this.renderer.setBiome('OUTSKIRTS');
+    gameStore.startRun('SURVIVAL', 1);
+    this.beginPlay();
+  }
+
+  public restartCurrentGame(): void {
+    if (gameStore.run.mode === 'CAMPAIGN') {
+      const levelCfg = gameStore.getCampaignLevelConfig(gameStore.run.levelId);
+      if (levelCfg && levelCfg.biome) {
+        this.renderer.setBiome(levelCfg.biome);
+      }
+    }
+    gameStore.startRun(gameStore.run.mode, gameStore.run.levelId);
+    this.beginPlay();
+  }
+
+  private beginPlay(): void {
     this.state = 'PLAYING';
 
     this.playerCar.rebuildVehicle(gameStore.save.selectedVehicleId);
@@ -166,19 +193,19 @@ export class Game {
   }
 
   public handleGameOver(victory: boolean): void {
-    this.state = victory ? 'VICTORY' : 'GAME_OVER';
-    gameStore.finishRun(victory);
-
-    const score = Math.floor(
-      gameStore.run.stats.zombiesKilled * 10 +
-      gameStore.run.stats.bossesDefeated * 300 +
-      gameStore.run.stats.scrapCollected * 5 +
-      gameStore.run.stats.driftTimeSeconds * 20
-    );
-
-    if (victory) {
-      this.uiManager.showVictory();
+    if (victory && gameStore.run.mode === 'CAMPAIGN') {
+      this.state = 'LEVEL_VICTORY';
+      const result = gameStore.completeLevelVictory(gameStore.run.levelId);
+      this.uiManager.showLevelVictory(result.stars, result.scrapBonus);
     } else {
+      this.state = 'GAME_OVER';
+      gameStore.finishRun(victory);
+      const score = Math.floor(
+        gameStore.run.stats.zombiesKilled * 10 +
+        gameStore.run.stats.bossesDefeated * 300 +
+        gameStore.run.stats.scrapCollected * 5 +
+        gameStore.run.stats.driftTimeSeconds * 20
+      );
       this.uiManager.showGameOver(gameStore.run.stats, score);
     }
   }
@@ -195,7 +222,7 @@ export class Game {
       const dt = rawDt * timeScale;
 
       if (this.state === 'PLAYING') {
-        const controls = inputManager.update();
+        const controls = inputManager.update(this.playerCar.physics.headingAngle);
 
         // 1. Step Physics
         PhysicsWorld.getInstance().step(dt);
@@ -271,13 +298,17 @@ export class Game {
 
         // 7. Update HUD
         this.uiManager.updateHud();
+      } else if (this.state === 'GARAGE') {
+        // Rotating car in showroom
+        this.playerCar.meshResult.root.position.set(0, 0.4, 0);
+        this.playerCar.meshResult.root.rotation.y += rawDt * 0.75;
       }
 
       // Update Arena animations & Dynamic lights
       this.arena.update(rawDt);
       this.renderer.update(rawDt);
 
-      // Update Camera & Particles regardless of state
+      // Update Camera & Particles
       const targetPos = this.playerCar.physics.position;
       const targetVel = this.playerCar.physics.velocity;
       this.renderer.cameraController.update(

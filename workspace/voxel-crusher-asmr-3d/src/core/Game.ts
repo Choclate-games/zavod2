@@ -14,7 +14,7 @@ import { ShredderSystem } from '../systems/ShredderSystem';
 import { TouchControls } from '../ui/TouchControls';
 import { UIManager } from '../ui/UIManager';
 import { GameLoop } from './GameLoop';
-import { getAllModels, getModelById } from '../data/ModelsData';
+import { COLLECTIONS_DATA, getAllModels } from '../data/ModelsData';
 
 export class Game {
   private eventBus: EventBus;
@@ -146,6 +146,12 @@ export class Game {
       // Submit leaderboard score
       const totalCrushed = this.storage.getProgress().totalVoxelsCrushed;
       this.playgama.setLeaderboardScore('total_voxels_crushed_leaderboard', totalCrushed);
+
+      const completedCount = this.storage.getProgress().completedModelIds.length;
+      const unlockedCollections = COLLECTIONS_DATA
+        .filter((collection) => completedCount >= collection.requiredCompletedCount)
+        .map((collection) => collection.id);
+      this.storage.updateProgress({ unlockedCollections });
     });
 
     // Next model action from victory modal
@@ -162,6 +168,9 @@ export class Game {
     this.ui.onSelectModelRequest = (model: VoxelModelData) => {
       const idx = this.allModels.findIndex((m) => m.id === model.id);
       if (idx !== -1) {
+        const collection = COLLECTIONS_DATA.find((item) => item.id === model.collectionId);
+        const completedCount = this.storage.getProgress().completedModelIds.length;
+        if (collection && completedCount < collection.requiredCompletedCount) return;
         this.currentModelIndex = idx;
         this.storage.updateProgress({ currentModelIndex: idx });
         this.shredder.loadModel(model);

@@ -27,6 +27,7 @@ export class InputManager {
       steer: Math.max(right ? 1 : 0, this.touch.steer) - Math.max(left ? 1 : 0, this.touch.steerLeft),
       handbrake: this.keys.has('Space') || this.touch.handbrake,
       pause: this.keys.has('Escape') || this.keys.has('KeyP'),
+      recover: this.keys.has('KeyR') || this.touch.recover,
     };
   }
 

@@ -12,6 +12,7 @@ export interface InputSnapshot {
   steer: number;
   handbrake: boolean;
   pause: boolean;
+  recover?: boolean;
 }
 
 export interface RunResult {

@@ -11,23 +11,21 @@
 <div id="app">
   <!-- ── Боковая навигация ─────────────────────────────────────────── -->
   <aside id="sidebar">
-    <div class="logo">🎮 FACTORY</div>
-    <div class="logo-sub">AI Game Studio · web</div>
-
     <button class="nav-btn active" data-view="studio">🚀 Студия генерации</button>
     <button class="nav-btn" data-view="projects">📁 Проекты и ТЗ</button>
     <button class="nav-btn" data-view="chats">💬 Чаты разработки</button>
-    <button class="nav-btn" data-view="play">🌐 Играть</button>
+    <button class="nav-btn" data-view="play">🌐 Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
     <button class="nav-btn" data-view="quota">📊 Квоты агентов</button>
     <button class="nav-btn" data-view="settings">⚙️ Настройки</button>
 
-    <div class="sidebar-spacer"></div>
-
-    <div class="sidebar-card">
-      <div class="state-ok" id="sidebar-status">● Фабрика запущена</div>
-      <div class="quota-line" id="sidebar-quota">Остаток: —</div>
-      <div class="quota-line" id="sidebar-running"></div>
-      <button class="btn small" id="btn-open-workspace">📂 Папка workspace/</button>
+    <!-- Активность: что агенты делают прямо сейчас и что закончили только что -->
+    <div class="activity">
+      <div class="activity-head">
+        <span>⚡ Активные чаты</span>
+        <span class="conn-dot" id="sidebar-status" title="Связь с фабрикой">●</span>
+      </div>
+      <div class="activity-list" id="sidebar-activity"></div>
+      <div class="act-servers hidden" id="sidebar-servers"></div>
     </div>
   </aside>
 
@@ -246,6 +244,18 @@
           <button class="btn" id="btn-play-build">🏗 Сборка</button>
           <button class="btn danger" id="btn-play-stop">⏹ Стоп</button>
         </div>
+      </div>
+
+      <!-- Менеджер запущенных игр: занятые порты, открыть/погасить лишнее -->
+      <div class="panel tight">
+        <div class="toolbar">
+          <strong class="small">🎮 Запущенные игры</strong>
+          <span class="dim" id="servers-count"></span>
+          <span class="grow"></span>
+          <button class="btn small" id="btn-servers-refresh">🔄 Обновить</button>
+          <button class="btn small danger" id="btn-servers-stop-all">⏹ Остановить все</button>
+        </div>
+        <div class="servers" id="play-servers"></div>
       </div>
 
       <div class="panel grow" style="padding:0">

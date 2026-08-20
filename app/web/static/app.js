@@ -41,6 +41,10 @@ const state = {
   docContent: "",
   ideas: [],
   playSlug: null,
+  gameTabs: {},        // slug → вкладка браузера, которая ждёт URL dev-сервера
+  servers: [],
+  activity: [],
+  activityTimer: null,
   quotaTimer: null,
   timerHandle: null,
   elapsed: 0,
@@ -86,7 +90,7 @@ function showView(name) {
   if (name === "projects") { loadProjects(); loadChats(); }
   if (name === "studio") loadGallery();
   if (name === "chats") { fillChatProjects(); loadChats(); }
-  if (name === "play") { fillPlayProjects(); loadPlayState(); }
+  if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
   if (name === "settings") renderSettings();
 }
@@ -1163,10 +1167,94 @@ function updateChatButtons() {
   $("btn-chat-play").disabled = !(project && project.playable);
   $("btn-chat-play").textContent = project && project.playable ? "▶ Играть" : "▶ Нет кода";
   $("btn-chat-stop").disabled = !state.sessionRunning;
-
   // Откат живёт в самой ленте — кнопка ↩ у каждого запроса пользователя.
-  const running = (state.sessions || []).filter((s) => s.running).length;
-  $("sidebar-running").textContent = running ? `⏳ Работает чатов: ${running}` : "";
+}
+
+/* ── Панель активности сайдбара ───────────────────────────────────────── */
+
+async function loadActivity() {
+  const res = await api("/api/activity");
+  state.activity = res.chats || [];
+  state.servers = res.servers || [];
+  renderActivity();
+  renderServers();
+  renderPlayBadge();
+}
+
+function agoText(seconds) {
+  if (seconds === null || seconds === undefined) return "";
+  if (seconds < 60) return "только что";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} мин назад`;
+}
+
+const ACT_ICONS = { running: "⏳", done: "✅", failed: "❌", stopped: "⏹" };
+
+function renderActivity() {
+  const box = $("sidebar-activity");
+  box.innerHTML = "";
+
+  if (!state.activity.length) {
+    box.appendChild(el("div", "activity-empty",
+      "Сейчас никто не работает. Поставьте задачу агенту во вкладке «💬 Чаты разработки»."));
+  }
+
+  state.activity.forEach((item) => {
+    const node = el("div", `act-item ${item.running ? "running" : item.status}`);
+    node.title = `${item.title}\n${item.slug}`;
+    node.appendChild(el("div", "act-title",
+      `${ACT_ICONS[item.status] || "•"} ${esc(item.title)}`));
+    node.appendChild(el("div", "act-meta", esc(
+      item.running
+        ? `${item.slug} · ${item.stopping ? "останавливаю" : "идёт"} ${item.duration}`
+        : `${item.slug} · ${item.duration} · ${agoText(item.finished_ago)}`)));
+
+    const foot = el("div", "act-foot");
+    if (item.running) {
+      const stop = el("button", "act-mini danger", "⏹ Стоп");
+      stop.onclick = async (e) => {
+        e.stopPropagation();
+        stop.disabled = true;
+        const res = await api(`/api/chats/${encodeURIComponent(item.slug)}/${item.session_id}/stop`,
+          { method: "POST" });
+        if (res.message) toast("Чат", res.message, res.status === "error" ? "err" : "");
+        loadActivity();
+      };
+      foot.appendChild(stop);
+    }
+    if (item.playable) {
+      const play = el("button", "act-mini ok", "▶ Играть");
+      play.onclick = (e) => { e.stopPropagation(); openPlay(item.slug); };
+      foot.appendChild(play);
+    }
+    if (foot.children.length) node.appendChild(foot);
+
+    node.onclick = () => {
+      state.project = item.slug;
+      localStorage.setItem("project", item.slug);
+      fillChatProjects();
+      openChat(item.session_id);
+    };
+    box.appendChild(node);
+  });
+
+  renderServerStrip();
+}
+
+/** Строка «сколько игр держит порты» под списком активности. */
+function renderServerStrip() {
+  const live = state.servers.filter((s) => s.running || s.starting);
+  const strip = $("sidebar-servers");
+  strip.classList.toggle("hidden", !live.length);
+  if (live.length) {
+    strip.textContent = `🎮 Запущено игр: ${live.length} · порты ${live.map((s) => s.port || "?").join(", ")}`;
+    strip.onclick = () => showView("play");
+  }
+}
+
+function startActivityTimer() {
+  if (state.activityTimer) return;
+  state.activityTimer = setInterval(loadActivity, 5000);
 }
 
 /* ── Откат запроса ────────────────────────────────────────────────────── */
@@ -1260,15 +1348,82 @@ function fillPlayProjects() {
   state.playSlug = select.value || null;
 }
 
+/**
+ * Открывает (или переиспользует) вкладку игры.
+ *
+ * Вкладку обязательно создаём синхронно, в том же клике: после `await`
+ * блокировщик всплывающих окон уже не пропустит window.open.
+ */
+function openGameTab(slug) {
+  const name = "game_" + String(slug).replace(/[^a-zA-Z0-9]/g, "_");
+  const tab = window.open("", name);
+  if (!tab) return null;
+  try {
+    if (!tab.location.href || tab.location.href === "about:blank") {
+      tab.document.write(
+        `<!doctype html><html lang="ru"><head><meta charset="utf-8">`
+        + `<title>🎮 ${slug}</title><style>`
+        + `body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;`
+        + `justify-content:center;gap:10px;background:#0a0e17;color:#f0f4fc;`
+        + `font-family:"Segoe UI",system-ui,sans-serif}`
+        + `.s{color:#00f0ff;font-size:18px;font-weight:700}.d{color:#8ea3c0;font-size:13px}`
+        + `</style></head><body><div class="s">🚀 Запускаю ${slug}…</div>`
+        + `<div class="d">npm run dev поднимается — вкладка обновится сама.</div></body></html>`);
+      tab.document.close();
+    }
+  } catch { /* вкладка уже с чужим origin — просто перейдём по URL */ }
+  return tab;
+}
+
+function navigateGameTab(tab, url) {
+  if (!tab || tab.closed) { window.open(url, "_blank", "noopener"); return; }
+  try { tab.location.replace(url); } catch { tab.location = url; }
+  try { tab.focus(); } catch { /* фокус не обязателен */ }
+}
+
+/** Ждущей вкладке проекта пришёл URL — переводим её на игру. */
+function resolveGameTab(slug, url) {
+  const pending = state.gameTabs[slug];
+  if (!pending || !url) return;
+  delete state.gameTabs[slug];
+  if (pending.timer) clearTimeout(pending.timer);
+  navigateGameTab(pending.tab, url);
+}
+
+function dropGameTab(slug, message) {
+  const pending = state.gameTabs[slug];
+  if (!pending) return;
+  delete state.gameTabs[slug];
+  if (pending.timer) clearTimeout(pending.timer);
+  const tab = pending.tab;
+  if (!tab || tab.closed) return;
+  try { tab.document.body.innerHTML = `<div class="s">⚠️ ${esc(message)}</div>`; } catch { tab.close(); }
+}
+
+/** «Играть» из любого места: поднимает dev-сервер и открывает игру новой вкладкой. */
 async function openPlay(slug) {
-  state.playSlug = slug;
-  showView("play");
-  fillPlayProjects();
-  $("play-project").value = slug;
-  await loadPlayState();
-  const state_ = await api(`/api/play/${encodeURIComponent(slug)}`);
-  if (!state_.running) startPlay();
-  else if (state_.url) window.open(state_.url, "_blank", "noopener");
+  if (!slug) return;
+  const tab = openGameTab(slug);
+  if (!tab) toast("Игра", "Браузер заблокировал новую вкладку — разрешите всплывающие окна для фабрики.", "warn");
+
+  const st = await api(`/api/play/${encodeURIComponent(slug)}`);
+  if (st.running && st.url) { navigateGameTab(tab, st.url); loadServers(); return; }
+
+  state.gameTabs[slug] = {
+    tab,
+    timer: setTimeout(() => dropGameTab(slug,
+      "Сервер не отдал URL за 2 минуты — посмотрите вкладку «Играть» в фабрике."), 120000),
+  };
+
+  const res = await api(`/api/play/${encodeURIComponent(slug)}/start`, { method: "POST" });
+  if (res.status === "error") {
+    dropGameTab(slug, res.message || "Не удалось запустить игру");
+    toast("Запуск игры", res.message, "err");
+    return;
+  }
+  if (res.url) resolveGameTab(slug, res.url);
+  else toast("Запуск игры", `${slug}: поднимаю dev-сервер, вкладка откроется сама.`, "");
+  loadServers();
 }
 
 async function loadPlayState() {
@@ -1289,12 +1444,60 @@ function setPlayStatus(running, starting, url) {
   else { node.textContent = "● Сервер остановлен"; node.style.color = "var(--muted)"; }
 }
 
-async function startPlay() {
+function startPlay() {
   const slug = $("play-project").value;
-  if (!slug) return;
-  const res = await api(`/api/play/${encodeURIComponent(slug)}/start`, { method: "POST" });
-  if (res.status === "error") toast("Запуск игры", res.message, "err");
-  if (res.url) { $("play-url").value = res.url; window.open(res.url, "_blank", "noopener"); }
+  if (slug) openPlay(slug);
+}
+
+/* ── Менеджер запущенных игр ──────────────────────────────────────────── */
+
+async function loadServers() {
+  const res = await api("/api/play");
+  state.servers = res.servers || [];
+  renderServers();
+  renderPlayBadge();
+  renderServerStrip();
+  return state.servers;
+}
+
+function renderPlayBadge() {
+  const badge = $("nav-play-badge");
+  const count = state.servers.filter((s) => s.running).length;
+  badge.textContent = count ? String(count) : "";
+  badge.classList.toggle("hidden", !count);
+}
+
+function renderServers() {
+  const box = $("play-servers");
+  box.innerHTML = "";
+  $("servers-count").textContent = state.servers.length ? `занято портов: ${state.servers.length}` : "";
+  if (!state.servers.length) {
+    box.appendChild(el("div", "servers-empty",
+      "Ни одна игра не запущена — порты свободны."));
+    return;
+  }
+  state.servers.forEach((s) => {
+    const row = el("div", "server-row");
+    row.appendChild(el("div", "s-slug", esc(s.slug)));
+    if (s.port) row.appendChild(el("div", "s-port", `:${s.port}`));
+    row.appendChild(el("div", "s-url grow", esc(s.url || "URL ещё не известен")));
+    row.appendChild(el("div", `s-state ${s.running ? "" : "starting"}`,
+      s.running ? "● работает" : "● запускается"));
+
+    const open = el("button", "btn small ok", "🖥 Открыть");
+    open.onclick = () => openPlay(s.slug);
+    const logs = el("button", "btn small", "📟 Лог");
+    logs.onclick = () => { $("play-project").value = s.slug; loadPlayState(); };
+    const stop = el("button", "btn small danger", "⏹ Стоп");
+    stop.onclick = async () => {
+      stop.disabled = true;
+      await api(`/api/play/${encodeURIComponent(s.slug)}/stop`, { method: "POST" });
+      await loadServers();
+      if (s.slug === state.playSlug) loadPlayState();
+    };
+    row.append(open, logs, stop);
+    box.appendChild(row);
+  });
 }
 
 /* ── Квоты ────────────────────────────────────────────────────────────── */
@@ -1357,10 +1560,6 @@ async function loadQuota() {
   const agentsBox = $("quota-agents");
   agentsBox.innerHTML = "";
   data.agents.forEach((card) => agentsBox.appendChild(quotaCard(card)));
-
-  const summary = $("sidebar-quota");
-  summary.textContent = data.summary.text;
-  summary.classList.toggle("critical", data.summary.critical);
 }
 
 function startQuotaTimer() {
@@ -1478,8 +1677,14 @@ function connectEvents() {
     try { payload = JSON.parse(message.data); } catch { return; }
     handleEvent(payload.topic, payload.data || {});
   };
-  source.onerror = () => { $("sidebar-status").textContent = "● Переподключение..."; };
-  source.onopen = () => { $("sidebar-status").textContent = "● Фабрика запущена"; };
+  source.onerror = () => {
+    $("sidebar-status").classList.add("offline");
+    $("sidebar-status").title = "Связь потеряна — переподключаюсь…";
+  };
+  source.onopen = () => {
+    $("sidebar-status").classList.remove("offline");
+    $("sidebar-status").title = "Фабрика на связи";
+  };
 }
 
 function handleEvent(topic, data) {
@@ -1518,6 +1723,7 @@ function handleEvent(topic, data) {
       break;
     case "chat.started":
       if (data.session_id === state.session) { state.sessionRunning = true; updateChatButtons(); }
+      loadActivity();
       break;
     case "chat.finished":
       if (data.session_id === state.session) {
@@ -1527,6 +1733,7 @@ function handleEvent(topic, data) {
         updateChatButtons();
       }
       notifyChatDone(data);
+      loadActivity();
       break;
     case "play.log":
       if (data.slug === state.playSlug) {
@@ -1536,14 +1743,21 @@ function handleEvent(topic, data) {
       }
       break;
     case "play.url":
+      resolveGameTab(data.slug, data.url);
       if (data.slug === state.playSlug) {
         $("play-url").value = data.url;
         setPlayStatus(true, false, data.url);
         toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(data.url, "_blank", "noopener")]]);
       }
+      loadServers();
       break;
     case "play.state":
+      if (data.url) resolveGameTab(data.slug, data.url);
+      if (!data.running && !data.starting) {
+        dropGameTab(data.slug, "Dev-сервер не работает — смотрите лог во вкладке «Играть».");
+      }
       if (data.slug === state.playSlug) setPlayStatus(data.running, data.starting, data.url);
+      loadServers();
       break;
     case "quota.changed":
       if (state.view === "quota") loadQuota();
@@ -1783,13 +1997,20 @@ function bindPlay() {
     loadPlayState();
   };
   $("btn-play-clear").onclick = () => { $("play-log").textContent = ""; };
+
+  $("btn-servers-refresh").onclick = loadServers;
+  $("btn-servers-stop-all").onclick = async () => {
+    const res = await api("/api/play/stop-all", { method: "POST" });
+    toast("Менеджер игр", res.message, res.stopped ? "ok" : "");
+    await loadServers();
+    loadPlayState();
+  };
 }
 
 function bindCommon() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.onclick = () => showView(btn.dataset.view);
   });
-  $("btn-open-workspace").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
   $("btn-save-settings").onclick = saveSettings;
@@ -1819,6 +2040,8 @@ async function boot() {
   renderSettings();
 
   connectEvents();
+  loadActivity();          // панель активности не ждёт медленной витрины проектов
+  startActivityTimer();
   await loadProjects();
   await loadStudioState();
   await loadGallery();

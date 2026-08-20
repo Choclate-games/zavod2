@@ -440,10 +440,13 @@ export class UIManager {
 
   private renderGalleryTabs(): void {
     this.galleryTabs.innerHTML = '';
+    const completedCount = this.storage.getProgress().completedModelIds.length;
     COLLECTIONS_DATA.forEach((col) => {
       const tab = document.createElement('button');
-      tab.className = `collection-tab ${col.id === this.currentSelectedCategory ? 'active' : ''}`;
-      tab.textContent = `${col.icon} ${col.nameRu}`;
+      const isLocked = completedCount < col.requiredCompletedCount;
+      tab.className = `collection-tab ${col.id === this.currentSelectedCategory ? 'active' : ''} ${isLocked ? 'locked' : ''}`;
+      tab.textContent = `${col.icon} ${col.nameRu}${isLocked ? ` 🔒 ${col.requiredCompletedCount}` : ''}`;
+      tab.disabled = isLocked;
       tab.addEventListener('click', () => {
         this.currentSelectedCategory = col.id;
         this.audio.playUiClick();
@@ -460,19 +463,21 @@ export class UIManager {
     if (!currentCollection) return;
 
     const completed = new Set(this.storage.getProgress().completedModelIds);
+    const isCollectionLocked = completed.size < currentCollection.requiredCompletedCount;
 
     currentCollection.models.forEach((model) => {
       const item = document.createElement('div');
       const isCompleted = completed.has(model.id);
 
-      item.className = `gallery-item ${isCompleted ? 'active-item' : ''}`;
+      item.className = `gallery-item ${isCompleted ? 'active-item' : ''} ${isCollectionLocked ? 'locked' : ''}`;
       item.innerHTML = `
         <div class="gallery-item-icon">${model.icon}</div>
         <div class="gallery-item-name">${model.nameRu}</div>
-        <div class="gallery-item-status">${isCompleted ? '⭐ 100%' : 'Разблокировано'}</div>
+        <div class="gallery-item-status">${isCollectionLocked ? `🔒 Нужно ${currentCollection.requiredCompletedCount}` : (isCompleted ? '⭐ 100%' : 'Разблокировано')}</div>
       `;
 
       item.addEventListener('click', () => {
+        if (isCollectionLocked) return;
         this.audio.playUiClick();
         this.closeGallery();
         if (this.onSelectModelRequest) {

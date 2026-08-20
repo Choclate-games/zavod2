@@ -80,6 +80,10 @@ class ChatJobManager:
     def running_jobs(self) -> List[ChatJob]:
         return [job for job in self._jobs.values() if job.status == "running"]
 
+    def all_jobs(self) -> List[ChatJob]:
+        """Все известные задачи: работающие и уже завершённые (для панели активности)."""
+        return list(self._jobs.values())
+
     def running_count(self) -> int:
         return len(self.running_jobs())
 

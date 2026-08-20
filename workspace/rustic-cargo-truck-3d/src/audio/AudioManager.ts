@@ -11,6 +11,13 @@ export class AudioManager {
     if (this.master && this.context) this.master.gain.setTargetAtTime(muted || this.muted ? 0.0001 : .14, this.context.currentTime, .12);
   }
 
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.master && this.context) {
+      this.master.gain.setTargetAtTime(muted || this.platformMuted ? 0.0001 : .14, this.context.currentTime, .05);
+    }
+  }
+
   unlock(): void {
     if (!this.context) {
       this.context = new AudioContext();

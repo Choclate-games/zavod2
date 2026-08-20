@@ -1,66 +1,53 @@
-const MAX_RADIUS = 58;
-const DEAD_ZONE = 0.08;
+const MAX_RADIUS = 68;
+const DEAD_ZONE = 0.06;
 
 export class TouchControls {
   readonly element = document.createElement('div');
-  readonly throttleButton = document.createElement('button');
-  readonly brakeButton = document.createElement('button');
-  readonly handbrakeButton = document.createElement('button');
+  private readonly joystick = document.createElement('div');
+  private readonly joystickKnob = document.createElement('div');
+  private readonly joystickGuide = document.createElement('div');
+
   throttle = 0;
   brake = 0;
   steer = 0;
   steerLeft = 0;
   handbrake = false;
-
-  private buttonThrottle = 0;
-  private buttonBrake = 0;
-  private joystickThrottle = 0;
-  private joystickBrake = 0;
+  recover = false;
 
   private joystickPointer = -1;
   private originX = 0;
   private originY = 0;
-  private joystick: HTMLDivElement;
-  private readonly buttonPointers = new Map<HTMLElement, Set<number>>();
 
   constructor() {
     this.element.className = 'touch-layer';
-    const leftZone = document.createElement('div');
-    leftZone.className = 'touch-left-zone';
-    this.joystick = document.createElement('div');
+
+    // Floating Joystick Base
     this.joystick.className = 'joystick hidden';
-    leftZone.append(this.joystick);
-    this.element.append(leftZone);
 
-    const right = document.createElement('div');
-    right.className = 'touch-right';
-    this.throttleButton.className = 'touch-btn main';
-    this.throttleButton.textContent = 'ГАЗ';
-    this.brakeButton.className = 'touch-btn';
-    this.brakeButton.textContent = 'ТОРМОЗ';
-    this.handbrakeButton.className = 'touch-btn';
-    this.handbrakeButton.textContent = 'РУЧНИК';
-    const pedals = document.createElement('div');
-    pedals.className = 'touch-pedals';
-    pedals.append(this.brakeButton, this.handbrakeButton);
-    right.append(pedals, this.throttleButton);
-    this.element.append(right);
-    this.buttonPointers.set(this.throttleButton, new Set());
-    this.buttonPointers.set(this.brakeButton, new Set());
-    this.buttonPointers.set(this.handbrakeButton, new Set());
+    // Directional Guide Indicators (subtle arrows inside the base)
+    this.joystickGuide.className = 'joystick-guide';
+    this.joystickGuide.innerHTML = `
+      <span class="guide-arrow guide-up">▲</span>
+      <span class="guide-arrow guide-down">▼</span>
+      <span class="guide-arrow guide-left">◀</span>
+      <span class="guide-arrow guide-right">▶</span>
+    `;
 
-    leftZone.addEventListener('pointerdown', this.onJoystickDown);
-    leftZone.addEventListener('pointermove', this.onJoystickMove);
-    leftZone.addEventListener('pointerup', this.onJoystickUp);
-    leftZone.addEventListener('pointercancel', this.onJoystickUp);
-    for (const button of this.buttonPointers.keys()) {
-      button.addEventListener('pointerdown', this.onButtonDown);
-      button.addEventListener('pointerup', this.onButtonUp);
-      button.addEventListener('pointercancel', this.onButtonUp);
-      button.addEventListener('lostpointercapture', this.onButtonUp);
-    }
-    this.element.addEventListener('contextmenu', this.preventBrowserGesture);
-    this.element.addEventListener('dragstart', this.preventBrowserGesture);
+    this.joystickKnob.className = 'joystick-knob';
+    this.joystick.append(this.joystickGuide, this.joystickKnob);
+    this.element.append(this.joystick);
+
+    // Pointer Events for single-finger or multi-touch joystick
+    this.element.addEventListener('pointerdown', this.onPointerDown);
+    this.element.addEventListener('pointermove', this.onPointerMove);
+    this.element.addEventListener('pointerup', this.onPointerUp);
+    this.element.addEventListener('pointercancel', this.onPointerUp);
+    this.element.addEventListener('lostpointercapture', this.onPointerUp);
+
+    // Prevent browser touch gestures
+    this.element.addEventListener('contextmenu', this.preventBrowserGesture, true);
+    this.element.addEventListener('dragstart', this.preventBrowserGesture, true);
+    this.element.addEventListener('selectstart', this.preventBrowserGesture, true);
     this.element.addEventListener('touchmove', this.preventBrowserGesture, { passive: false });
   }
 
@@ -72,102 +59,79 @@ export class TouchControls {
   releaseAll = (): void => {
     this.joystickPointer = -1;
     this.joystick.classList.add('hidden');
-    this.buttonThrottle = 0;
-    this.buttonBrake = 0;
-    this.joystickThrottle = 0;
-    this.joystickBrake = 0;
+    this.joystickKnob.style.transform = 'translate(0px, 0px)';
     this.throttle = 0;
     this.brake = 0;
     this.steer = 0;
     this.steerLeft = 0;
     this.handbrake = false;
-    for (const [button, pointers] of this.buttonPointers) {
-      pointers.clear();
-      button.classList.remove('active');
-    }
+    this.recover = false;
   };
 
-  private readonly onJoystickDown = (event: PointerEvent): void => {
-    if (this.joystickPointer !== -1 || event.clientX > window.innerWidth / 2) return;
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    // If touched on HUD controls (pause, audio), let those pass through
+    if ((event.target as HTMLElement).closest('.hud-control-btn') || (event.target as HTMLElement).closest('button')) {
+      return;
+    }
+
+    if (this.joystickPointer !== -1) return;
+
     event.preventDefault();
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    this.element.setPointerCapture(event.pointerId);
     this.joystickPointer = event.pointerId;
+
     this.originX = event.clientX;
     this.originY = event.clientY;
+
     this.joystick.style.left = `${event.clientX}px`;
     this.joystick.style.top = `${event.clientY}px`;
     this.joystick.classList.remove('hidden');
+
     this.updateJoystick(event);
   };
 
-  private readonly onJoystickMove = (event: PointerEvent): void => {
+  private readonly onPointerMove = (event: PointerEvent): void => {
     if (event.pointerId === this.joystickPointer) {
       event.preventDefault();
       this.updateJoystick(event);
     }
   };
 
-  private readonly onJoystickUp = (event: PointerEvent): void => {
+  private readonly onPointerUp = (event: PointerEvent): void => {
     if (event.pointerId !== this.joystickPointer) return;
-    this.joystickPointer = -1;
-    this.steer = 0;
-    this.steerLeft = 0;
-    this.joystickThrottle = 0;
-    this.joystickBrake = 0;
-    this.throttle = this.buttonThrottle;
-    this.brake = this.buttonBrake;
-    this.joystick.classList.add('hidden');
+    this.releaseAll();
   };
 
   private readonly updateJoystick = (event: PointerEvent): void => {
     const dx = event.clientX - this.originX;
     const dy = event.clientY - this.originY;
-    const normalizedX = Math.max(-1, Math.min(1, dx / MAX_RADIUS));
-    const normalizedY = Math.max(-1, Math.min(1, dy / MAX_RADIUS));
 
-    const x = Math.abs(normalizedX) < DEAD_ZONE ? 0 : Math.sign(normalizedX) * (Math.abs(normalizedX) - DEAD_ZONE) / (1 - DEAD_ZONE);
-    const y = Math.abs(normalizedY) < DEAD_ZONE ? 0 : Math.sign(normalizedY) * (Math.abs(normalizedY) - DEAD_ZONE) / (1 - DEAD_ZONE);
+    const rawDist = Math.sqrt(dx * dx + dy * dy);
+    const clampedDist = Math.min(MAX_RADIUS, rawDist);
+    const angle = Math.atan2(dy, dx);
 
+    const normX = rawDist > 0 ? (Math.cos(angle) * clampedDist) / MAX_RADIUS : 0;
+    const normY = rawDist > 0 ? (Math.sin(angle) * clampedDist) / MAX_RADIUS : 0;
+
+    // Apply dead zone and smooth curve
+    const x = Math.abs(normX) < DEAD_ZONE ? 0 : Math.sign(normX) * ((Math.abs(normX) - DEAD_ZONE) / (1 - DEAD_ZONE));
+    const y = Math.abs(normY) < DEAD_ZONE ? 0 : Math.sign(normY) * ((Math.abs(normY) - DEAD_ZONE) / (1 - DEAD_ZONE));
+
+    // Steering: Right (X > 0), Left (X < 0)
     this.steer = Math.max(0, x);
     this.steerLeft = Math.max(0, -x);
 
-    // Negative Y (dragged up) -> throttle; Positive Y (dragged down) -> brake/reverse
-    this.joystickThrottle = Math.max(0, -y);
-    this.joystickBrake = Math.max(0, y);
+    // Throttle & Brake: Drag UP (Y < 0) is Forward Gas, Drag DOWN (Y > 0) is Brake / Reverse
+    this.throttle = Math.max(0, -y);
+    this.brake = Math.max(0, y);
 
-    this.throttle = Math.max(this.buttonThrottle, this.joystickThrottle);
-    this.brake = Math.max(this.buttonBrake, this.joystickBrake);
-
-    this.joystick.style.transform = `translate(${normalizedX * 35}px, ${normalizedY * 35}px)`;
-  };
-
-  private readonly onButtonDown = (event: PointerEvent): void => {
-    event.preventDefault();
-    const button = event.currentTarget as HTMLElement;
-    button.setPointerCapture(event.pointerId);
-    const pointers = this.buttonPointers.get(button);
-    pointers?.add(event.pointerId);
-    button.classList.add('active');
-    this.updateButtons();
-  };
-
-  private readonly onButtonUp = (event: PointerEvent): void => {
-    const button = event.currentTarget as HTMLElement;
-    this.buttonPointers.get(button)?.delete(event.pointerId);
-    if ((this.buttonPointers.get(button)?.size ?? 0) === 0) button.classList.remove('active');
-    this.updateButtons();
-  };
-
-  private readonly updateButtons = (): void => {
-    this.buttonThrottle = (this.buttonPointers.get(this.throttleButton)?.size ?? 0) > 0 ? 1 : 0;
-    this.buttonBrake = (this.buttonPointers.get(this.brakeButton)?.size ?? 0) > 0 ? 1 : 0;
-    this.handbrake = (this.buttonPointers.get(this.handbrakeButton)?.size ?? 0) > 0;
-    this.throttle = Math.max(this.buttonThrottle, this.joystickThrottle);
-    this.brake = Math.max(this.buttonBrake, this.joystickBrake);
+    // Visual knob offset
+    const knobX = Math.cos(angle) * clampedDist * 0.58;
+    const knobY = Math.sin(angle) * clampedDist * 0.58;
+    this.joystickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
   };
 
   private readonly preventBrowserGesture = (event: Event): void => {
     event.preventDefault();
   };
 }
-

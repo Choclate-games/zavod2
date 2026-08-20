@@ -324,6 +324,12 @@ def chats_running() -> Dict[str, Any]:
     return {"running": service.running_chats()}
 
 
+@app.get("/api/activity")
+def activity() -> Dict[str, Any]:
+    """Панель активности сайдбара: работающие/недавно завершённые чаты и живые dev-серверы."""
+    return service.activity()
+
+
 # ── Агенты ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/agents/{key}/models")
@@ -362,6 +368,17 @@ async def agent_terminal(key: str, request: Request) -> Dict[str, Any]:
 
 
 # ── Игра ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/play")
+def play_servers() -> Dict[str, Any]:
+    """Менеджер запущенных игр: занятые порты по проектам."""
+    return {"servers": service.running_servers()}
+
+
+@app.post("/api/play/stop-all")
+def play_stop_all() -> Dict[str, Any]:
+    return service.stop_all_play()
+
 
 @app.get("/api/play/{slug}")
 def play_state(slug: str) -> Dict[str, Any]:

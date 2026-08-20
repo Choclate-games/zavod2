@@ -192,6 +192,15 @@ export class GameStore {
     return CAMPAIGN_LEVELS.find((l) => l.id === levelId) || CAMPAIGN_LEVELS[0];
   }
 
+  public getTotalStars(): number {
+    return Object.values(this.save.levelStars).reduce((acc, s) => acc + s, 0);
+  }
+
+  public getChapterStars(chapter: number): number {
+    const chapterLevels = CAMPAIGN_LEVELS.filter((l) => l.chapter === chapter);
+    return chapterLevels.reduce((acc, l) => acc + (this.save.levelStars[l.id] || 0), 0);
+  }
+
   public startRun(mode: GameMode = 'CAMPAIGN', levelId = 1): void {
     this.mode = mode;
     this.currentLevelId = levelId;

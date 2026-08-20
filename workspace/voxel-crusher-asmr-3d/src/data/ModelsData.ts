@@ -581,7 +581,74 @@ function createRocket(): VoxelCoord[] {
   return list;
 }
 
-// 16 Rich Voxel Models grouped into 4 Collections
+function createCrystalCluster(): VoxelCoord[] {
+  const list: VoxelCoord[] = [];
+  for (let x = -8; x <= 8; x++) {
+    for (let y = 0; y <= 15; y++) {
+      for (let z = -6; z <= 6; z++) {
+        const crystalA = Math.abs(x) <= Math.max(1, 5 - Math.floor(y / 4)) && Math.abs(z) <= 2;
+        const crystalB = Math.abs(x - 4) <= Math.max(1, 3 - Math.floor(y / 5)) && Math.abs(z + 2) <= 2 && y >= 3;
+        if (crystalA || crystalB) {
+          list.push({ x, y, z, color: y % 3 === 0 ? C.DIAMOND_LIGHT : C.DIAMOND_CYAN });
+        }
+      }
+    }
+  }
+  return list;
+}
+
+function createGear(): VoxelCoord[] {
+  const list: VoxelCoord[] = [];
+  for (let x = -10; x <= 10; x++) {
+    for (let y = 0; y <= 5; y++) {
+      for (let z = -10; z <= 10; z++) {
+        const radius = Math.sqrt(x * x + z * z);
+        const tooth = Math.abs(x) > 8 || Math.abs(z) > 8;
+        if ((radius <= 7 || (radius <= 10 && tooth)) && radius > 2.2) {
+          list.push({ x, y, z, color: y === 5 ? C.CROWN_GOLD : C.TOWER_STONE_LIGHT });
+        }
+      }
+    }
+  }
+  return list;
+}
+
+function createSatellite(): VoxelCoord[] {
+  const list: VoxelCoord[] = [];
+  for (let x = -5; x <= 5; x++) {
+    for (let y = 0; y <= 8; y++) {
+      for (let z = -5; z <= 5; z++) {
+        if (Math.abs(x) <= 3 && Math.abs(z) <= 3) {
+          list.push({ x, y, z, color: y === 8 ? C.PHONE_SCREEN : C.ROBOT_METAL });
+        }
+      }
+    }
+  }
+  for (let x = -10; x <= 10; x++) {
+    for (let y = 2; y <= 5; y++) {
+      list.push({ x, y, z: 5, color: C.DIAMOND_CYAN });
+      list.push({ x, y, z: -5, color: C.DIAMOND_CYAN });
+    }
+  }
+  return list;
+}
+
+function createTemple(): VoxelCoord[] {
+  const list: VoxelCoord[] = [];
+  for (let y = 0; y <= 15; y++) {
+    const half = Math.max(2, 8 - Math.floor(y / 3));
+    for (let x = -half; x <= half; x++) {
+      for (let z = -half; z <= half; z++) {
+        if (Math.abs(x) === half || Math.abs(z) === half || y < 2) {
+          list.push({ x, y, z, color: y >= 13 ? C.TOWER_ROOF : C.TOWER_STONE_LIGHT });
+        }
+      }
+    }
+  }
+  return list;
+}
+
+// 20 rich voxel models grouped into 5 collections
 export const COLLECTIONS_DATA: CollectionData[] = [
   {
     id: 'food_fruits',
@@ -792,6 +859,59 @@ export const COLLECTIONS_DATA: CollectionData[] = [
         voxels: createRocket(),
         baseVoxelValue: 10.0,
         hardness: 2.4
+      }
+    ]
+  },
+  {
+    id: 'industrial_extras',
+    nameRu: 'Индустриальные испытания',
+    nameEn: 'Industrial Trials',
+    icon: '⚙️',
+    requiredCompletedCount: 16,
+    models: [
+      {
+        id: 'crystal_cluster',
+        nameRu: 'Кристальный Кластер',
+        nameEn: 'Crystal Cluster',
+        icon: '🔷',
+        collectionId: 'industrial_extras',
+        gridSize: [18, 18, 14],
+        voxels: createCrystalCluster(),
+        baseVoxelValue: 11.5,
+        hardness: 2.6
+      },
+      {
+        id: 'steel_gear',
+        nameRu: 'Стальной Механизм',
+        nameEn: 'Steel Gear',
+        icon: '⚙️',
+        collectionId: 'industrial_extras',
+        gridSize: [22, 8, 22],
+        voxels: createGear(),
+        baseVoxelValue: 13.0,
+        hardness: 2.8
+      },
+      {
+        id: 'satellite',
+        nameRu: 'Орбитальный Спутник',
+        nameEn: 'Orbital Satellite',
+        icon: '🛰️',
+        collectionId: 'industrial_extras',
+        gridSize: [22, 10, 12],
+        voxels: createSatellite(),
+        baseVoxelValue: 15.0,
+        hardness: 3.0
+      },
+      {
+        id: 'temple',
+        nameRu: 'Древний Храм',
+        nameEn: 'Ancient Temple',
+        icon: '🏛️',
+        collectionId: 'industrial_extras',
+        gridSize: [18, 18, 18],
+        voxels: createTemple(),
+        baseVoxelValue: 18.0,
+        hardness: 3.2
       }
     ]
   }

@@ -23,11 +23,17 @@ export class VoxelModelObject {
   private voxelPositions: Float32Array; // local [x, y, z]
   private voxelColors: Uint32Array;
   private voxelActive: Uint8Array;
-  private sortedIndices: Uint32Array; // Sorted by local Y ascending for fast slicing
+  private voxelHealth: Float32Array;
+  private voxelMaxHealth: Float32Array;
+  private detachedVoxels: DetachedVoxel[] = [];
+  private worldPosition = new THREE.Vector3();
+  private minActiveLy = 0;
 
   public posY = 3.8;
   public targetY = 3.8;
   public wobbleAngle = 0;
+  private fallVelocity = 0;
+  private previousPosY = 3.8;
 
   constructor(scene: THREE.Scene, modelData: VoxelModelData) {
     this.group = new THREE.Group();
@@ -39,7 +45,8 @@ export class VoxelModelObject {
     this.voxelPositions = new Float32Array(count * 3);
     this.voxelColors = new Uint32Array(count);
     this.voxelActive = new Uint8Array(count);
-    this.sortedIndices = new Uint32Array(count);
+    this.voxelHealth = new Float32Array(count);
+    this.voxelMaxHealth = new Float32Array(count);
 
     this.buildInstancedMesh();
     this.group.position.set(0, this.posY, 0);
@@ -76,6 +83,10 @@ export class VoxelModelObject {
     const centerY = minY; // Sit at local bottom Y = 0
     const centerZ = (minZ + maxZ) / 2;
 
+    const hardness = this.modelData.hardness;
+    // Substantial base health per voxel (scaled by hardness)
+    const baseHealth = 24.0 * Math.pow(hardness, 1.25);
+
     for (let i = 0; i < voxels.length; i++) {
       const v = voxels[i];
       const lx = (v.x - centerX) * this.voxelSize;
@@ -87,7 +98,12 @@ export class VoxelModelObject {
       this.voxelPositions[i * 3 + 2] = lz;
       this.voxelColors[i] = v.color;
       this.voxelActive[i] = 1;
-      this.sortedIndices[i] = i;
+
+      // Deterministic per-voxel variation for organic, non-uniform chipping
+      const hash = Math.abs(Math.sin((v.x + 11) * 12.9898 + (v.y + 19) * 78.233 + (v.z + 23) * 45.164)) % 1;
+      const health = Math.round((baseHealth * (0.85 + 0.30 * hash)) * 10) / 10;
+      this.voxelMaxHealth[i] = health;
+      this.voxelHealth[i] = health;
 
       this.dummy.position.set(lx, ly, lz);
       this.dummy.scale.set(1, 1, 1);
@@ -100,11 +116,7 @@ export class VoxelModelObject {
       this.instancedMesh.setColorAt(i, colorHelper);
     }
 
-    // Sort indices by local Y ascending so we slice from the bottom up!
-    this.sortedIndices.sort((a, b) => {
-      return this.voxelPositions[a * 3 + 1] - this.voxelPositions[b * 3 + 1];
-    });
-
+    this.minActiveLy = 0;
     this.instancedMesh.instanceMatrix.needsUpdate = true;
     if (this.instancedMesh.instanceColor) {
       this.instancedMesh.instanceColor.needsUpdate = true;
@@ -113,73 +125,115 @@ export class VoxelModelObject {
     this.group.add(this.instancedMesh);
   }
 
+  private updateLowestActiveLy(): void {
+    let minLy = Infinity;
+    for (let i = 0; i < this.totalVoxels; i++) {
+      if (this.voxelActive[i] === 1) {
+        const ly = this.voxelPositions[i * 3 + 1];
+        if (ly < minLy) {
+          minLy = ly;
+        }
+      }
+    }
+    this.minActiveLy = minLy === Infinity ? 0 : minLy;
+  }
+
   /**
    * Slice voxels that have passed through or reached the contact plane (nipThresholdY)
    */
-  public sliceVoxels(nipThresholdY: number, maxSliceCount: number): DetachedVoxel[] {
-    const detached: DetachedVoxel[] = [];
-    if (this.remainingVoxels <= 0) return detached;
+  public sliceVoxels(
+    nipThresholdY: number,
+    minContactX: number,
+    maxContactX: number,
+    minContactZ: number,
+    maxContactZ: number,
+    contactHalfHeight: number,
+    damageThisFrame: number
+  ): DetachedVoxel[] {
+    this.detachedVoxels.length = 0;
+    if (this.remainingVoxels <= 0) return this.detachedVoxels;
 
     let matrixNeedsUpdate = false;
+    const minY = nipThresholdY - contactHalfHeight;
+    const maxY = nipThresholdY + contactHalfHeight;
 
-    for (let i = 0; i < this.totalVoxels; i++) {
-      if (detached.length >= maxSliceCount) break;
-
-      const idx = this.sortedIndices[i];
+    for (let idx = 0; idx < this.totalVoxels; idx++) {
       if (this.voxelActive[idx] === 0) continue;
 
       const lx = this.voxelPositions[idx * 3];
       const ly = this.voxelPositions[idx * 3 + 1];
       const lz = this.voxelPositions[idx * 3 + 2];
 
-      // Compute world position accounting for group position and wobble
+      const worldX = this.group.position.x + lx;
       const worldY = this.group.position.y + ly;
+      const worldZ = this.group.position.z + lz;
 
-      if (worldY <= nipThresholdY) {
-        // Detach voxel!
-        this.voxelActive[idx] = 0;
-        this.remainingVoxels--;
+      const inX = worldX >= minContactX && worldX <= maxContactX;
+      const inZ = worldZ >= minContactZ && worldZ <= maxContactZ;
+      if (!inX || !inZ) continue;
 
-        // Calculate world coordinates
-        const worldPos = new THREE.Vector3(lx, ly, lz);
-        this.group.localToWorld(worldPos);
+      const inY = worldY >= minY && worldY <= maxY;
+      const crossedY = worldY < minY && (this.previousPosY + ly) >= minY;
+      if (!inY && !crossedY) continue;
 
-        detached.push({
-          worldX: worldPos.x,
-          worldY: worldPos.y,
-          worldZ: worldPos.z,
-          color: this.voxelColors[idx]
-        });
-
-        // Hide detached instance in mesh
-        this.instancedMesh.setMatrixAt(idx, this.zeroMatrix);
-        matrixNeedsUpdate = true;
+      this.voxelHealth[idx] -= damageThisFrame;
+      if (this.voxelHealth[idx] > 0) {
+        continue;
       }
+
+      this.voxelHealth[idx] = 0;
+      this.voxelActive[idx] = 0;
+      this.remainingVoxels--;
+
+      this.worldPosition.set(lx, ly, lz);
+      this.group.localToWorld(this.worldPosition);
+
+      this.detachedVoxels.push({
+        worldX: this.worldPosition.x,
+        worldY: this.worldPosition.y,
+        worldZ: this.worldPosition.z,
+        color: this.voxelColors[idx]
+      });
+
+      this.instancedMesh.setMatrixAt(idx, this.zeroMatrix);
+      matrixNeedsUpdate = true;
     }
 
     if (matrixNeedsUpdate) {
       this.instancedMesh.instanceMatrix.needsUpdate = true;
+      this.updateLowestActiveLy();
     }
 
-    return detached;
+    return this.detachedVoxels;
   }
 
-  public updateDescent(feedSpeed: number, dt: number, isTurbo: boolean): void {
-    // Descent rate towards rollers
-    const speed = feedSpeed * (isTurbo ? 2.5 : 1.0);
-    this.posY = Math.max(-1.5, this.posY - speed * dt);
-    this.group.position.y = this.posY;
+  public updateDescent(feedSpeed: number, dt: number, isTurbo: boolean, nipY: number): void {
+    this.previousPosY = this.posY;
+    const bottomWorldY = this.posY + this.minActiveLy;
 
-    // Gentle physical wobble while being crushed
-    if (isTurbo) {
-      this.wobbleAngle += dt * 15.0;
-      this.group.rotation.z = Math.sin(this.wobbleAngle) * 0.035;
-      this.group.rotation.x = Math.cos(this.wobbleAngle * 0.7) * 0.025;
+    if (bottomWorldY > nipY) {
+      // Free fall under gravity until reaching the top teeth of the rollers
+      this.fallVelocity = Math.min(this.fallVelocity + 12.0 * dt, 4.5);
+      this.posY -= this.fallVelocity * dt;
+      if (this.posY + this.minActiveLy < nipY) {
+        this.posY = nipY - this.minActiveLy;
+        this.fallVelocity = 0;
+      }
     } else {
-      this.wobbleAngle += dt * 5.0;
-      this.group.rotation.z = Math.sin(this.wobbleAngle) * 0.015;
-      this.group.rotation.x = 0;
+      // Contact with rollers: pulled downward at controlled shredder feed rate
+      this.fallVelocity = 0;
+      const feedRate = feedSpeed * (isTurbo ? 2.2 : 1.0);
+      this.posY -= feedRate * dt;
+
+      // Rollers resist descent: the model sinks as bottom voxels are crushed
+      const minAllowedPosY = (nipY - 0.22) - this.minActiveLy;
+      if (this.posY < minAllowedPosY) {
+        this.posY = minAllowedPosY;
+      }
     }
+
+    this.group.position.y = this.posY;
+    this.group.rotation.set(0, 0, 0);
   }
 
   public getProgressPercent(): number {

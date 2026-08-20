@@ -66,6 +66,8 @@ export interface GarageUpgrades {
 
 export interface LevelConfig {
   id: number;
+  chapter: number;
+  chapterNameRu: string;
   nameRu: string;
   subtitleRu: string;
   descriptionRu: string;
@@ -75,9 +77,11 @@ export interface LevelConfig {
   speedMultiplier: number;
   countMultiplier: number;
   bossWave?: number;
+  bossName?: string;
   rewardScrap: number;
   targetKills: number;
   minHealthPercentStar: number;
+  biome?: string;
 }
 
 export interface SaveData {

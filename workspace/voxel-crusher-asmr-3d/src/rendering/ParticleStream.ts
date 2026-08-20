@@ -20,7 +20,9 @@ export class ParticleStream {
     const cubeMat = new THREE.MeshLambertMaterial();
 
     this.instancedMesh = new THREE.InstancedMesh(cubeGeo, cubeMat, this.maxParticles);
-    this.instancedMesh.castShadow = true;
+    // Debris is short-lived and numerous; excluding it from the shadow map keeps
+    // the expensive shadow pass focused on the static machine and active model.
+    this.instancedMesh.castShadow = false;
     this.instancedMesh.receiveShadow = false;
 
     this.particles = new Array(this.maxParticles);
@@ -85,13 +87,13 @@ export class ParticleStream {
       p.velY = (-2.5 - Math.random() * 3.5) * speedMult; // Strong downward momentum
       p.velZ = (Math.random() * 1.6 - 0.8) * speedMult;
 
-      p.rotX = Math.random() * Math.PI * 2;
-      p.rotY = Math.random() * Math.PI * 2;
-      p.rotZ = Math.random() * Math.PI * 2;
-
-      p.rotVelX = (Math.random() * 12 - 6) * speedMult;
-      p.rotVelY = (Math.random() * 12 - 6) * speedMult;
-      p.rotVelZ = (Math.random() * 12 - 6) * speedMult;
+      // Falling debris keeps its voxel orientation instead of tumbling.
+      p.rotX = 0;
+      p.rotY = 0;
+      p.rotZ = 0;
+      p.rotVelX = 0;
+      p.rotVelY = 0;
+      p.rotVelZ = 0;
 
       p.scale = 1.0;
       p.color = v.color;
@@ -144,10 +146,6 @@ export class ParticleStream {
       p.posY += p.velY * dt;
       p.posZ += p.velZ * dt;
 
-      p.rotX += p.rotVelX * dt;
-      p.rotY += p.rotVelY * dt;
-      p.rotZ += p.rotVelZ * dt;
-
       // Basket floor collision & restitution bounce
       if (p.posY <= basketFloorY) {
         p.posY = basketFloorY;
@@ -184,7 +182,7 @@ export class ParticleStream {
 
       // Sync to InstancedMesh matrix
       this.dummy.position.set(p.posX, p.posY, p.posZ);
-      this.dummy.rotation.set(p.rotX, p.rotY, p.rotZ);
+       this.dummy.rotation.set(0, 0, 0);
       this.dummy.scale.set(p.scale, p.scale, p.scale);
       this.dummy.updateMatrix();
 
@@ -206,6 +204,7 @@ export class ParticleStream {
   }
 
   public reset(): void {
+    this.freeIndices.length = 0;
     for (let i = 0; i < this.maxParticles; i++) {
       this.particles[i].active = false;
       this.freeIndices.push(i);

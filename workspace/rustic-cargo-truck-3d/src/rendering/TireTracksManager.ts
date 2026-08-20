@@ -219,7 +219,8 @@ export class TireTracksManager {
     if (this.dirty) {
       this.posAttr.needsUpdate = true;
       this.colorAttr.needsUpdate = true;
-      this.geometry.computeVertexNormals();
+      // Normals are not recomputed per-frame: the track ribbon is nearly flat on terrain,
+      // so the initial flat normals are visually indistinguishable and cost nothing.
       this.dirty = false;
     }
   }

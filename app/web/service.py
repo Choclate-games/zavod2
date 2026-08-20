@@ -22,6 +22,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import yaml
 
@@ -183,6 +184,26 @@ CODE_TASK_PROMPT = (
 
 MAX_STUDIO_LOG_LINES = 3000
 MAX_PLAY_LOG_LINES = 1500
+
+# Сколько времени завершённый чат ещё висит в панели активности сайдбара.
+RECENT_CHAT_WINDOW_SECONDS = 15 * 60
+
+
+def _epoch(iso: str) -> float:
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _port_of(url: Optional[str]) -> Optional[int]:
+    """Порт из URL dev-сервера — им подписан каждый запущенный проект."""
+    if not url:
+        return None
+    try:
+        return urlparse(url).port
+    except ValueError:
+        return None
 
 
 def plural_runs(count: int) -> str:
@@ -1235,6 +1256,48 @@ class FactoryService:
             for job in self.chat_jobs.running_jobs()
         ]
 
+    def activity_chats(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        Лента активности для боковой панели: что работает прямо сейчас и что
+        завершилось недавно (в пределах RECENT_CHAT_WINDOW_SECONDS).
+        """
+        moment = datetime.now()
+        rows: List[Dict[str, Any]] = []
+        for job in self.chat_jobs.all_jobs():
+            running = job.status == "running"
+            finished_ago: Optional[int] = None
+            if not running:
+                if not job.finished_at:
+                    continue
+                seconds = int((moment - job.finished_at).total_seconds())
+                if seconds > RECENT_CHAT_WINDOW_SECONDS:
+                    continue
+                finished_ago = seconds
+            rows.append({
+                "session_id": job.session_id,
+                "slug": job.slug,
+                "title": job.title,
+                "status": job.status,
+                "running": running,
+                "duration": job.duration_str,
+                "model": job.model or "",
+                "stopping": running and job.should_stop(),
+                "finished_ago": finished_ago,
+                "finished_at": job.finished_at.strftime("%H:%M") if job.finished_at else "",
+                "started_at": job.started_at.isoformat(timespec="seconds"),
+                "playable": self.project_is_playable(job.slug),
+            })
+
+        # Работающие сверху (самые свежие первыми), затем недавно завершённые.
+        rows.sort(key=lambda row: (
+            0 if row["running"] else 1,
+            -_epoch(row["started_at"]) if row["running"] else (row["finished_ago"] or 0),
+        ))
+        return rows[:limit]
+
+    def activity(self) -> Dict[str, Any]:
+        return {"chats": self.activity_chats(), "servers": self.running_servers()}
+
     # =====================================================================
     # Терминальные агенты
     # =====================================================================
@@ -1404,6 +1467,45 @@ class FactoryService:
         engine = open_internal_browser(url, title=f"🎮 {slug}",
                                        on_log=lambda m: self._play_log(slug, m))
         return {"status": "success", "engine": engine}
+
+    def running_servers(self) -> List[Dict[str, Any]]:
+        """Менеджер запущенных игр: какие проекты держат порты прямо сейчас."""
+        with self._play_lock:
+            items = list(self.play.items())
+
+        rows: List[Dict[str, Any]] = []
+        for slug, entry in items:
+            server = entry.get("server")
+            running = bool(server and server.is_running)
+            starting = bool(entry.get("starting"))
+            if not running and not starting:
+                continue
+            url = entry.get("url") or (getattr(server, "expected_url", None) if server else None)
+            proc = getattr(server, "proc", None) if server else None
+            rows.append({
+                "slug": slug,
+                "url": url,
+                "port": _port_of(url),
+                "running": running,
+                "starting": starting,
+                "pid": proc.pid if proc else None,
+            })
+        rows.sort(key=lambda row: (0 if row["running"] else 1, row["slug"]))
+        return rows
+
+    def stop_all_play(self) -> Dict[str, Any]:
+        """Гасит все dev-серверы разом — освобождает порты одной кнопкой."""
+        with self._play_lock:
+            slugs = list(self.play.keys())
+        stopped = 0
+        for slug in slugs:
+            entry = self.play.get(slug) or {}
+            server = entry.get("server")
+            if (server and server.is_running) or entry.get("starting"):
+                self.stop_play(slug)
+                stopped += 1
+        return {"status": "success", "stopped": stopped,
+                "message": f"Остановлено серверов: {stopped}" if stopped else "Запущенных игр нет."}
 
     def stop_all_servers(self) -> None:
         with self._play_lock:

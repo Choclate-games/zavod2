@@ -11,8 +11,8 @@ export const TERRAIN = {
   roadHalfWidth: 4.0,
   startZ: -16,
   endZ: 340,
-  segmentsX: 130,
-  segmentLength: 0.85,
+  segmentsX: 80,
+  segmentLength: 1.2,
 };
 
 let activeLevel: LevelConfig = LEVELS[0];

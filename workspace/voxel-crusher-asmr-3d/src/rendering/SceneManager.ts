@@ -35,10 +35,10 @@ export class SceneManager {
       alpha: false
     });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
-    const maxDpr = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 1.5 : Math.min(window.devicePixelRatio, 2.0);
+    const maxDpr = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 1.25 : Math.min(window.devicePixelRatio, 1.75);
     this.renderer.setPixelRatio(maxDpr);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
 
@@ -58,8 +58,8 @@ export class SceneManager {
     this.keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
     this.keyLight.position.set(6, 14, 8);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.width = 1024;
-    this.keyLight.shadow.mapSize.height = 1024;
+    this.keyLight.shadow.mapSize.width = 512;
+    this.keyLight.shadow.mapSize.height = 512;
     this.keyLight.shadow.camera.near = 1;
     this.keyLight.shadow.camera.far = 30;
     const shadowDist = 6;

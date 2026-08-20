@@ -70,7 +70,40 @@ export class WaveManager {
     // Spawn Boss on Boss Wave
     if (isBossWave && !zombieManager.boss) {
       const bossHpMult = mode === 'CAMPAIGN' ? hpMult : 1.0 + (Math.floor(wave / 5) - 1) * 0.35;
-      zombieManager.spawnBoss(playerPos, bossHpMult, speedMult);
+      const levelCfg = mode === 'CAMPAIGN' ? gameStore.getCampaignLevelConfig(gameStore.run.levelId) : null;
+      
+      let bossType: import('../types/zombie').BossType = 'BOSS_GOLIATH';
+      if (mode === 'CAMPAIGN' && levelCfg) {
+        const lvl = levelCfg.id;
+        if (lvl <= 5) bossType = 'BOSS_GOLIATH';
+        else if (lvl <= 10) bossType = 'BOSS_SAND_TITAN';
+        else if (lvl <= 20) bossType = 'BOSS_IRON_BUTCHER';
+        else if (lvl <= 30) bossType = 'BOSS_TOXIC_BEHEMOTH';
+        else if (lvl <= 40) bossType = 'BOSS_INFERNO_TITAN';
+        else if (lvl <= 50) bossType = 'BOSS_CYBER_REAPER';
+        else if (lvl <= 60) bossType = 'BOSS_STORM_BRINGER';
+        else if (lvl <= 70) bossType = 'BOSS_CRIMSON_REAPER';
+        else if (lvl <= 80) bossType = 'BOSS_RADIOACTIVE_COLOSSUS';
+        else if (lvl <= 90) bossType = 'BOSS_ASHEN_OVERLORD';
+        else bossType = 'BOSS_APOCALYPSE_LORD';
+      } else {
+        // Survival Mode boss progression every 5 waves
+        const tier = Math.floor(wave / 5);
+        if (tier === 1) bossType = 'BOSS_GOLIATH';
+        else if (tier === 2) bossType = 'BOSS_SAND_TITAN';
+        else if (tier === 3) bossType = 'BOSS_IRON_BUTCHER';
+        else if (tier === 4) bossType = 'BOSS_TOXIC_BEHEMOTH';
+        else if (tier === 5) bossType = 'BOSS_INFERNO_TITAN';
+        else if (tier === 6) bossType = 'BOSS_CYBER_REAPER';
+        else if (tier === 7) bossType = 'BOSS_STORM_BRINGER';
+        else if (tier === 8) bossType = 'BOSS_CRIMSON_REAPER';
+        else if (tier === 9) bossType = 'BOSS_RADIOACTIVE_COLOSSUS';
+        else if (tier === 10) bossType = 'BOSS_ASHEN_OVERLORD';
+        else bossType = 'BOSS_APOCALYPSE_LORD';
+      }
+
+      const bossName = levelCfg?.bossName || (mode === 'SURVIVAL' ? `Босс (Волна ${wave})` : 'Босс');
+      zombieManager.spawnBoss(playerPos, bossHpMult, speedMult, bossName, bossType);
     }
 
     // Spawn regular hordes in dynamic packs

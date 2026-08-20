@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { Zombie } from './Zombie';
 import { BossZombie } from './BossZombie';
-import { ZombieType } from '../types/zombie';
+import { ZombieType, BossType } from '../types/zombie';
 import { PlayerCar } from './PlayerCar';
 import { ProjectileManager } from './Projectile';
 import { ScrapManager } from './ScrapDrop';
 import { ParticleSystem } from '../graphics/ParticleSystem';
+import { RagdollSystem, DeathType } from '../graphics/RagdollSystem';
 import { CameraController } from '../graphics/CameraController';
 import { DynamicLightManager } from '../graphics/DynamicLightManager';
 import { gameStore } from '../core/Store';
@@ -22,9 +23,15 @@ export class ZombieManager {
   public group = new THREE.Group();
   public zombies: Zombie[] = [];
   public boss: BossZombie | null = null;
+  public ragdolls: RagdollSystem;
 
   // Max active zombies for massive horde battles
   public maxConcurrentZombies = 180;
+
+  constructor() {
+    this.ragdolls = new RagdollSystem();
+    this.group.add(this.ragdolls.group);
+  }
 
   public spawnZombie(
     type: ZombieType,
@@ -74,7 +81,8 @@ export class ZombieManager {
     playerPos: THREE.Vector3,
     hpMultiplier = 1.0,
     speedMultiplier = 1.0,
-    customName?: string
+    customName?: string,
+    bossType: BossType = 'BOSS_GOLIATH'
   ): void {
     if (this.boss && !this.boss.isDead) return;
 
@@ -85,7 +93,7 @@ export class ZombieManager {
       playerPos.z + Math.cos(angle) * 32
     );
 
-    this.boss = new BossZombie(_scratchSpawnPos, hpMultiplier, speedMultiplier, customName);
+    this.boss = new BossZombie(_scratchSpawnPos, hpMultiplier, speedMultiplier, customName, bossType);
     this.group.add(this.boss.meshResult.root);
   }
 
@@ -107,6 +115,9 @@ export class ZombieManager {
     const rageMult = playerCar.physics.driftMultiplier;
     const stats = gameStore.getEffectiveVehicleStats();
 
+    // 0. Update Ragdoll Physics Simulation
+    this.ragdolls.update(dt, particleSystem);
+
     // 1. Update Projectiles & Check Collisions with Zombies, Barrels, Crates
     projectileManager.update(dt, (proj) => {
       // Area of effect explosion
@@ -116,7 +127,7 @@ export class ZombieManager {
       cameraController.addTrauma(0.25);
 
       // Damage all zombies in explosion radius
-      this.damageInRadius(proj.position, proj.areaRadius, proj.damage, scrapManager, particleSystem);
+      this.damageInRadius(proj.position, proj.areaRadius, proj.damage, scrapManager, particleSystem, 'EXPLOSION');
       if (this.boss && !this.boss.isDead) {
         if (this.boss.position.distanceTo(proj.position) <= proj.areaRadius + 2.0) {
           this.damageBoss(proj.damage, scrapManager, particleSystem, cameraController, dynamicLights);
@@ -183,10 +194,13 @@ export class ZombieManager {
           const dz = z.position.z - pz;
           const r = 1.3 * z.config.scale;
           if (dx * dx + dz * dz < r * r) {
+            const isToxic = z.type === 'SPITTER';
             const died = z.takeDamage(proj.damage);
-            particleSystem.emitBloodSplatter(z.position.x, z.position.y + 0.5, z.position.z, 6);
+            particleSystem.emitBloodSpurt(z.position.x, z.position.y + 0.5, z.position.z, proj.velocity, 16, isToxic);
+            particleSystem.emitBloodMist(z.position.x, z.position.y + 0.5, z.position.z, 4, isToxic);
+            particleSystem.emitBloodSplatter(z.position.x, z.position.y + 0.5, z.position.z, 10, isToxic);
             if (died) {
-              this.handleZombieDeath(z, scrapManager, particleSystem);
+              this.handleZombieDeath(z, scrapManager, particleSystem, proj.velocity, 'BULLET');
             }
             hit = true;
             break;
@@ -226,7 +240,10 @@ export class ZombieManager {
       this.boss,
       (z, dmg) => {
         if (z.takeDamage(dmg)) {
-          this.handleZombieDeath(z, scrapManager, particleSystem);
+          const deathType: DeathType = playerCar.weapons.weapons.has('SIDE_BUZZSAWS') ? 'SAW'
+            : playerCar.weapons.weapons.has('FLAMETHROWER') ? 'FIRE'
+            : playerCar.weapons.weapons.has('SHOCK_RING') ? 'SHOCK' : 'BULLET';
+          this.handleZombieDeath(z, scrapManager, particleSystem, playerVel, deathType);
         }
       },
       (dmg) => {
@@ -237,9 +254,16 @@ export class ZombieManager {
       dynamicLights
     );
 
-    // 3. Update Zombies, AI, Obstacle Collisions & Toxic Pools
+    // 3. Update Zombies, AI, Obstacle Collisions & Ramming
     const speedFactor = Math.min(1.5, carSpeed / Math.max(1, stats.topSpeed));
     const isRammingSpeed = carSpeed > 6.0 || isNitro;
+
+    // Vehicle collision geometry (OBB)
+    const carHeading = playerCar.physics.headingAngle;
+    const sinCar = Math.sin(carHeading);
+    const cosCar = Math.cos(carHeading);
+    const carHalfWidth = 1.15;
+    const carHalfLength = 2.2;
 
     for (let i = this.zombies.length - 1; i >= 0; i--) {
       const z = this.zombies[i];
@@ -272,6 +296,7 @@ export class ZombieManager {
               const pen = minDist - d;
               z.position.x += (odx / d) * pen;
               z.position.z += (odz / d) * pen;
+              z.meshResult.root.position.copy(z.position);
             }
           } else {
             // Box obstacle OBB
@@ -303,43 +328,74 @@ export class ZombieManager {
               const wNz = localNx * sinW + localNz * cosW;
               z.position.x += wNx * pen;
               z.position.z += wNz * pen;
+              z.meshResult.root.position.copy(z.position);
             }
           }
         }
       }
 
-      // Collision with Player Car
+      // Precise Solid Oriented Bounding Box (OBB) Car Collision Resolution
       const cdx = z.position.x - playerPos.x;
       const cdz = z.position.z - playerPos.z;
-      const hitDistSq = cdx * cdx + cdz * cdz;
-      const hitRadius = 1.9 * z.config.scale;
 
-      if (hitDistSq < hitRadius * hitRadius) {
+      // Transform world delta into car local coordinates
+      const locX = -cdx * cosCar + cdz * sinCar; // Right axis
+      const locZ = cdx * sinCar + cdz * cosCar;  // Forward axis
+
+      const zRadius = (z.type === 'TANK' ? 0.85 : 0.55) * z.config.scale;
+      const boundX = carHalfWidth + zRadius;
+      const boundZ = carHalfLength + zRadius;
+
+      const isCarColliding = Math.abs(locX) < boundX && Math.abs(locZ) < boundZ;
+
+      if (isCarColliding) {
+        // Resolve penetration immediately: push zombie out to exterior perimeter
+        const penX = boundX - Math.abs(locX);
+        const penZ = boundZ - Math.abs(locZ);
+
+        let pushLocX = locX;
+        let pushLocZ = locZ;
+
+        if (penX < penZ) {
+          pushLocX = (locX >= 0 ? 1 : -1) * boundX;
+        } else {
+          pushLocZ = (locZ >= 0 ? 1 : -1) * boundZ;
+        }
+
+        // Convert resolved position back to world coordinates
+        z.position.x = playerPos.x - pushLocX * cosCar + pushLocZ * sinCar;
+        z.position.z = playerPos.z + pushLocX * sinCar + pushLocZ * cosCar;
+        z.meshResult.root.position.copy(z.position);
+
         if (isRammingSpeed) {
-          // Ramming Impact with balanced scaling (2x debuffed)
+          // Ramming Impact with balanced scaling
           const driftBonus = isDrifting ? rageMult : 1.0;
           const nitroBonus = isNitro ? 1.5 : 1.0;
           const ramDmg = Math.floor(stats.ramDamage * (0.22 + speedFactor * 0.65) * driftBonus * nitroBonus);
 
-          // Knockback vector
+          // Knockback vector in direction of vehicle velocity / heading
           const pSpeed = Math.max(1, playerVel.length());
           _scratchKnockback.set(
-            (playerVel.x / pSpeed) * (8 + carSpeed * 0.3),
-            2.5,
-            (playerVel.z / pSpeed) * (8 + carSpeed * 0.3)
+            (playerVel.x / pSpeed) * (10 + carSpeed * 0.4),
+            3.2,
+            (playerVel.z / pSpeed) * (10 + carSpeed * 0.4)
           );
 
+          const isToxic = z.type === 'SPITTER';
           const died = z.takeDamage(ramDmg, _scratchKnockback);
-          particleSystem.emitBloodSplatter(z.position.x, z.position.y + 0.5, z.position.z, 12);
-          particleSystem.emitSparks(z.position.x, z.position.y + 0.3, z.position.z, 5);
+          particleSystem.emitBloodBurst(z.position.x, z.position.y + 0.5, z.position.z, 26, 1.25, isToxic);
+          particleSystem.emitBloodSpurt(z.position.x, z.position.y + 0.5, z.position.z, playerVel, 18, isToxic);
+          particleSystem.emitBloodMist(z.position.x, z.position.y + 0.5, z.position.z, 6, isToxic);
+          particleSystem.emitBloodChunks(z.position.x, z.position.y + 0.5, z.position.z, 8, _scratchKnockback);
+          particleSystem.emitSparks(z.position.x, z.position.y + 0.3, z.position.z, 6);
           dynamicLights?.flash(z.position.x, z.position.y + 0.4, z.position.z, 0xffa500, 1.8, 8, 16.0);
           audioManager.playRamImpact(Math.min(2.0, 0.6 + speedFactor));
           cameraController.addTrauma(0.08 * speedFactor);
 
           if (died) {
-            this.handleZombieDeath(z, scrapManager, particleSystem);
+            this.handleZombieDeath(z, scrapManager, particleSystem, _scratchKnockback, 'RAM');
           } else {
-            // Recoil damage to player when hitting heavy tank or surviving zombie without nitro/high drift
+            // Recoil damage to player when hitting heavy tank or slow collision
             if (z.type === 'TANK' && !isNitro && carSpeed < 14) {
               playerCar.takeDamage(12);
             } else if (!isDrifting && !isNitro && carSpeed < 10) {
@@ -347,7 +403,7 @@ export class ZombieManager {
             }
           }
         } else {
-          // Slow car -> Zombie attacks
+          // Slow car -> Zombie attacks from the exterior
           if (z.attackTimer <= 0) {
             z.attackTimer = z.config.attackCooldown;
             playerCar.takeDamage(z.config.damage);
@@ -357,25 +413,108 @@ export class ZombieManager {
       }
     }
 
-    // 4. Update Boss
-    if (this.boss && !this.boss.isDead) {
-      this.boss.update(dt, playerPos, (slamPos) => {
-        particleSystem.emitExplosion(slamPos.x, 0.4, slamPos.z, 30);
-        dynamicLights?.flash(slamPos.x, 0.6, slamPos.z, 0xff1100, 4.0, 20, 4.5);
-        audioManager.playExplosion();
-        cameraController.addTrauma(0.4);
-
-        if (playerPos.distanceTo(slamPos) < 9.0) {
-          playerCar.takeDamage(35);
+    // 3.5. Zombie-to-Zombie Crowd Separation & Flocking
+    const zLen = this.zombies.length;
+    for (let i = 0; i < zLen; i++) {
+      const z1 = this.zombies[i];
+      if (z1.isDead) continue;
+      for (let j = i + 1; j < zLen; j++) {
+        const z2 = this.zombies[j];
+        if (z2.isDead) continue;
+        const sepX = z2.position.x - z1.position.x;
+        const sepZ = z2.position.z - z1.position.z;
+        const minDist = 0.95 * ((z1.config.scale + z2.config.scale) * 0.5);
+        const distSq = sepX * sepX + sepZ * sepZ;
+        if (distSq < minDist * minDist && distSq > 0.0001) {
+          const d = Math.sqrt(distSq);
+          const push = (minDist - d) * 0.45;
+          const nx = sepX / d;
+          const nz = sepZ / d;
+          z1.position.x -= nx * push;
+          z1.position.z -= nz * push;
+          z2.position.x += nx * push;
+          z2.position.z += nz * push;
+          z1.meshResult.root.position.copy(z1.position);
+          z2.meshResult.root.position.copy(z2.position);
         }
-      });
+      }
+    }
 
-      // Boss Car Collision
+    // 4. Update Boss & Specialized Attacks
+    if (this.boss && !this.boss.isDead) {
+      this.boss.update(
+        dt,
+        playerPos,
+        (slamPos, bossType) => {
+          // Unique Shockwave Visuals per Boss Archetype
+          if (bossType === 'BOSS_TOXIC_BEHEMOTH') {
+            particleSystem.emitAcidSplash(slamPos.x, 0.5, slamPos.z, 24);
+            dynamicLights?.flash(slamPos.x, 0.8, slamPos.z, 0x76ff03, 4.0, 20, 4.5);
+          } else if (bossType === 'BOSS_INFERNO_TITAN' || bossType === 'BOSS_ASHEN_OVERLORD') {
+            particleSystem.emitExplosion(slamPos.x, 0.5, slamPos.z, 36);
+            particleSystem.emitFlameStream(slamPos, new THREE.Vector3(1, 0, 0), 4);
+            particleSystem.emitFlameStream(slamPos, new THREE.Vector3(-1, 0, 0), 4);
+            dynamicLights?.flash(slamPos.x, 0.8, slamPos.z, 0xff3300, 4.5, 22, 4.0);
+          } else if (bossType === 'BOSS_CYBER_REAPER') {
+            particleSystem.emitLightningArc(slamPos, new THREE.Vector3(slamPos.x + 4, 0.5, slamPos.z), 5);
+            particleSystem.emitLightningArc(slamPos, new THREE.Vector3(slamPos.x - 4, 0.5, slamPos.z), 5);
+            dynamicLights?.flash(slamPos.x, 0.8, slamPos.z, 0x00f0ff, 4.0, 20, 6.0);
+          } else if (bossType === 'BOSS_STORM_BRINGER') {
+            particleSystem.emitLightningArc(slamPos, new THREE.Vector3(slamPos.x + 5, 0.5, slamPos.z + 5), 6);
+            particleSystem.emitLightningArc(slamPos, new THREE.Vector3(slamPos.x - 5, 0.5, slamPos.z - 5), 6);
+            dynamicLights?.flash(slamPos.x, 0.8, slamPos.z, 0x48cae4, 4.5, 24, 5.0);
+          } else if (bossType === 'BOSS_APOCALYPSE_LORD') {
+            particleSystem.emitExplosion(slamPos.x, 0.5, slamPos.z, 40);
+            dynamicLights?.flash(slamPos.x, 0.8, slamPos.z, 0x9d4edd, 5.0, 28, 3.0);
+          } else {
+            particleSystem.emitExplosion(slamPos.x, 0.5, slamPos.z, 30);
+            dynamicLights?.flash(slamPos.x, 0.6, slamPos.z, 0xff1100, 4.0, 20, 4.5);
+          }
+
+          audioManager.playExplosion();
+          cameraController.addTrauma(0.42);
+
+          if (playerPos.distanceTo(slamPos) < 9.5) {
+            playerCar.takeDamage(38);
+          }
+        },
+        projectileManager,
+        (pos) => {
+          // Boss Summons Minion Reinforcements
+          this.spawnZombieBatch('TANK', pos, 2, 1.2, 1.1);
+          this.spawnZombieBatch('RUNNER', pos, 3, 1.2, 1.2);
+          particleSystem.emitExplosion(pos.x, 1.0, pos.z, 20);
+        }
+      );
+
+      // Boss vs Car Solid Collision Resolution (OBB)
       const bdx = this.boss.position.x - playerPos.x;
       const bdz = this.boss.position.z - playerPos.z;
-      const bossDistSq = bdx * bdx + bdz * bdz;
+      const bLocX = -bdx * cosCar + bdz * sinCar;
+      const bLocZ = bdx * sinCar + bdz * cosCar;
 
-      if (bossDistSq < 16.0) {
+      const bossRadius = 1.75 * this.boss.config.scale;
+      const bossBoundX = carHalfWidth + bossRadius;
+      const bossBoundZ = carHalfLength + bossRadius;
+
+      if (Math.abs(bLocX) < bossBoundX && Math.abs(bLocZ) < bossBoundZ) {
+        // Push boss outside car perimeter
+        const bPenX = bossBoundX - Math.abs(bLocX);
+        const bPenZ = bossBoundZ - Math.abs(bLocZ);
+
+        let pushBLocX = bLocX;
+        let pushBLocZ = bLocZ;
+
+        if (bPenX < bPenZ) {
+          pushBLocX = (bLocX >= 0 ? 1 : -1) * bossBoundX;
+        } else {
+          pushBLocZ = (bLocZ >= 0 ? 1 : -1) * bossBoundZ;
+        }
+
+        this.boss.position.x = playerPos.x - pushBLocX * cosCar + pushBLocZ * sinCar;
+        this.boss.position.z = playerPos.z + pushBLocX * sinCar + pushBLocZ * cosCar;
+        this.boss.meshResult.root.position.copy(this.boss.position);
+
         if (carSpeed > 6.0 || isNitro) {
           const driftBonus = isDrifting ? rageMult : 1.0;
           const nitroBonus = isNitro ? 1.75 : 1.0;
@@ -416,7 +555,7 @@ export class ZombieManager {
     cameraController.addTrauma(0.4);
 
     // Massive AoE damage (180 dmg) to all zombies in 8.5m radius
-    this.damageInRadius(barrel.position, 8.5, 180, scrapManager, particleSystem);
+    this.damageInRadius(barrel.position, 8.5, 180, scrapManager, particleSystem, 'EXPLOSION');
 
     if (this.boss && !this.boss.isDead) {
       if (this.boss.position.distanceTo(barrel.position) < 10.0) {
@@ -477,7 +616,9 @@ export class ZombieManager {
   ): void {
     if (!this.boss || this.boss.isDead) return;
 
-    particleSystem.emitBloodSplatter(this.boss.position.x, this.boss.position.y + 1.2, this.boss.position.z, 16);
+    particleSystem.emitBloodBurst(this.boss.position.x, this.boss.position.y + 1.2, this.boss.position.z, 36, 1.4);
+    particleSystem.emitBloodMist(this.boss.position.x, this.boss.position.y + 1.2, this.boss.position.z, 10);
+    particleSystem.emitBloodChunks(this.boss.position.x, this.boss.position.y + 1.2, this.boss.position.z, 12);
     particleSystem.emitSparks(this.boss.position.x, this.boss.position.y + 1.0, this.boss.position.z, 10);
     dynamicLights?.flash(this.boss.position.x, this.boss.position.y + 1.0, this.boss.position.z, 0xff0044, 2.5, 12, 12.0);
     audioManager.playRamImpact(1.8);
@@ -488,10 +629,22 @@ export class ZombieManager {
       gameStore.addXp(this.boss.config.xpValue);
       scrapManager.spawnScrap(this.boss.position, 80);
       scrapManager.spawnHealthPack(this.boss.position, 40);
+      particleSystem.emitBloodBurst(this.boss.position.x, 1.5, this.boss.position.z, 64, 2.0);
+      particleSystem.emitBloodMist(this.boss.position.x, 1.5, this.boss.position.z, 20);
+      particleSystem.emitBloodChunks(this.boss.position.x, 1.5, this.boss.position.z, 24);
       particleSystem.emitExplosion(this.boss.position.x, 1.5, this.boss.position.z, 50);
       dynamicLights?.flash(this.boss.position.x, 1.5, this.boss.position.z, 0xff2200, 5.0, 24, 3.0);
       cameraController.addTrauma(0.6);
       eventBus.emit('SLOW_MO_START', { duration: 1.5, scale: 0.25 });
+
+      // Spawn massive ragdoll launch on boss defeat
+      this.ragdolls.spawnRagdoll(
+        this.boss.position,
+        this.boss.bossType,
+        new THREE.Vector3((Math.random() - 0.5) * 12, 8, (Math.random() - 0.5) * 12),
+        'EXPLOSION',
+        this.boss.config.scale
+      );
     }
   }
 
@@ -500,7 +653,8 @@ export class ZombieManager {
     radius: number,
     damage: number,
     scrapManager: ScrapManager,
-    particleSystem: ParticleSystem
+    particleSystem: ParticleSystem,
+    deathType: DeathType = 'EXPLOSION'
   ): void {
     const radSq = radius * radius;
     for (let i = 0; i < this.zombies.length; i++) {
@@ -514,12 +668,15 @@ export class ZombieManager {
         const falloff = 1 - dist / radius;
         const dmg = Math.floor(damage * (0.5 + falloff * 0.5));
         _scratchKnockback.set(
-          dist > 0.001 ? (dx / dist) * (7 * falloff) : 0,
-          2.5,
-          dist > 0.001 ? (dz / dist) * (7 * falloff) : 0
+          dist > 0.001 ? (dx / dist) * (9 * falloff) : 0,
+          3.5,
+          dist > 0.001 ? (dz / dist) * (9 * falloff) : 0
         );
+        const isToxic = z.type === 'SPITTER';
+        particleSystem.emitBloodBurst(z.position.x, z.position.y + 0.5, z.position.z, 16, 1.1, isToxic);
+        particleSystem.emitBloodMist(z.position.x, z.position.y + 0.5, z.position.z, 4, isToxic);
         if (z.takeDamage(dmg, _scratchKnockback)) {
-          this.handleZombieDeath(z, scrapManager, particleSystem);
+          this.handleZombieDeath(z, scrapManager, particleSystem, _scratchKnockback, deathType);
         }
       }
     }
@@ -528,7 +685,9 @@ export class ZombieManager {
   private handleZombieDeath(
     z: Zombie,
     scrapManager: ScrapManager,
-    particleSystem: ParticleSystem
+    particleSystem: ParticleSystem,
+    impactVel?: THREE.Vector3,
+    deathType: DeathType = 'RAM'
   ): void {
     gameStore.run.stats.zombiesKilled += 1;
     gameStore.addXp(z.config.xpValue);
@@ -543,7 +702,14 @@ export class ZombieManager {
       scrapManager.spawnHealthPack(z.position, z.type === 'TANK' ? 25 : 15);
     }
 
-    particleSystem.emitBloodSplatter(z.position.x, 0.4, z.position.z, 16);
+    // Spawn 3D Physical Ragdoll / Severed Limbs
+    const vel = impactVel || new THREE.Vector3((Math.random() - 0.5) * 8, 4, (Math.random() - 0.5) * 8);
+    this.ragdolls.spawnRagdoll(z.position, z.type, vel, deathType, z.config.scale);
+
+    const isToxic = z.type === 'SPITTER';
+    particleSystem.emitBloodBurst(z.position.x, 0.5, z.position.z, 30, 1.2, isToxic);
+    particleSystem.emitBloodMist(z.position.x, 0.5, z.position.z, 6, isToxic);
+    particleSystem.emitBloodChunks(z.position.x, 0.5, z.position.z, 8, vel);
     audioManager.playSplatter();
     eventBus.emit('ZOMBIE_KILLED', { type: z.type });
   }
@@ -557,5 +723,6 @@ export class ZombieManager {
       this.group.remove(this.boss.meshResult.root);
       this.boss = null;
     }
+    this.ragdolls.clear();
   }
 }

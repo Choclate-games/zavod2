@@ -1,7 +1,7 @@
 # AGENTS.md — инструкция для ИИ-агента
 
 Проект: **Воксельный Измельчитель ASMR 3D**
-Каталог: `C:\Users\Eduard\Desktop\zavod2\workspace\voxel-crusher-asmr-3d`
+Каталог: `C:\Users\1\Documents\Eduard\Program\zavod2\workspace\voxel-crusher-asmr-3d`
 
 Этот файл создан фабрикой и читается автоматически. Он задаёт правила работы над
 проектом. Всё, что здесь написано, обязательно к исполнению.

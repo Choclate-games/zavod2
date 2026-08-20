@@ -32,14 +32,14 @@ export class SceneManager {
     mudTrack: new THREE.MeshLambertMaterial({ color: 0x302014, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
     mudParticle: new THREE.MeshLambertMaterial({ color: 0x3b2817 }),
     water: new THREE.MeshLambertMaterial({ color: 0x3b7582, transparent: true, opacity: 0.72, depthWrite: false }),
-    waterParticle: new THREE.MeshLambertMaterial({ color: 0x82d0de, transparent: true, opacity: 0.75, depthWrite: false }),
-    waterSpray: new THREE.MeshLambertMaterial({ color: 0x9fe6f2, transparent: true, opacity: 0.65, depthWrite: false, side: THREE.DoubleSide }),
-    waterFoam: new THREE.MeshLambertMaterial({ color: 0xf4f9fb, transparent: true, opacity: 0.88, depthWrite: false }),
-    waterRipple: new THREE.MeshLambertMaterial({ color: 0xa6ebf7, transparent: true, opacity: 0.60, depthWrite: false, side: THREE.DoubleSide }),
-    waterMist: new THREE.MeshLambertMaterial({ color: 0xdaf2f7, transparent: true, opacity: 0.38, depthWrite: false }),
-    dustParticle: new THREE.MeshLambertMaterial({ color: 0xbfad93, transparent: true, opacity: 0.45, depthWrite: false }),
-    smokeParticle: new THREE.MeshLambertMaterial({ color: 0x2e2c2a, transparent: true, opacity: 0.70, depthWrite: false }),
-    smokeIdle: new THREE.MeshLambertMaterial({ color: 0xb5b2ad, transparent: true, opacity: 0.40, depthWrite: false }),
+    waterParticle: new THREE.MeshLambertMaterial({ color: 0x82d0de, transparent: true, opacity: 0.70, depthWrite: false }),
+    waterSpray: new THREE.MeshLambertMaterial({ color: 0x9fe6f2, transparent: true, opacity: 0.58, depthWrite: false, side: THREE.DoubleSide }),
+    waterFoam: new THREE.MeshLambertMaterial({ color: 0xf4f9fb, transparent: true, opacity: 0.38, depthWrite: false }),
+    waterRipple: new THREE.MeshLambertMaterial({ color: 0xa6ebf7, transparent: true, opacity: 0.50, depthWrite: false, side: THREE.DoubleSide }),
+    waterMist: new THREE.MeshLambertMaterial({ color: 0xdaf2f7, transparent: true, opacity: 0.20, depthWrite: false }),
+    dustParticle: new THREE.MeshLambertMaterial({ color: 0xbfad93, transparent: true, opacity: 0.28, depthWrite: false }),
+    smokeParticle: new THREE.MeshLambertMaterial({ color: 0x2e2c2a, transparent: true, opacity: 0.50, depthWrite: false }),
+    smokeIdle: new THREE.MeshLambertMaterial({ color: 0xb5b2ad, transparent: true, opacity: 0.20, depthWrite: false }),
     sparkParticle: new THREE.MeshBasicMaterial({ color: 0xffe066 }),
     leafGold: new THREE.MeshLambertMaterial({ color: 0xdf9b20, side: THREE.DoubleSide }),
     leafOrange: new THREE.MeshLambertMaterial({ color: 0xd95725, side: THREE.DoubleSide }),
@@ -94,13 +94,16 @@ export class SceneManager {
   private readonly cameraTarget = new THREE.Vector3();
   private readonly aim = new THREE.Vector3();
   private readonly smoothedForward = new THREE.Vector3(0, 0, 1);
+  private readonly scratchForwardXZ = new THREE.Vector3();
   private readonly sky = new THREE.Color(0x95ad9e);
   private sun: THREE.DirectionalLight | null = null;
   private garageOrbitAngle = 0;
 
   constructor() {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.shadowMap.enabled = true;
+    // PCFSoftShadowMap at 1024px gives visually acceptable soft shadows.
+    // BasicShadowMap was too pixelated/aliased for this style of game.
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setClearColor(this.sky, 1);
@@ -141,9 +144,23 @@ export class SceneManager {
   onResize = (): void => {
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);
-    this.camera.aspect = width / height;
+    const aspect = width / height;
+    this.camera.aspect = aspect;
+
+    // Dynamic FOV for portrait vs landscape:
+    // When in portrait (aspect < 1.0), expand vertical FOV to preserve horizontal field of view
+    if (aspect < 1.0) {
+      const baseFovRad = (52 * Math.PI) / 180;
+      const targetFov = 2 * Math.atan(Math.tan(baseFovRad / 2) / aspect) * (180 / Math.PI);
+      this.camera.fov = Math.max(52, Math.min(82, targetFov));
+    } else {
+      this.camera.fov = 52;
+    }
+
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // Cap at 1.0 DPR: on retina/mobile screens 1.5+ DPR doubles GPU fillrate cost
+    // with minimal visual improvement in a fast 3D game.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
     this.renderer.setSize(width, height, false);
   };
 
@@ -152,15 +169,19 @@ export class SceneManager {
    * Smoothes vehicle heading to eliminate jitter on bumps and avoids disorienting reverse yaw swings.
    */
   render(target: THREE.Vector3, forward: THREE.Vector3, speed: number): void {
-    const forwardXZ = new THREE.Vector3(forward.x, 0, forward.z);
+    const forwardXZ = this.scratchForwardXZ.set(forward.x, 0, forward.z);
     if (forwardXZ.lengthSq() < 1e-4) forwardXZ.set(0, 0, 1);
     forwardXZ.normalize();
 
     // Smooth forward heading to follow truck orientation without jarring
     this.smoothedForward.lerp(forwardXZ, 0.12).normalize();
 
-    const distance = 10.2 + Math.min(2.8, Math.max(0, speed) * 0.06);
-    const heightOffset = 4.2;
+    const isPortrait = window.innerWidth < window.innerHeight;
+    const baseDistance = isPortrait ? 11.6 : 10.2;
+    const heightOffset = isPortrait ? 5.0 : 4.2;
+    const lookHeight = isPortrait ? 1.4 : 1.2;
+
+    const distance = baseDistance + Math.min(2.8, Math.max(0, speed) * 0.06);
 
     this.cameraTarget
       .copy(target)
@@ -172,7 +193,7 @@ export class SceneManager {
     // Look directly at the truck chassis center to prevent counter-steer screen drift
     this.aim
       .copy(target)
-      .setY(target.y + 1.2);
+      .setY(target.y + lookHeight);
 
     this.lookTarget.lerp(this.aim, 0.16);
     this.camera.lookAt(this.lookTarget);
@@ -184,10 +205,11 @@ export class SceneManager {
   /** Showroom camera for the Garage */
   renderGarage(target: THREE.Vector3, dt: number): void {
     this.garageOrbitAngle += dt * 0.35;
-    const radius = 7.4;
+    const isPortrait = window.innerWidth < window.innerHeight;
+    const radius = isPortrait ? 8.6 : 7.4;
     const camX = target.x + Math.sin(this.garageOrbitAngle) * radius;
     const camZ = target.z + Math.cos(this.garageOrbitAngle) * radius;
-    const camY = target.y + 2.8;
+    const camY = target.y + (isPortrait ? 3.4 : 2.8);
 
     this.cameraTarget.set(camX, camY, camZ);
     this.camera.position.lerp(this.cameraTarget, 0.12);
@@ -201,8 +223,12 @@ export class SceneManager {
 
   resetCamera(target: THREE.Vector3): void {
     this.smoothedForward.set(0, 0, 1);
-    this.camera.position.copy(target).add(new THREE.Vector3(0, 4.2, -10.2));
-    this.lookTarget.copy(target).add(new THREE.Vector3(0, 1.2, 0));
+    const isPortrait = window.innerWidth < window.innerHeight;
+    const baseDistance = isPortrait ? 11.6 : 10.2;
+    const heightOffset = isPortrait ? 5.0 : 4.2;
+    const lookHeight = isPortrait ? 1.4 : 1.2;
+    this.camera.position.copy(target).add(new THREE.Vector3(0, heightOffset, -baseDistance));
+    this.lookTarget.copy(target).add(new THREE.Vector3(0, lookHeight, 0));
     this.camera.lookAt(this.lookTarget);
   }
 

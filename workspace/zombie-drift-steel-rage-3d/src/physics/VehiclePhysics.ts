@@ -124,10 +124,13 @@ export class VehiclePhysics {
     // Handbrake or hard cornering drift condition
     const isHandbrake = controls.handbrake;
     const speedRatio = Math.abs(forwardSpeed) / Math.max(1, stats.topSpeed);
-    const isHardTurning = Math.abs(controls.steering) > 0.55 && speedRatio > 0.4;
+    const isHardTurning = Math.abs(controls.steering) > 0.55 && speedRatio > 0.4 && forwardSpeed > 3.0;
 
     let lateralGrip = baseGrip;
-    if (isHandbrake) {
+    if (forwardSpeed < -0.2) {
+      // Stable high grip when reversing unless handbraking
+      lateralGrip = isHandbrake ? 0.6 : Math.max(baseGrip, 0.94);
+    } else if (isHandbrake) {
       lateralGrip = 0.52; // High slide
     } else if (isHardTurning) {
       lateralGrip = 0.70; // Moderate drift slide
@@ -155,17 +158,17 @@ export class VehiclePhysics {
     this.velocity.copy(_scratchForwardDir).multiplyScalar(forwardSpeed).addScaledVector(_scratchRightDir, this.lateralVelocity);
     this.speed = this.velocity.length();
 
-    // Calculate Drift Angle & Drift Multiplier
-    if (this.speed > 4.0) {
+    // Calculate Drift Angle & Drift Multiplier (ONLY during forward movement)
+    if (forwardSpeed > 3.5 && this.speed > 4.0) {
       _scratchVelNorm.copy(this.velocity).normalize();
-      const dot = Math.max(-1, Math.min(1, _scratchVelNorm.dot(_scratchForwardDir)));
-      this.driftAngle = Math.acos(dot); // 0 to PI
+      const dot = Math.max(0, Math.min(1, _scratchVelNorm.dot(_scratchForwardDir)));
+      this.driftAngle = Math.acos(dot); // 0 to PI/2
     } else {
       this.driftAngle = 0;
     }
 
     const driftThreshold = 0.25; // ~14 degrees
-    if (this.driftAngle > driftThreshold && this.speed > 6.5) {
+    if (forwardSpeed > 3.5 && this.driftAngle > driftThreshold && this.speed > 6.5) {
       this.isDrifting = true;
       this.driftDuration += dt;
 

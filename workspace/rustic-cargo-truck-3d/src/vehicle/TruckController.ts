@@ -196,11 +196,30 @@ export class TruckController {
     this.position.set(p.x, p.y, p.z);
     this.rotation.set(r.x, r.y, r.z, r.w);
     this.positionZ = p.z;
-    this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
-
     this.updateVFX(dt, controls, speed);
     this.particles.update(dt);
-    this.recoverFromRollover(body, dt);
+    if (controls.recover) {
+      this.recoverNow();
+    } else {
+      this.recoverFromRollover(body, dt);
+    }
+  }
+
+  recoverNow(): void {
+    const body = this.body;
+    if (!body) return;
+    this.upsideDownFor = 0;
+    const heading = Math.atan2(this.forward.x, this.forward.z);
+    this.physics.placeBody(
+      body,
+      new THREE.Vector3(
+        THREE.MathUtils.clamp(this.position.x, -4, 4),
+        this.road.roadHeightAt(this.position.z) + RIDE_HEIGHT + 0.45,
+        this.position.z,
+      ),
+      heading,
+    );
+    this.speed = 0;
   }
 
   /**
@@ -230,7 +249,7 @@ export class TruckController {
         for (let i = 0; i < this.wheels.length; i += 1) {
           const wCfg = this.config.wheels[i];
           const wWorld = this.localToWorld(this.scratchVec.set(wCfg.x, this.config.suspension.connectionY - this.config.wheelRadius * 0.7, wCfg.z));
-          this.particles.emitDustCloud(wWorld, this.forward, speed, Math.min(1.0, this.speed / 30));
+          this.particles.emitDustCloud(wWorld, this.forward, speed, Math.min(1.0, this.speed / 30), this.config.wheelRadius);
         }
       }
     }
@@ -323,7 +342,7 @@ export class TruckController {
           this.particles.emitMudSpray(wheelWorld, this.forward, rotDelta, mud, this.config.wheelRadius);
         }
         if (water > 0.12 && (Math.abs(speed) > 1.8 || Math.abs(rotDelta) > 3.0)) {
-          this.particles.emitWaterSplash(wheelWorld, this.forward, speed, water);
+          this.particles.emitWaterSplash(wheelWorld, this.forward, speed, water, this.config.wheelRadius);
         }
       }
     }
@@ -376,6 +395,7 @@ export class TruckController {
   render(_alpha: number): void {
     const vehicle = this.vehicle;
     if (!vehicle) return;
+    const tireUp = this.currentUpgrades.tires;
     for (let i = 0; i < this.wheels.length; i += 1) {
       const rig = this.wheels[i];
       const suspension = vehicle.wheelSuspensionLength(i) ?? this.config.suspension.restLength;
@@ -383,9 +403,15 @@ export class TruckController {
       const wheelCfg = this.config.wheels[i] || this.config.wheels[0];
       const wheelWorld = this.localToWorld(this.scratchVec2.set(wheelCfg.x, this.config.suspension.connectionY, wheelCfg.z));
       const mud = this.road.getMudIntensity(wheelWorld.x, wheelWorld.z);
-      const sink = mud * MUD.maxSinkDepth;
+      const water = this.road.getWaterIntensity(wheelWorld.x, wheelWorld.z);
+      const inContact = vehicle.wheelIsInContact(i);
 
-      rig.steer.position.y = this.config.suspension.connectionY - suspension - sink;
+      // Visual sinking of wheels down into mud/puddles:
+      const mudSink = mud * (0.22 + (this.currentMudFactor > 0.3 ? 0.08 : 0)) * (1 - tireUp * 0.12);
+      const waterSink = water * 0.16;
+      const targetSink = inContact ? Math.max(mudSink, waterSink) : 0;
+
+      rig.steer.position.y = this.config.suspension.connectionY - suspension - targetSink;
       rig.steer.rotation.y = vehicle.wheelSteering(i) ?? 0;
       rig.spin.rotation.x = vehicle.wheelRotation(i) ?? 0;
     }

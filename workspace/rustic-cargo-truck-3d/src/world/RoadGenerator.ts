@@ -28,27 +28,7 @@ export class RoadGenerator {
   mainRoadCenterX = mainRoadCenterX;
   getActiveFork = getActiveFork;
   getRoadProximity = getRoadProximity;
-
-  getDeformedHeightAt(worldX: number, worldZ: number): number {
-    if (!this.positionAttr || worldZ < TERRAIN.startZ || worldZ > TERRAIN.endZ) {
-      return heightAt(worldX, worldZ);
-    }
-    const gridX = ((worldX + TERRAIN.halfWidth) / (TERRAIN.halfWidth * 2)) * TERRAIN.segmentsX;
-    const gridZ = ((worldZ - TERRAIN.startZ) / (TERRAIN.endZ - TERRAIN.startZ)) * this.segmentsZ;
-    const ix = Math.round(gridX);
-    const iz = Math.round(gridZ);
-    if (ix < 0 || ix > TERRAIN.segmentsX || iz < 0 || iz > this.segmentsZ) {
-      return heightAt(worldX, worldZ);
-    }
-    const idx = iz * (TERRAIN.segmentsX + 1) + ix;
-    return this.positionAttr.getY(idx);
-  }
-
-  private terrainGeometry: THREE.BufferGeometry | null = null;
-  private positionAttr: THREE.BufferAttribute | null = null;
-  private colorAttr: THREE.BufferAttribute | null = null;
-  private segmentsZ = 0;
-  private modifiedVertices = false;
+  getDeformedHeightAt = heightAt;
 
   build(scene: SceneManager, physics: PhysicsWorld, level: LevelConfig = LEVELS[0]): void {
     setLevel(level);
@@ -60,10 +40,6 @@ export class RoadGenerator {
     physics.clearObstacles();
 
     const geometry = buildTerrainGeometry();
-    this.terrainGeometry = geometry;
-    this.positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
-    this.colorAttr = geometry.getAttribute('color') as THREE.BufferAttribute;
-    this.segmentsZ = Math.round((TERRAIN.endZ - TERRAIN.startZ) / TERRAIN.segmentLength);
 
     const ground = new THREE.Mesh(geometry, scene.materials.terrain);
     ground.receiveShadow = true;
@@ -83,90 +59,14 @@ export class RoadGenerator {
   }
 
   /**
-   * Real-time SnowRunner-style terrain and mud deformation under rolling and spinning wheels.
-   * - Carves continuous deep tire ruts directly under the contact patch
-   * - Pushes displaced mud outwards into raised lateral berms along the rut edges
-   * - Progressively churns deeper under wheelspin
-   * - Stains soil to dark wet peat mud in the trench and clumpy textured mud on berms
+   * Lightweight stub for road deformation (Option 1 relies on visual wheel mud sink and 3D tire tracks).
    */
-  deformRoad(worldX: number, worldZ: number, depth: number, isSpinning = false): void {
-    if (!this.positionAttr || !this.colorAttr || !this.terrainGeometry) return;
-    if (worldZ < TERRAIN.startZ || worldZ > TERRAIN.endZ) return;
-    const prox = getRoadProximity(worldX, worldZ);
-    if (prox.distToRoad > TERRAIN.roadHalfWidth + 3.0) return;
-
-    const gridX = ((worldX + TERRAIN.halfWidth) / (TERRAIN.halfWidth * 2)) * TERRAIN.segmentsX;
-    const gridZ = ((worldZ - TERRAIN.startZ) / (TERRAIN.endZ - TERRAIN.startZ)) * this.segmentsZ;
-
-    const cx = Math.round(gridX);
-    const cz = Math.round(gridZ);
-
-    if (cx < 3 || cx >= TERRAIN.segmentsX - 2 || cz < 3 || cz >= this.segmentsZ - 2) return;
-
-    const rowStride = TERRAIN.segmentsX + 1;
-    const maxRutDepth = isSpinning ? 0.38 : 0.28;
-    const effectiveDepth = Math.min(depth * (isSpinning ? 1.8 : 1.2), 0.08);
-
-    const rutRadius = 0.95;
-    const bermRadius = 2.10;
-
-    // 2D kernel over 7x7 vertex neighborhood
-    for (let dz = -3; dz <= 3; dz += 1) {
-      const iz = cz + dz;
-      if (iz < 0 || iz >= this.segmentsZ) continue;
-
-      for (let dx = -3; dx <= 3; dx += 1) {
-        const ix = cx + dx;
-        if (ix < 0 || ix >= TERRAIN.segmentsX) continue;
-
-        const idx = iz * rowStride + ix;
-        const vx = this.positionAttr.getX(idx);
-        const vz = this.positionAttr.getZ(idx);
-        const curY = this.positionAttr.getY(idx);
-        const origY = heightAt(vx, vz);
-
-        const dist = Math.sqrt((vx - worldX) * (vx - worldX) + (vz - worldZ) * (vz - worldZ));
-
-        if (dist <= rutRadius) {
-          // Central rut trough: depress soil
-          const weight = Math.cos((dist / rutRadius) * (Math.PI / 2));
-          const sink = effectiveDepth * weight;
-
-          if (curY > origY - maxRutDepth) {
-            const newY = Math.max(origY - maxRutDepth, curY - sink);
-            this.positionAttr.setY(idx, newY);
-
-            // Dark wet peat mud color
-            const mudFactor = Math.min(1.0, (origY - newY) / (maxRutDepth * 0.7));
-            const r = THREE.MathUtils.lerp(0.24, 0.10, mudFactor);
-            const g = THREE.MathUtils.lerp(0.16, 0.06, mudFactor);
-            const b = THREE.MathUtils.lerp(0.10, 0.03, mudFactor);
-            this.colorAttr.setXYZ(idx, r, g, b);
-            this.modifiedVertices = true;
-          }
-        } else if (dist <= bermRadius) {
-          // Outer perimeter berm: push displaced soil upwards
-          const bermWeight = Math.sin(((dist - rutRadius) / (bermRadius - rutRadius)) * Math.PI);
-          const rise = effectiveDepth * 0.42 * bermWeight;
-
-          if (curY < origY + 0.18) {
-            this.positionAttr.setY(idx, curY + rise);
-            // Clumpy textured mud color
-            this.colorAttr.setXYZ(idx, 0.30, 0.20, 0.12);
-            this.modifiedVertices = true;
-          }
-        }
-      }
-    }
+  deformRoad(_worldX: number, _worldZ: number, _depth: number, _isSpinning = false): void {
+    // Zero CPU overhead
   }
 
   flushDeformations(): void {
-    if (this.modifiedVertices && this.positionAttr && this.colorAttr && this.terrainGeometry) {
-      this.positionAttr.needsUpdate = true;
-      this.colorAttr.needsUpdate = true;
-      this.terrainGeometry.computeVertexNormals();
-      this.modifiedVertices = false;
-    }
+    // Zero CPU overhead
   }
 
   private buildForest(scene: SceneManager, physics: PhysicsWorld, level: LevelConfig): void {

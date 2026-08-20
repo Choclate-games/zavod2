@@ -18,10 +18,10 @@
     "archived_at": ""
   },
   "izometricheskiy-stels-ekshen-pixi-js-per": {
-    "rating": 0,
-    "archived": false,
+    "rating": 3,
+    "archived": true,
     "created_at": "2026-08-20T13:38:24",
-    "archived_at": ""
+    "archived_at": "2026-08-20T14:40:51"
   },
   "atmosfernuyu-3d-stels-three-js-vidom-3d": {
     "rating": 0,
@@ -42,7 +42,7 @@
     "archived_at": "2026-08-20T13:40:22"
   },
   "rustic-cargo-truck-3d": {
-    "rating": 0,
+    "rating": 5,
     "archived": false,
     "created_at": "2026-08-19T14:50:19",
     "archived_at": ""
@@ -72,16 +72,16 @@
     "archived_at": ""
   },
   "cyber-slice-bullet-protocol-3d": {
-    "rating": 0,
-    "archived": false,
+    "rating": 1,
+    "archived": true,
     "created_at": "2026-08-19T14:50:19",
-    "archived_at": ""
+    "archived_at": "2026-08-20T14:39:13"
   },
   "merge-turret-defense-3d": {
     "rating": 0,
-    "archived": false,
+    "archived": true,
     "created_at": "2026-08-19T14:50:19",
-    "archived_at": ""
+    "archived_at": "2026-08-20T14:39:32"
   },
   "ricochet-bullet-slowmo-3d": {
     "rating": 0,
@@ -96,7 +96,7 @@
     "archived_at": ""
   },
   "voxel-crusher-asmr-3d": {
-    "rating": 0,
+    "rating": 5,
     "archived": false,
     "created_at": "2026-08-19T14:50:19",
     "archived_at": ""
