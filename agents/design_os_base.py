@@ -10,7 +10,7 @@ from typing import Any, Optional, Type, TypeVar
 from pydantic import BaseModel
 
 from app.context import GenerationContext
-from app.logging import log_agent
+from app.logging import log_agent, log_warning
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -52,7 +52,13 @@ def ask_model(
     try:
         result = provider.generate_structured(system_prompt, user_prompt, response_model)
     except Exception as exc:  # провайдер может быть недоступен — это не повод падать
-        log_agent(agent_name, f"AI-обогащение недоступно ({exc}); используется локальная эвристика")
+        # Видимое предупреждение, а не строчка в общем потоке: без ответа модели
+        # агент отдаёт нейтральную заготовку, и это надо заметить в логе, а не
+        # обнаружить потом в документах.
+        log_warning(
+            f"[{agent_name}] Модель не ответила ({exc}). "
+            f"Раздел собран локальной эвристикой — перезапустите его при рабочем провайдере."
+        )
         return None
     if is_empty(result):
         return None

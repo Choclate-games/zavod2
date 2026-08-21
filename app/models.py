@@ -7,7 +7,7 @@ class BaseSafeModel(BaseModel):
 class GameScores(BaseSafeModel):
     fun: int = Field(default=8, ge=1, le=10, description="Immediate entertainment value and satisfying core game feel")
     originality: int = Field(default=8, ge=1, le=10, description="Uniqueness of mechanics, theme, and twist")
-    replayability: int = Field(default=9, ge=1, le=10, description="Depth of roguelite build variance and progression")
+    replayability: int = Field(default=9, ge=1, le=10, description="Depth of variety and reasons to start again")
     development_cost: int = Field(default=6, ge=1, le=10, description="Feasibility score (higher = easier to build within browser budget)")
     visual_appeal: int = Field(default=8, ge=1, le=10, description="Readability and spectacle of physics, VFX, and camera")
     mobile_fit: int = Field(default=9, ge=1, le=10, description="Ergonomics of touch controls and portrait/landscape adaptation")
@@ -372,6 +372,64 @@ class HumanGate(BaseSafeModel):
     decided_at: str = Field(default="")
     note: str = Field(default="")
 
+# ---------------------------------------------------------------------------
+# Направление проекта и план знаний.
+#
+# Оба артефакта решают одну болезнь: раньше «что это за игра» и «какие
+# документы базы знаний нужны» решались зашитыми умолчаниями, поэтому любая
+# идея сползала к одной и той же арене с волнами и тремя картами апгрейда.
+# Теперь и то и другое — решение модели, записанное в спецификацию вместе с
+# обоснованием и списком осознанно отвергнутых вариантов.
+# ---------------------------------------------------------------------------
+
+class DirectionOption(BaseSafeModel):
+    """Один вариант того, чем проект может стать. Варианты обязаны отличаться
+    глаголом игрока и формой сессии, а не декорациями."""
+    id: str = Field(default="", description="Короткий идентификатор варианта, напр. D1")
+    name: str = Field(default="", description="Название направления на русском")
+    pitch: str = Field(default="", description="Одна фраза: во что играет игрок")
+    core_verb: str = Field(default="", description="Главный глагол игрока: рулить, резать, прятаться, чинить")
+    genre_family: str = Field(default="", description="Жанровое семейство направления")
+    session_shape: str = Field(default="", description="Форма сессии: забег, уровень, смена, партия, бесконечный поток")
+    camera: str = Field(default="", description="Камера и ракурс, вытекающие из глагола игрока")
+    control_scheme: str = Field(default="", description="Схема управления на телефоне и на клавиатуре")
+    world: str = Field(default="", description="Мир, материал, эпоха, палитра")
+    spectacle: str = Field(default="", description="Что видно на скриншоте за 1 секунду")
+    why_not_generic: str = Field(default="", description="Чем это направление не сводится к шаблону жанра")
+    biggest_risk: str = Field(default="", description="Главный риск направления")
+    production_cost: str = Field(default="", description="Оценка объёма работ: низкий/средний/высокий и почему")
+    knowledge_hints: List[str] = Field(default_factory=list, description="Пути документов knowledge/, которые понадобятся")
+
+class ProjectDirection(BaseSafeModel):
+    """Решение о том, каким проектом станет идея, вместе с отвергнутыми вариантами."""
+    options: List[DirectionOption] = Field(default_factory=list)
+    selected_id: str = Field(default="")
+    selected_name: str = Field(default="")
+    selection_reason: str = Field(default="", description="Почему выбран именно этот вариант")
+    rejected_reasons: List[str] = Field(default_factory=list, description="Почему отвергнуты остальные варианты")
+    what_it_is_not: List[str] = Field(default_factory=list, description="Шаблоны и клише, запрещённые в этом проекте")
+    non_negotiables: List[str] = Field(default_factory=list, description="Без чего направление перестаёт существовать")
+    signature_scene: str = Field(default="", description="Сцена, по которой игру узнают")
+    avoid_references: List[str] = Field(default_factory=list, description="Игры, повторять которые нельзя")
+
+class KnowledgeSelection(BaseSafeModel):
+    """Один выбранный документ базы знаний с обоснованием."""
+    path: str = Field(default="", description="Путь относительно knowledge/")
+    role: str = Field(default="core", description="core | supporting")
+    reason: str = Field(default="", description="Зачем этот документ именно этой игре")
+
+class KnowledgePlan(BaseSafeModel):
+    """Какие документы базы знаний получает проект и почему."""
+    selections: List[KnowledgeSelection] = Field(default_factory=list)
+    rejected: List[str] = Field(default_factory=list, description="Документы, осознанно НЕ включённые")
+    rejection_reason: str = Field(default="", description="Почему они не нужны этой игре")
+    loop_pattern: str = Field(default="", description="Выбранный архетип петли из knowledge/patterns")
+    summary: str = Field(default="", description="Одна фраза: на какой набор знаний опирается проект")
+
+    def paths(self, role: str = "") -> List[str]:
+        """Пути выбранных документов, при необходимости отфильтрованные по роли."""
+        return [s.path for s in self.selections if not role or s.role == role]
+
 class GameConcept(BaseSafeModel):
     raw_prompt: str = Field(default="")
     title: str = Field(default="")
@@ -387,7 +445,9 @@ class GameConcept(BaseSafeModel):
     core_loop: str = Field(default="")
     hook: str = Field(default="")
     player_fantasy: str = Field(default="")
-    session_model: str = Field(default="5-10 minute roguelite arena runs with persistent meta-progression")
+    # Умолчание намеренно пустое: зашитая «5-10 минутная roguelite-арена» тянула
+    # каждый проект к одному и тому же формату сессии ещё до первого решения.
+    session_model: str = Field(default="", description="Форма сессии именно этой игры")
     unique_value_proposition: str = Field(default="")
     vision: str = Field(default="")
     elevator_pitch: str = Field(default="")
@@ -415,6 +475,9 @@ class GameConcept(BaseSafeModel):
     preview_image_path: Optional[str] = Field(default="preview/concept_preview.png")
     preview_status: str = Field(default="pending")
     definition_of_done: List[str] = Field(default_factory=list)
+    # --- Решение о направлении проекта и составе базы знаний ---
+    direction: ProjectDirection = Field(default_factory=ProjectDirection)
+    knowledge_plan: KnowledgePlan = Field(default_factory=KnowledgePlan)
     # --- Design OS layer (проверяемые решения поверх спецификации) ---
     player_promise: PlayerPromiseContract = Field(default_factory=PlayerPromiseContract)
     design_nucleus: List[DesignNucleusOption] = Field(default_factory=list)

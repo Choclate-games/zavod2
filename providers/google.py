@@ -4,13 +4,19 @@ from typing import Any, Dict, Optional, Type
 import requests
 
 from providers.base import AIProvider, T
-from providers.local import LocalAIProvider
+
+# Локальной подмены ответа здесь больше нет.
+#
+# Раньше любая ошибка (нет ключа, сеть, невалидный JSON) молча возвращала
+# концепт, собранный локальным шаблонным генератором. Отличить такой пакет
+# документов от настоящей работы модели невозможно, и фабрика выпускала
+# одинаковые ТЗ, считая их результатом генерации. Теперь ошибка остаётся
+# ошибкой: её видно в логе, и генерация останавливается.
 
 class GoogleProvider(AIProvider):
     def __init__(self, api_key: Optional[str] = None, model: str = "gemini-1.5-pro"):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
         self.model = model
-        self.fallback = LocalAIProvider()
 
     def generate_text(
         self,
@@ -20,7 +26,7 @@ class GoogleProvider(AIProvider):
         max_tokens: int = 4096
     ) -> str:
         if not self.api_key:
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+            raise RuntimeError("Google Gemini: не задан GEMINI_API_KEY.")
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         payload = {
@@ -36,9 +42,8 @@ class GoogleProvider(AIProvider):
             resp.raise_for_status()
             data = resp.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            print(f"Google Gemini API call failed ({e}), falling back to Local Expert...")
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+        except Exception as exc:
+            raise RuntimeError(f"Google Gemini: запрос не удался — {exc}") from exc
 
     def generate_structured(
         self,
@@ -48,7 +53,7 @@ class GoogleProvider(AIProvider):
         temperature: float = 0.5
     ) -> T:
         if not self.api_key:
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+            raise RuntimeError("Google Gemini: не задан GEMINI_API_KEY.")
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         schema = response_model.model_json_schema()
@@ -68,6 +73,7 @@ class GoogleProvider(AIProvider):
             text = data["candidates"][0]["content"]["parts"][0]["text"]
             parsed = json.loads(text)
             return response_model.model_validate(parsed)
-        except Exception as e:
-            print(f"Google Gemini structured call failed ({e}), falling back to Local Expert...")
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Google Gemini: ответ не разобрался как {response_model.__name__} — {exc}"
+            ) from exc

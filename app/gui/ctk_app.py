@@ -29,10 +29,12 @@ from app.gui.chat_terminal import ChatTerminal
 # from providers.opencode import OpenCodeProvider
 from providers.base import NoneImageProvider
 from validators.output_validator import OutputValidator
+from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
 from agents.game_designer import GameDesignerAgent
 from agents.reference_analyst import ReferenceAnalystAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
+from agents.knowledge_curator import KnowledgeCuratorAgent
 from agents.renderer_selector import RendererSelectorAgent
 from agents.technical_architect import TechnicalArchitectAgent
 from agents.playgama_specialist import PlaygamaSpecialistAgent
@@ -1397,6 +1399,13 @@ class GamePromptFactoryGUI(ctk.CTk):
                     image_provider=ProviderFactory.get_image_provider(img_provider)
                 )
 
+                # 0. Project Director — направление проекта и запрет жанровых шаблонов.
+                if self.agy_stop_requested: return
+                self._update_progress(6, "0/14 Project Director: Направление проекта...")
+                ProjectDirectorAgent().run(ctx)
+                if ctx.direction and ctx.direction.selected_name:
+                    self._append_studio_log_raw(f"🎯 Направление: {ctx.direction.selected_name}")
+
                 # 1. Idea Analyzer
                 if self.agy_stop_requested: return
                 self._update_progress(10, "1/14 Idea Analyzer: Анализ идеи и столпов игры...")
@@ -1417,6 +1426,14 @@ class GamePromptFactoryGUI(ctk.CTk):
                 if self.agy_stop_requested: return
                 self._update_progress(34, "4/14 Mechanics Architect: Балансировка систем и физики...")
                 MechanicsArchitectAgent().run(ctx)
+
+                # 4b. Knowledge Curator — состав базы знаний под этот проект.
+                if self.agy_stop_requested: return
+                self._update_progress(38, "4b/14 Knowledge Curator: Подбор документов базы знаний...")
+                KnowledgeCuratorAgent().run(ctx)
+                self._append_studio_log_raw(
+                    f"📚 База знаний: {len(ctx.concept.knowledge_plan.selections)} документов под проект"
+                )
 
                 # 5. Renderer Selector
                 if self.agy_stop_requested: return
@@ -1567,8 +1584,11 @@ class GamePromptFactoryGUI(ctk.CTk):
             image_provider=ProviderFactory.get_image_provider(img_provider)
         )
 
-        # 1-13 Standard multi-agent steps
-        self._update_progress(12, f"{tag}1/13 Idea Analyzer: Анализ идеи...")
+        # Полная последовательность агентов спецификации
+        self._update_progress(8, f"{tag}Project Director: Направление проекта...")
+        ProjectDirectorAgent().run(ctx)
+
+        self._update_progress(14, f"{tag}Idea Analyzer: Анализ идеи...")
         IdeaAnalyzerAgent().run(ctx)
         self._append_studio_log_raw(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
 
@@ -1581,7 +1601,10 @@ class GamePromptFactoryGUI(ctk.CTk):
         self._update_progress(42, f"{tag}4/13 Mechanics Architect: Механики...")
         MechanicsArchitectAgent().run(ctx)
 
-        self._update_progress(52, f"{tag}5/13 Renderer Selector: Выбор движка...")
+        self._update_progress(48, f"{tag}Knowledge Curator: Подбор документов базы знаний...")
+        KnowledgeCuratorAgent().run(ctx)
+
+        self._update_progress(52, f"{tag}Renderer Selector: Выбор движка...")
         RendererSelectorAgent().run(ctx)
 
         self._update_progress(62, f"{tag}6/13 Technical Architect: Архитектура...")

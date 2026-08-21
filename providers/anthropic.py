@@ -4,13 +4,19 @@ from typing import Any, Dict, Optional, Type
 import requests
 
 from providers.base import AIProvider, T
-from providers.local import LocalAIProvider
+
+# Локальной подмены ответа здесь больше нет.
+#
+# Раньше любая ошибка (нет ключа, сеть, невалидный JSON) молча возвращала
+# концепт, собранный локальным шаблонным генератором. Отличить такой пакет
+# документов от настоящей работы модели невозможно, и фабрика выпускала
+# одинаковые ТЗ, считая их результатом генерации. Теперь ошибка остаётся
+# ошибкой: её видно в логе, и генерация останавливается.
 
 class AnthropicProvider(AIProvider):
     def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-5-sonnet-20241022"):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
         self.model = model
-        self.fallback = LocalAIProvider()
 
     def generate_text(
         self,
@@ -20,7 +26,7 @@ class AnthropicProvider(AIProvider):
         max_tokens: int = 4096
     ) -> str:
         if not self.api_key:
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+            raise RuntimeError("Anthropic: не задан ANTHROPIC_API_KEY.")
         
         headers = {
             "x-api-key": self.api_key,
@@ -39,9 +45,8 @@ class AnthropicProvider(AIProvider):
             resp.raise_for_status()
             data = resp.json()
             return data["content"][0]["text"]
-        except Exception as e:
-            print(f"Anthropic API call failed ({e}), falling back to Local Expert...")
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+        except Exception as exc:
+            raise RuntimeError(f"Anthropic: запрос не удался — {exc}") from exc
 
     def generate_structured(
         self,
@@ -51,7 +56,7 @@ class AnthropicProvider(AIProvider):
         temperature: float = 0.5
     ) -> T:
         if not self.api_key:
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+            raise RuntimeError("Anthropic: не задан ANTHROPIC_API_KEY.")
         
         # Use Claude tools/structured output or text prompt with json markdown block
         prompt_with_schema = (
@@ -68,6 +73,7 @@ class AnthropicProvider(AIProvider):
                 cleaned = cleaned.split("```")[1].split("```")[0].strip()
             parsed = json.loads(cleaned)
             return response_model.model_validate(parsed)
-        except Exception as e:
-            print(f"Failed to parse Claude structured response ({e}), falling back to Local Expert...")
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Anthropic: ответ не разобрался как {response_model.__name__} — {exc}"
+            ) from exc

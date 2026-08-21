@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from app.models import GameConcept, GenerationMetadata
+from app.models import GameConcept, GenerationMetadata, ProjectDirection
 from providers.base import AIProvider, ImageProvider
 
 @dataclass
@@ -18,6 +18,9 @@ class GenerationContext:
     ai_provider: Optional[AIProvider] = None
     image_provider: Optional[ImageProvider] = None
     
+    # Направление проекта выбирается до появления концепции (ProjectDirectorAgent),
+    # поэтому живёт в контексте, а не только внутри GameConcept.
+    direction: Optional[ProjectDirection] = None
     concept: Optional[GameConcept] = None
     metadata: Optional[GenerationMetadata] = None
     

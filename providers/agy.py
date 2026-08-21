@@ -5,13 +5,14 @@ import re
 import math
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type, Callable
 from PIL import Image, ImageDraw
 
 from providers.base import AIProvider, ImageProvider, NoneImageProvider, T
-from providers.local import LocalAIProvider, LocalImageProvider
+from providers.local import LocalImageProvider
 
 class AGYQuotaTracker:
     """
@@ -290,7 +291,6 @@ class AGYProvider(AIProvider):
         # Блокирующий прогон живёт столько же, сколько сам агент: обрывать его
         # раньше --print-timeout нельзя, иначе задача умрёт на середине.
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else self._blocking_timeout()
-        self.fallback = LocalAIProvider()
         self.quota_tracker = AGYQuotaTracker()
 
     def resolve_cli(self) -> Optional[str]:
@@ -312,16 +312,51 @@ class AGYProvider(AIProvider):
         """Проверка доступности исполняемого файла agy."""
         return self.resolve_cli() is not None
 
+    # Промпт никогда не уходит в командную строку целиком: Windows обрывает
+    # CreateProcess на ~32 767 символах, а одна только JSON-схема GameConcept
+    # весит 57 КБ. Раньше это молча роняло структурную генерацию в локальный
+    # шаблон — и любая идея превращалась в одну и ту же арену. Теперь промпт
+    # лежит в файле, а в командной строке остаётся ссылка на него.
+    _PROMPT_FILE_INSTRUCTION = (
+        "Твоя задача целиком записана в файле {path} (кодировка UTF-8). "
+        "Прочитай его полностью и выполни ровно то, что в нём написано. "
+        "Файл — это и есть инструкция; пересказывать или комментировать сам файл не нужно."
+    )
+
+    @staticmethod
+    def _stage_prompt(prompt: str, schema_json: Optional[str] = None) -> tuple[str, Path, Optional[Path]]:
+        """Кладёт промпт (и схему) во временный каталог.
+
+        Возвращает короткий текст для `-p`, путь к каталогу (его нужно удалить
+        после запуска) и путь к файлу схемы, если она передана."""
+        tmpdir = Path(tempfile.mkdtemp(prefix="zavod_agy_"))
+        prompt_file = tmpdir / "TASK.md"
+        prompt_file.write_text(prompt, encoding="utf-8")
+        schema_file = None
+        if schema_json:
+            schema_file = tmpdir / "schema.json"
+            schema_file.write_text(schema_json, encoding="utf-8")
+        instruction = AGYProvider._PROMPT_FILE_INSTRUCTION.format(path=prompt_file)
+        return instruction, tmpdir, schema_file
+
     def _build_command(
         self,
         prompt: str,
         output_format: str = "text",
         yolo: Optional[bool] = None,
         with_effort: bool = True,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        extra_dir: Optional[Path] = None,
+        schema_file: Optional[Path] = None
     ) -> list[str]:
         use_yolo = self.yolo if yolo is None else yolo
         cmd = [self.resolve_cli() or self.cli_path, "-p", prompt, "--output-format", output_format]
+        if extra_dir:
+            # Каталог с файлом задачи должен быть в рабочем пространстве агента,
+            # иначе он не сможет его прочитать.
+            cmd.extend(["--add-dir", str(extra_dir)])
+        if schema_file:
+            cmd.extend(["--json-schema", str(schema_file)])
         # Продолжение беседы на стороне CLI: агент видит собственный прошлый
         # контекст целиком, а не пересказ из GUI.
         if conversation_id:
@@ -522,7 +557,14 @@ class AGYProvider(AIProvider):
             return None
         return self.event_to_text(event)
 
-    def _run_agy(self, prompt: str, output_format: str = "text", yolo: Optional[bool] = None, cwd: Optional[Path] = None) -> str:
+    def _run_agy(
+        self,
+        prompt: str,
+        output_format: str = "text",
+        yolo: Optional[bool] = None,
+        cwd: Optional[Path] = None,
+        schema_json: Optional[str] = None,
+    ) -> str:
         if not self.is_available():
             raise RuntimeError(f"Исполняемый файл Antigravity CLI '{self.cli_path}' не найден в PATH.")
 
@@ -530,10 +572,12 @@ class AGYProvider(AIProvider):
         env["PYTHONIOENCODING"] = "utf-8"
 
         work_dir = str(Path(cwd).resolve()) if cwd and Path(cwd).is_dir() else None
+        instruction, tmpdir, schema_file = self._stage_prompt(prompt, schema_json)
 
         def attempt(with_effort: bool):
             cmd = self._build_command(
-                prompt, output_format=output_format, yolo=yolo, with_effort=with_effort
+                instruction, output_format=output_format, yolo=yolo, with_effort=with_effort,
+                extra_dir=tmpdir, schema_file=schema_file
             )
             try:
                 return subprocess.run(
@@ -549,11 +593,14 @@ class AGYProvider(AIProvider):
             except OSError as exc:
                 raise RuntimeError(f"Не удалось запустить AGY CLI '{cmd[0]}': {exc}") from exc
 
-        result = attempt(with_effort=True)
+        try:
+            result = attempt(with_effort=True)
 
-        # AGY отклоняет --effort для моделей, которые его не поддерживают — повторяем без него
-        if result.returncode != 0 and self._is_effort_rejection(f"{result.stdout}\n{result.stderr}"):
-            result = attempt(with_effort=False)
+            # AGY отклоняет --effort для моделей, которые его не поддерживают — повторяем без него
+            if result.returncode != 0 and self._is_effort_rejection(f"{result.stdout}\n{result.stderr}"):
+                result = attempt(with_effort=False)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
 
@@ -646,11 +693,16 @@ class AGYProvider(AIProvider):
                 if on_conversation_id:
                     on_conversation_id(str(found))
 
+        # Мастер-промпт кодового агента — это сотня килобайт текста, в командную
+        # строку он не помещается. Он тоже уходит файлом.
+        staged_instruction, staged_dir, _ = self._stage_prompt(prompt)
+
         def attempt(with_effort: bool) -> tuple[int, str, bool, bool]:
             """Один прогон CLI. Возвращает (код, вывод, остановлен, отклонён_effort)."""
             cmd = self._build_command(
-                prompt, output_format="stream-json", yolo=yolo,
-                with_effort=with_effort, conversation_id=conversation_id
+                staged_instruction, output_format="stream-json", yolo=yolo,
+                with_effort=with_effort, conversation_id=conversation_id,
+                extra_dir=staged_dir
             )
             cmd[0] = cli
             shown_cmd = " ".join(
@@ -760,12 +812,15 @@ class AGYProvider(AIProvider):
 
             return proc.returncode, raw, stopped, False
 
-        code, raw, stopped, effort_rejected = attempt(with_effort=True)
+        try:
+            code, raw, stopped, effort_rejected = attempt(with_effort=True)
 
-        if effort_rejected and not stopped:
-            emit({"kind": "system", "icon": "♻️",
-                  "text": f"Модель не поддерживает --effort «{self.effort}» — повторяю запуск без него."})
-            code, raw, stopped, _ = attempt(with_effort=False)
+            if effort_rejected and not stopped:
+                emit({"kind": "system", "icon": "♻️",
+                      "text": f"Модель не поддерживает --effort «{self.effort}» — повторяю запуск без него."})
+                code, raw, stopped, _ = attempt(with_effort=False)
+        finally:
+            shutil.rmtree(staged_dir, ignore_errors=True)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
         return code, raw
@@ -864,11 +919,10 @@ class AGYProvider(AIProvider):
             f"[TASK / USER REQUEST]\n{user_prompt}\n\n"
             f"Please provide a comprehensive and detailed response in RUSSIAN."
         )
-        try:
-            return self._run_agy(combined_prompt, output_format="text")
-        except Exception as e:
-            print(f"[AGYProvider] Execution error ({e}), falling back to Local Expert...")
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+        # Молчаливой подмены локальным шаблоном больше нет: сгенерированный
+        # шаблон невозможно отличить от настоящего ответа модели, и фабрика
+        # месяцами выпускала одинаковые ТЗ, считая их работой модели.
+        return self._run_agy(combined_prompt, output_format="text")
 
     def generate_structured(
         self,
@@ -889,16 +943,61 @@ class AGYProvider(AIProvider):
             f"JSON Schema:\n{schema_str}\n"
         )
 
-        try:
-            raw_output = self._run_agy(combined_prompt, output_format="text")
-            extracted_json = self._extract_json_string(raw_output)
-            parsed_data = json.loads(extracted_json)
-            return response_model.model_validate(parsed_data)
-        except Exception as e:
-            print(f"[AGYProvider] Structured generation error ({e}), falling back to Local Expert...")
-            return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
+        # Схема уходит и в промпт, и в --json-schema: CLI включает структурный
+        # режим по флагу, а копия в тексте страхует, если модель проигнорирует
+        # структурный вывод и ответит обычным JSON.
+        raw_output = self._run_agy(
+            combined_prompt, output_format="json", schema_json=schema_str
+        )
+        return self._parse_structured(raw_output, response_model)
 
-    def _extract_json_string(self, text: str) -> str:
+    @classmethod
+    def _parse_structured(cls, raw_output: str, response_model: Type[T]) -> T:
+        """Разбирает конверт `--output-format json` и достаёт из него объект.
+
+        Порядок важен: сначала `structured_output` (его CLI строит по схеме),
+        затем JSON внутри текстового ответа. Если не разобралось — это ошибка,
+        а не повод подсунуть шаблон."""
+        envelope: Any = None
+        try:
+            envelope = json.loads(raw_output)
+        except ValueError:
+            envelope = None
+
+        candidates: List[Any] = []
+        if isinstance(envelope, dict):
+            if isinstance(envelope.get("structured_output"), dict):
+                candidates.append(envelope["structured_output"])
+            response_text = envelope.get("response")
+            if isinstance(response_text, str):
+                candidates.append(cls._extract_json_string(response_text))
+            status = str(envelope.get("status") or "").upper()
+            if status and status != "SUCCESS" and not candidates:
+                raise RuntimeError(f"AGY CLI вернул статус {status}: {str(envelope)[:400]}")
+        else:
+            candidates.append(cls._extract_json_string(raw_output))
+
+        errors: List[str] = []
+        for candidate in candidates:
+            data = candidate
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError as exc:
+                    errors.append(str(exc))
+                    continue
+            try:
+                return response_model.model_validate(data)
+            except Exception as exc:  # ответ не подошёл под схему
+                errors.append(str(exc))
+
+        raise RuntimeError(
+            f"AGY CLI вернул ответ, который не разбирается как {response_model.__name__}: "
+            + ("; ".join(errors)[:500] or raw_output[:300])
+        )
+
+    @staticmethod
+    def _extract_json_string(text: str) -> str:
         """Extracts JSON substring from possible markdown wrappers or surrounding text."""
         text = text.strip()
         match = re.search(r"```(?:json)?\s*(\{.*\}|\[.*\])\s*```", text, re.DOTALL)

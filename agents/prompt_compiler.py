@@ -86,6 +86,78 @@ class PromptCompilerAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _knowledge_block(concept) -> str:
+        """Документы базы знаний, отобранные под этот проект, с обоснованием."""
+        plan = concept.knowledge_plan
+        mandatory = "\n".join(f"- `knowledge/{rel}`" for rel in knowledge.MANDATORY_TOPICS)
+        if not plan.selections:
+            return (
+                "Куратор знаний не отработал на этом прогоне — доступна вся база:\n\n"
+                + "\n".join(f"- `knowledge/{rel}`" for rel in knowledge.list_topics())
+            )
+
+        core = "\n".join(
+            f"- `knowledge/{s.path}` — {s.reason}" for s in plan.selections if s.role == "core"
+        ) or "- (ядро не выделено)"
+        supporting = "\n".join(
+            f"- `knowledge/{s.path}` — {s.reason}" for s in plan.selections if s.role != "core"
+        )
+        parts = [
+            f"Набор отобран под этот проект: {plan.summary or 'см. PROJECT_KNOWLEDGE_SKILL.md'}",
+            f"**Ядро — прочитать до начала реализации:**\n{core}",
+        ]
+        if supporting:
+            parts.append(f"**Вспомогательные:**\n{supporting}")
+        if plan.loop_pattern:
+            parts.append(f"**Архетип петли проекта**: `knowledge/{plan.loop_pattern}`")
+        parts.append(f"**Платформенные требования (обязательны всегда):**\n{mandatory}")
+        if plan.rejected:
+            rejected = ", ".join(f"`{r}`" for r in plan.rejected)
+            parts.append(
+                f"**Осознанно НЕ включены**: {rejected}. {plan.rejection_reason}\n"
+                "Не подтягивай решения из этих документов — они про другую игру."
+            )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _direction_section(concept) -> str:
+        """Рамка проекта в мастер-промпте: направление и список запретов.
+
+        Кодовый агент по умолчанию достраивает недостающее самым типичным для
+        жанра образом — так в игру про доставку приезжают волны врагов. Явный
+        список «чем игра не является» — единственное, что это надёжно
+        останавливает, поэтому он стоит в начале промпта, а не в приложении."""
+        direction = concept.direction
+        if not (direction.selected_name or direction.what_it_is_not):
+            return ""
+        parts = ["\n---\n\n## 1b. РАМКА ПРОЕКТА: ЧТО ЭТО ЗА ИГРА И ЧЕМ ОНА НЕ ЯВЛЯЕТСЯ\n"]
+        if direction.selected_name:
+            parts.append(f"**Направление**: {direction.selected_name}")
+        if direction.selection_reason:
+            parts.append(f"**Почему выбрано именно оно**: {direction.selection_reason}")
+        if direction.signature_scene:
+            parts.append(f"**Узнаваемая сцена**: {direction.signature_scene}")
+        if direction.non_negotiables:
+            parts.append(
+                "**Без чего проект перестаёт быть собой** (реализовать обязательно):\n"
+                + "\n".join(f"- {item}" for item in direction.non_negotiables)
+            )
+        if direction.what_it_is_not:
+            parts.append(
+                "**ЗАПРЕЩЕНО ВВОДИТЬ** — даже если спецификация где-то умалчивает "
+                "и даже если «так принято в жанре»:\n"
+                + "\n".join(f"- {item}" for item in direction.what_it_is_not)
+                + "\n\nЕсли по ходу реализации кажется, что без запрещённого элемента игра "
+                "не работает — это находка для `DEVLOG.md`, а не разрешение его добавить."
+            )
+        if direction.rejected_reasons:
+            parts.append(
+                "**Рассмотренные и отклонённые направления** (не возвращай их через механики):\n"
+                + "\n".join(f"- {item}" for item in direction.rejected_reasons)
+            )
+        return "\n\n".join(parts) + "\n"
+
+    @staticmethod
     def _promise_block(concept) -> str:
         p = concept.player_promise
         layers = [
@@ -370,10 +442,16 @@ class PromptCompilerAgent:
         desktop_controls = self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
         log_agent("PromptCompiler", f"Control profile: {profile}")
 
+        direction_section = self._direction_section(concept)
+
         critical_rules = knowledge.critical_rules(heading_offset=1)
         if not critical_rules:
             log_agent("PromptCompiler", "WARNING: knowledge/CRITICAL_RULES.md missing — prompt will omit platform rules")
-        knowledge_index = "\n".join(f"- `knowledge/{rel}`" for rel in knowledge.list_topics())
+        # Индекс знаний в промпте — это не библиотека «на всякий случай», а список
+        # того, что кодовый агент обязан прочитать. Полный дамп базы тянул в игру
+        # чужой жанр: документы про орду и карточки апгрейда лежали ровно там же,
+        # где нужные. Здесь остаётся только выбор куратора знаний.
+        knowledge_index = self._knowledge_block(concept)
 
         roadmap_items = "\n".join([
             f"### Phase {phase.phase_number}: {phase.title} ({phase.duration_days} days)\n"
@@ -431,6 +509,7 @@ class PromptCompilerAgent:
 - **Core Hook**: {concept.hook}
 - **Session Model**: {concept.session_model}
 
+{direction_section}
 {promise_section}
 ---
 

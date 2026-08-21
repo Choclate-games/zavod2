@@ -6,11 +6,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from app.context import GenerationContext
 from app.logging import console, log_info, log_success, log_error
 from providers.factory import ProviderFactory
+from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
 from agents.concept_architect import ConceptArchitectAgent
 from agents.game_designer import GameDesignerAgent
 from agents.reference_analyst import ReferenceAnalystAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
+from agents.knowledge_curator import KnowledgeCuratorAgent
 from agents.renderer_selector import RendererSelectorAgent
 from agents.technical_architect import TechnicalArchitectAgent
 from agents.playgama_specialist import PlaygamaSpecialistAgent
@@ -70,6 +72,13 @@ class Pipeline:
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
+            # 0. Project Director — решает, чем станет идея, до написания ТЗ.
+            # Без этого шага IdeaAnalyzer сам выбирал жанр и стабильно приходил
+            # к арене с волнами: это самый вероятный ответ на любой запрос.
+            t0 = progress.add_task("[magenta]Project Director: Направления проекта и запрет шаблонов...", total=1)
+            ProjectDirectorAgent().run(ctx)
+            progress.update(t0, completed=1)
+
             # 1. Idea Analyzer
             t1 = progress.add_task("[magenta]Idea Analyzer: Deconstructing concept and pillars...", total=1)
             IdeaAnalyzerAgent().run(ctx)
@@ -96,6 +105,12 @@ class Pipeline:
             t4 = progress.add_task("[magenta]Mechanics Architect: Designing formulas, input, and feedback...", total=1)
             MechanicsArchitectAgent().run(ctx)
             progress.update(t4, completed=1)
+
+            # 4b. Knowledge Curator — выбирает документы базы знаний под проект.
+            # Раньше каждому проекту доставались все документы threejs и stack.
+            t4b = progress.add_task("[magenta]Knowledge Curator: Подбор документов базы знаний...", total=1)
+            KnowledgeCuratorAgent().run(ctx)
+            progress.update(t4b, completed=1)
 
             # 5. Renderer Selector
             t5 = progress.add_task("[magenta]Renderer Selector: Configuring Three.js stack...", total=1)
@@ -238,6 +253,23 @@ class Pipeline:
             with open(game_dir / "PROGRESSION.md", "w", encoding="utf-8") as f:
                 f.write(self.doc_gen._gen_progression(ctx).strip())
             log_success("Updated GAMEPLAY_SPECIFICATION.md, MECHANICS.md, CORE_LOOP.md, PROGRESSION.md")
+        elif sec in ["references", "refs"]:
+            ReferenceAnalystAgent().run(ctx)
+            with open(game_dir / "REFERENCE_ANALYSIS.md", "w", encoding="utf-8") as f:
+                f.write(self.doc_gen._gen_references(ctx).strip())
+            log_success("Updated REFERENCE_ANALYSIS.md")
+        elif sec in ["ux", "ui", "hud"]:
+            UXDesignerAgent().run(ctx)
+            with open(game_dir / "UI_UX_SPECIFICATION.md", "w", encoding="utf-8") as f:
+                f.write(self.doc_gen._gen_ui_ux(ctx).strip())
+            log_success("Updated UI_UX_SPECIFICATION.md")
+        elif sec in ["knowledge", "docs-selection", "knowledge-plan"]:
+            # Пересобирается вместе со скиллами: состав знаний виден проекту
+            # только через сгенерированные скиллы.
+            KnowledgeCuratorAgent().run(ctx)
+            SkillGeneratorAgent().run(ctx)
+            self.skill_gen.generate(ctx)
+            log_success("Обновлён план знаний и skills/")
         elif sec in ["playgama", "bridge"]:
             PlaygamaSpecialistAgent().run(ctx)
             with open(game_dir / "PLAYGAMA_INTEGRATION.md", "w", encoding="utf-8") as f:
@@ -261,7 +293,7 @@ class Pipeline:
         else:
             log_error(
                 f"Unknown section '{section}'. Available: monetization, architecture, preview, "
-                "skills, gameplay, playgama, design-os"
+                "skills, gameplay, references, ux, knowledge, playgama, design-os"
             )
             return
 

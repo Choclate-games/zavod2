@@ -1,3 +1,4 @@
+from app import anticliche
 from app.context import GenerationContext
 from app.logging import log_agent, log_warning, log_success
 
@@ -35,22 +36,31 @@ class SelfCritiqueAgent:
         # 3. Check Definition of Done
         if not concept.definition_of_done or len(concept.definition_of_done) < 5:
             issues_found.append("Definition of Done was incomplete.")
-            concept.definition_of_done = [
-                "Project builds cleanly with zero TypeScript errors (`npm run build`).",
-                "Playgama Bridge initializes and dispatches GAME_READY platform message.",
-                "Core gameplay loop (Move, Attack, Parry, Waves, Upgrades) is 100% playable.",
-                "Mobile virtual controls respond without touch delay or scrolling glitches.",
-                "Rewarded Ads (Revive, 2x Gold) and Interstitial Ads (90s cooldown) function properly.",
-                "Audio and physics automatically pause/resume on tab blur and ad display.",
-                "Persistent progress saves and loads from Playgama Cloud Storage.",
-                "Runs at steady 60 FPS on desktop and >= 50 FPS on mobile."
-            ]
-            corrections.append("Synthesized complete 8-point Definition of Done checklist.")
+            concept.definition_of_done = self._definition_of_done(concept)
+            corrections.append("Synthesized Definition of Done from this game's own loop and mechanics.")
 
         # 4. Check Mobile ergonomics
         if not concept.mobile.safe_area_handling:
             concept.mobile.safe_area_handling = "CSS env(safe-area-inset-*) padding applied to HUD root."
             corrections.append("Added safe area inset handling to mobile specification.")
+
+        # 5. Жанровые клише в спецификации.
+        # Ловим шаблон, протёкший в текст: он попадёт в мастер-промпт как
+        # требование, и кодовый агент построит чужую игру, а не эту.
+        leaked = anticliche.scan(concept.model_dump_json(), ctx.raw_prompt)
+        banned = [b for b in concept.direction.what_it_is_not if b]
+        if leaked:
+            issues_found.extend(
+                f"Жанровое клише в спецификации: {name}" for name in leaked
+            )
+            log_warning(
+                "Критик нашёл шаблоны, которых пользователь не просил: "
+                + "; ".join(leaked)
+                + ". Проверьте MECHANICS.md и UI_UX_SPECIFICATION.md — "
+                "их стоит пересобрать (`rebuild gameplay`, `rebuild ux`)."
+            )
+        elif banned:
+            log_success(f"Клише не найдено: соблюдены все {len(banned)} запретов направления проекта.")
 
         if issues_found:
             for issue in issues_found:
@@ -59,3 +69,30 @@ class SelfCritiqueAgent:
                 log_success(f"Critic auto-corrected: {corr}")
         else:
             log_success("Self-critique passed: 0 critical inconsistencies detected.")
+
+    @staticmethod
+    def _definition_of_done(concept) -> list:
+        """Критерии готовности этой игры.
+
+        Прежний список требовал «Move, Attack, Parry, Waves, Upgrades» и
+        награду «Revive, 2x Gold» — то есть приёмку боевого рогалика для любого
+        проекта. Теперь геймплейные пункты берутся из петли и механик игры,
+        а платформенные остаются общими: они и правда одинаковы для всех."""
+        loop = concept.core_loop or "основная петля игры"
+        mechanics = ", ".join(m.name for m in concept.mechanics[:4]) or "механики из MECHANICS.md"
+        rewarded = ", ".join(
+            r.name for r in concept.monetization.rewarded_placements[:3]
+        ) or "rewarded-награды из MONETIZATION.md"
+        return [
+            "Project builds cleanly with zero TypeScript errors (`npm run build`).",
+            "Playgama Bridge initializes and dispatches GAME_READY platform message.",
+            f"Петля играбельна целиком: {loop}.",
+            f"Реализованы механики проекта: {mechanics}.",
+            f"Условие успеха ({concept.win_conditions or 'см. GAME_DESIGN_DOCUMENT.md'}) "
+            f"и условие проигрыша ({concept.lose_conditions or 'см. GAME_DESIGN_DOCUMENT.md'}) работают.",
+            "Тач-управление отвечает без задержки, страница под игрой не скроллится.",
+            f"Rewarded-реклама выдаёт награду ровно один раз ({rewarded}); interstitial соблюдает паузу 90 с.",
+            "Audio and physics automatically pause/resume on tab blur and ad display.",
+            "Persistent progress saves and loads from Playgama Cloud Storage.",
+            "Runs at steady 60 FPS on desktop and >= 50 FPS on mobile.",
+        ]

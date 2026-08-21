@@ -126,3 +126,84 @@ def stack_topics() -> List[str]:
     renderer topics so the coding agent never re-implements what the stack solves —
     see `knowledge/stack/README.md` §1."""
     return list_topics("stack")
+
+
+# ---------------------------------------------------------------------------
+# Индекс базы знаний для ИИ-выбора.
+#
+# Раньше набор документов был зашит: каждому проекту доставались ВСЕ файлы
+# knowledge/threejs и knowledge/stack. Гонка получала документ про орду и
+# карточки апгрейда, кулинария — про парирование, и кодовый агент собирал из
+# этой смеси одну и ту же игру. Теперь состав документов выбирает модель —
+# по индексу «путь + о чём файл», а не по подстроке в жанре.
+# ---------------------------------------------------------------------------
+
+# Документы, которые не выбираются: это требования площадок, а не творческое
+# решение. Всё остальное проект получает только если куратор их выбрал.
+MANDATORY_TOPICS: List[str] = list(CORE_TOPICS)
+
+# Папки, из которых куратор набирает документы под конкретный проект.
+CURATED_FOLDERS: List[str] = ["threejs", "mechanics", "patterns", "stack", "ux", "audio", "monetization"]
+
+_SUMMARY_LIMIT = 220
+
+
+def describe(rel_path: str) -> str:
+    """Однострочное описание документа: заголовок + первая содержательная строка.
+
+    Нужно, чтобы модель выбирала документы по смыслу, а не по имени файла."""
+    body = read(rel_path)
+    if not body:
+        return ""
+    title = ""
+    summary = ""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            if not title:
+                title = stripped.lstrip("#").strip()
+            continue
+        if stripped.startswith(("```", "|", ">", "---")):
+            continue
+        summary = stripped.lstrip("-*").strip()
+        break
+    text = f"{title} — {summary}" if title and summary else (title or summary)
+    return text[:_SUMMARY_LIMIT].strip()
+
+
+def index(folders: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """Индекс базы знаний: путь и о чём документ. Основа выбора куратора."""
+    folders = folders if folders is not None else CURATED_FOLDERS
+    entries: List[Dict[str, str]] = []
+    for folder in folders:
+        for rel in list_topics(folder):
+            entries.append({"path": rel, "about": describe(rel)})
+    return entries
+
+
+def index_markdown(folders: Optional[List[str]] = None) -> str:
+    """Индекс в виде списка для промпта куратора знаний."""
+    return "\n".join(f"- `{e['path']}` — {e['about']}" for e in index(folders) if e["about"])
+
+
+def resolve(rel_paths: List[str]) -> List[str]:
+    """Оставляет только реально существующие документы, без дублей и в исходном порядке.
+
+    Модель регулярно придумывает правдоподобные, но несуществующие пути
+    (`threejs/cooking_core.md`). Такой путь обязан исчезнуть здесь, а не превратиться
+    в пустой раздел сгенерированного скилла."""
+    seen = set()
+    result: List[str] = []
+    for rel in rel_paths:
+        clean = (rel or "").strip().strip("`").replace("\\", "/")
+        if clean.startswith("knowledge/"):
+            clean = clean[len("knowledge/"):]
+        if not clean or clean in seen:
+            continue
+        if not (KNOWLEDGE_DIR / clean).is_file():
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result

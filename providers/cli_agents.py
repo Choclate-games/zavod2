@@ -43,6 +43,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 from pathlib import Path
@@ -124,6 +125,28 @@ class CodingCLIAgent(AIProvider):
         self.fallback = LocalAIProvider()
         # Расход считаем сами: у этих CLI нет машинного отчёта об остатке квоты.
         self.usage_tracker = AgentUsageTracker()
+
+    # ── Передача промпта ────────────────────────────────────────────────
+    #
+    # Промпт никогда не уходит в командную строку целиком: Windows обрывает
+    # CreateProcess примерно на 32 767 символах, а мастер-промпт и JSON-схема
+    # концепта весят намного больше. Раньше это приводило к WinError 206 и
+    # тихому откату на локальный шаблон. Промпт кладётся в файл, в аргументах
+    # остаётся только просьба его прочитать.
+
+    PROMPT_FILE_INSTRUCTION = (
+        "Твоя задача целиком записана в файле {path} (кодировка UTF-8). "
+        "Прочитай его полностью и выполни ровно то, что в нём написано. "
+        "Файл — это и есть инструкция; пересказывать сам файл не нужно."
+    )
+
+    @classmethod
+    def stage_prompt(cls, prompt: str) -> tuple[str, Path]:
+        """Кладёт промпт во временный файл. Возвращает короткую инструкцию и каталог."""
+        tmpdir = Path(tempfile.mkdtemp(prefix="zavod_cli_"))
+        task_file = tmpdir / "TASK.md"
+        task_file.write_text(prompt, encoding="utf-8")
+        return cls.PROMPT_FILE_INSTRUCTION.format(path=task_file), tmpdir
 
     # ── Поиск исполняемого файла ─────────────────────────────────────────
 
@@ -350,7 +373,9 @@ class CodingCLIAgent(AIProvider):
         if conversation_id and not self.supports_resume:
             conversation_id = None
 
-        cmd = self.build_stream_command(prompt, conversation_id)
+        # Мастер-промпт кодового агента — сотня килобайт: он уходит файлом.
+        staged_instruction, staged_dir = self.stage_prompt(prompt)
+        cmd = self.build_stream_command(staged_instruction, conversation_id)
         cmd[0] = cli
         shown_cmd = " ".join(
             [self.key] + [f"<промпт {len(prompt)} симв.>" if arg is prompt else str(arg) for arg in cmd[1:]]
@@ -463,6 +488,7 @@ class CodingCLIAgent(AIProvider):
                 emit(event)
 
         self.usage_tracker.add_tokens(usage_key, spent_tokens)
+        shutil.rmtree(staged_dir, ignore_errors=True)
 
         if proc.returncode not in (0, None) and not stopped and not hung and not reported_error:
             tail = "".join(collected).strip()
@@ -486,7 +512,8 @@ class CodingCLIAgent(AIProvider):
         if not cli:
             raise RuntimeError(f"{self.title}: исполняемый файл '{self.cli_path}' не найден в PATH.")
 
-        cmd = self.build_plain_command(prompt)
+        instruction, staged_dir = self.stage_prompt(prompt)
+        cmd = self.build_plain_command(instruction)
         cmd[0] = cli
         env = self.prepare_env(os.environ.copy())
         env["PYTHONIOENCODING"] = "utf-8"
@@ -505,6 +532,7 @@ class CodingCLIAgent(AIProvider):
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ('{cmd[0]}'): {exc}") from exc
         finally:
+            shutil.rmtree(staged_dir, ignore_errors=True)
             self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
 
         if result.returncode != 0:
@@ -617,11 +645,10 @@ class CodingCLIAgent(AIProvider):
             f"[TASK / USER REQUEST]\n{user_prompt}\n\n"
             f"Please provide a comprehensive and detailed response in RUSSIAN."
         )
-        try:
-            return self.run_once(combined)
-        except Exception as exc:
-            print(f"[{self.title}] Ошибка выполнения ({exc}), переключаюсь на локального эксперта…")
-            return self.fallback.generate_text(system_prompt, user_prompt, temperature, max_tokens)
+        # Подмены ответа локальным шаблоном больше нет: шаблон невозможно
+        # отличить от настоящего ответа модели, и фабрика выпускала одинаковые
+        # ТЗ, считая их работой модели.
+        return self.run_once(combined)
 
     def generate_structured(
         self,
@@ -640,10 +667,8 @@ class CodingCLIAgent(AIProvider):
             f"JSON Schema:\n{schema_str}\n"
         )
         # Одна повторная попытка: срыв JSON у терминального агента — частая
-        # случайность, а откат на локальный шаблон стоит дорого. Локальный
-        # эксперт собирает концепт по шаблону, и пакет документов может выйти
-        # не про выбранную идею — поэтому падение оформлено как предупреждение,
-        # видимое в логе студии, а не как тихий print.
+        # случайность. Если и она не помогла — это ошибка генерации, а не повод
+        # собрать концепт по локальному шаблону.
         last_error: Optional[Exception] = None
         for attempt in (1, 2):
             prompt = combined if attempt == 1 else (
@@ -657,12 +682,11 @@ class CodingCLIAgent(AIProvider):
                 last_error = exc
                 if attempt == 1:
                     log_warning(f"[{self.title}] Структурированный вывод не разобрался ({exc}); повторяю запрос.")
-        log_warning(
-            f"[{self.title}] Модель не вернула валидный JSON ({last_error}). "
-            f"Беру локальный шаблон — документы могут не соответствовать выбранной идее. "
-            f"Проверьте {response_model.__name__} в результате или перезапустите генерацию."
+        raise RuntimeError(
+            f"{self.title}: модель не вернула валидный JSON для {response_model.__name__} "
+            f"после двух попыток ({last_error}). Генерация остановлена — "
+            f"пакет документов по шаблону хуже, чем честная ошибка."
         )
-        return self.fallback.generate_structured(system_prompt, user_prompt, response_model, temperature)
 
 
 def _extract_json_string(text: str) -> str:

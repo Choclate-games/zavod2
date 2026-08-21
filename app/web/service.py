@@ -48,9 +48,11 @@ from validators.output_validator import OutputValidator
 from agents.art_director import ArtDirectorAgent
 from agents.critic import SelfCritiqueAgent
 from agents.game_designer import GameDesignerAgent
+from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
 from agents.idea_brainstormer import IdeaBrainstormerAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
+from agents.knowledge_curator import KnowledgeCuratorAgent
 from agents.monetization_designer import MonetizationDesignerAgent
 from agents.playgama_specialist import PlaygamaSpecialistAgent
 from agents.preview_designer import PreviewDesignerAgent
@@ -333,7 +335,7 @@ class FactoryService:
 
     def run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
                           mode: str, image_provider: str, label: str = "") -> Path:
-        """Полный прогон 13 агентов спецификации (синхронно, в рабочем потоке)."""
+        """Полный прогон агентов спецификации (синхронно, в рабочем потоке)."""
         tag = f"{label} " if label else ""
         self.update_progress(5, f"{tag}Инициализация контекста генерации...")
         self.append_log(
@@ -343,46 +345,62 @@ class FactoryService:
 
         ctx = self._make_context(prompt, renderer, provider, mode, image_provider)
 
-        self.update_progress(12, f"{tag}1/13 Idea Analyzer: Анализ идеи...")
+        self.update_progress(8, f"{tag}1/15 Project Director: Направление проекта...")
+        ProjectDirectorAgent().run(ctx)
+        if ctx.direction and ctx.direction.selected_name:
+            self.append_log(
+                f"{tag}Направление: {ctx.direction.selected_name} "
+                f"(вариантов рассмотрено: {len(ctx.direction.options)})"
+            )
+
+        self.update_progress(14, f"{tag}2/15 Idea Analyzer: Анализ идеи...")
         IdeaAnalyzerAgent().run(ctx)
         self.append_log(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
 
-        self.update_progress(22, f"{tag}2/13 Game Designer: Core loop...")
+        self.update_progress(22, f"{tag}3/15 Game Designer: Core loop...")
         GameDesignerAgent().run(ctx)
 
-        self.update_progress(32, f"{tag}3/13 Reference Analyst: Референсы...")
+        self.update_progress(32, f"{tag}4/15 Reference Analyst: Референсы...")
         ReferenceAnalystAgent().run(ctx)
 
-        self.update_progress(42, f"{tag}4/13 Mechanics Architect: Механики...")
+        self.update_progress(42, f"{tag}5/15 Mechanics Architect: Механики...")
         MechanicsArchitectAgent().run(ctx)
 
-        self.update_progress(52, f"{tag}5/13 Renderer Selector: Выбор движка...")
+        self.update_progress(48, f"{tag}6/15 Knowledge Curator: Подбор документов базы знаний...")
+        KnowledgeCuratorAgent().run(ctx)
+        plan = ctx.concept.knowledge_plan
+        self.append_log(
+            f"{tag}База знаний: выбрано {len(plan.selections)} документов"
+            + (f" | архетип петли: {plan.loop_pattern}" if plan.loop_pattern else "")
+        )
+
+        self.update_progress(54, f"{tag}7/15 Renderer Selector: Выбор движка...")
         RendererSelectorAgent().run(ctx)
 
-        self.update_progress(62, f"{tag}6/13 Technical Architect: Архитектура...")
+        self.update_progress(62, f"{tag}8/15 Technical Architect: Архитектура...")
         TechnicalArchitectAgent().run(ctx)
 
-        self.update_progress(70, f"{tag}7/13 Playgama Specialist: Bridge SDK...")
+        self.update_progress(70, f"{tag}9/15 Playgama Specialist: Bridge SDK...")
         PlaygamaSpecialistAgent().run(ctx)
 
-        self.update_progress(78, f"{tag}8/13 Monetization Designer: Экономика...")
+        self.update_progress(78, f"{tag}10/15 Monetization Designer: Экономика...")
         MonetizationDesignerAgent().run(ctx)
 
-        self.update_progress(84, f"{tag}9/13 Art & UX: Визуал и интерфейс...")
+        self.update_progress(84, f"{tag}11/15 Art & UX: Визуал и интерфейс...")
         ArtDirectorAgent().run(ctx)
         UXDesignerAgent().run(ctx)
 
-        self.update_progress(89, f"{tag}10/13 Preview Designer: Концепт-арт...")
+        self.update_progress(89, f"{tag}12/15 Preview Designer: Концепт-арт...")
         PreviewDesignerAgent().run(ctx)
 
-        self.update_progress(93, f"{tag}11/13 Skill Generator: Скиллы...")
+        self.update_progress(93, f"{tag}13/15 Skill Generator: Скиллы...")
         SkillGeneratorAgent().run(ctx)
         SelfCritiqueAgent().run(ctx)
 
-        self.update_progress(97, f"{tag}12/13 Output Generator: Запись файлов...")
+        self.update_progress(97, f"{tag}14/15 Output Generator: Запись файлов...")
         game_dir = OutputGenerator().generate_package(ctx)
 
-        self.update_progress(99, f"{tag}13/13 Validator: Валидация...")
+        self.update_progress(99, f"{tag}15/15 Validator: Валидация...")
         OutputValidator().run_all(game_dir)
 
         sandbox.ensure_project_docs(game_dir, ctx.concept.title)

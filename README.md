@@ -9,11 +9,13 @@
 ## 🚀 Возможности
 
 - **Полный ролевой Pipeline агентов**:
-  - `IdeaAnalyzer` — деконструкция идеи, определение жанра, fantasy, hook, ЦА.
+  - `ProjectDirector` — разводит идею на 3 разных направления (разный глагол игрока, форма сессии и камера), выбирает одно с обоснованием и фиксирует, **чем проект НЕ является** (`PROJECT_DIRECTION.md`).
+  - `IdeaAnalyzer` — деконструкция идеи внутри выбранного направления: жанр, fantasy, hook, ЦА.
   - `GameDesigner` — core loop, win/lose, сессионная модель, прогрессия.
   - `ReferenceAnalyst` — подбор и деконструкция паттернов из базы референсов.
   - `MechanicsArchitect` — проектирование механик с физикой, инпутом, фидбеком и edge-кейсами.
-  - `RendererSelector` — обоснованный выбор **Three.js** или **PixiJS** + физического движка.
+  - `KnowledgeCurator` — подбирает документы `knowledge/` под конкретный проект (а не выдаёт всю базу каждому) и объясняет, что осознанно не взял.
+  - `RendererSelector` — конфигурация стека **Three.js** + Rapier3D под жанр.
   - `TechnicalArchitect` — модульная TypeScript/Vite архитектура, системы, зависимости.
   - `PlaygamaSpecialist` — полноценная интеграция Playgama Bridge (Ads, Storage, Cloud, Leaderboards, Lifecycle).
   - `MonetizationDesigner` — баланс Rewarded видео, Interstitials, IAP и экономика.

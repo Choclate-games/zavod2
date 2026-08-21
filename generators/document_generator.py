@@ -13,6 +13,7 @@ class DocumentGenerator:
         log_agent("DocumentGenerator", f"Rendering full specification suite in {ctx.game_dir}")
         generators: Dict[str, Callable[[GenerationContext], str]] = {
             "README.md": self._gen_readme,
+            "PROJECT_DIRECTION.md": self._gen_direction,
             "GAME_DESIGN_DOCUMENT.md": self._gen_gdd,
             "GAMEPLAY_SPECIFICATION.md": self._gen_gameplay,
             "CORE_LOOP.md": self._gen_core_loop,
@@ -49,6 +50,89 @@ class DocumentGenerator:
             ctx.generated_files.append(file_path)
 
         log_success(f"Successfully rendered {len(generators)} specification documents.")
+
+    def _gen_direction(self, ctx: GenerationContext) -> str:
+        """Решение о том, чем стал проект, и какие знания он получил.
+
+        Документ существует, чтобы решение было видно человеку: раньше выбор
+        направления не принимался вовсе, а состав базы знаний был зашит в код,
+        и проверить, почему игра вышла похожей на предыдущую, было негде."""
+        c = ctx.concept
+        d = c.direction
+        plan = c.knowledge_plan
+
+        options = "\n\n".join(
+            f"### {o.id or '—'}. {o.name}"
+            f"\n- **Питч**: {o.pitch}"
+            f"\n- **Глагол игрока**: {o.core_verb}"
+            f"\n- **Форма сессии**: {o.session_shape}"
+            f"\n- **Камера**: {o.camera}"
+            f"\n- **Управление**: {o.control_scheme}"
+            f"\n- **Мир**: {o.world}"
+            f"\n- **Чем не сводится к шаблону**: {o.why_not_generic}"
+            f"\n- **Главный риск**: {o.biggest_risk}"
+            f"\n- **Объём работ**: {o.production_cost}"
+            + (f"\n- **Выбрано**: да" if o.id == d.selected_id else "")
+            for o in d.options
+        ) or "_Варианты не сформированы: ИИ-провайдер был недоступен на этом прогоне._"
+
+        bans = "\n".join(f"- {item}" for item in d.what_it_is_not) or "- (запреты не заданы)"
+        musts = "\n".join(f"- {item}" for item in d.non_negotiables) or "- (не задано)"
+        rejected = "\n".join(f"- {item}" for item in d.rejected_reasons) or "- (не задано)"
+
+        knowledge_rows = "\n".join(
+            f"| `{sel.path}` | {sel.role} | {sel.reason} |" for sel in plan.selections
+        ) or "| — | — | план знаний не сформирован |"
+        not_included = ", ".join(f"`{r}`" for r in plan.rejected) or "—"
+
+        return f"""# Направление проекта: {c.title}
+
+> Этот документ фиксирует, ЧЕМ проект решено сделать и чем он сознательно НЕ является.
+> Все остальные документы спецификации написаны внутри этой рамки.
+
+---
+
+## 1. Выбранное направление
+
+- **Направление**: {d.selected_name or '—'}
+- **Почему именно оно**: {d.selection_reason or '—'}
+- **Узнаваемая сцена**: {d.signature_scene or '—'}
+
+### Без чего проект перестаёт быть собой
+{musts}
+
+### Чем этот проект НЕ является
+{bans}
+
+Запреты действуют на всю разработку: если поле спецификации где-то умалчивает,
+недостающее достраивается в духе направления, а не в духе жанрового шаблона.
+
+---
+
+## 2. Рассмотренные направления
+
+{options}
+
+### Почему отвергнуты остальные
+{rejected}
+
+---
+
+## 3. Знания, отобранные под проект
+
+{plan.summary or '_Сводка не задана._'}
+
+| Документ | Роль | Зачем этой игре |
+| --- | --- | --- |
+{knowledge_rows}
+
+- **Архетип петли**: {f'`{plan.loop_pattern}`' if plan.loop_pattern else 'собственная петля, архетип не подошёл'}
+- **Осознанно не включены**: {not_included}
+- **Почему**: {plan.rejection_reason or '—'}
+
+Платформенные документы (Playgama Bridge, модерация, локализация, тач-управление)
+подключаются всегда и в выбор не входят.
+"""
 
     def _gen_readme(self, ctx: GenerationContext) -> str:
         c = ctx.concept

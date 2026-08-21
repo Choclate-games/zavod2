@@ -1,3 +1,5 @@
+from typing import List, Sequence
+
 from app import knowledge
 from app.context import GenerationContext
 from app.models import SkillDoc
@@ -103,10 +105,7 @@ class SkillGeneratorAgent:
                     "Shadow map renders crisp without artifact acne.",
                     "The quality auto-tuner converges and locks instead of oscillating."
                 ],
-                knowledge_refs=[
-                    *knowledge.topics_for_renderer(),
-                    "audio/procedural_sound_synthesizer.md",
-                ]
+                knowledge_refs=self._renderer_refs(ctx)
             ))
 
         if "stack_skill" not in skill_ids:
@@ -141,7 +140,7 @@ class SkillGeneratorAgent:
                     "The frame order matches knowledge/stack/README.md section 2.",
                     "Every stack library used is pinned to the version in knowledge/stack/README.md.",
                 ],
-                knowledge_refs=knowledge.stack_topics(),
+                knowledge_refs=self._stack_refs(ctx),
             ))
 
         if "playgama_skill" not in skill_ids:
@@ -243,7 +242,7 @@ class SkillGeneratorAgent:
         haystack = self._concept_haystack(ctx)
 
         # 1. FPS / Шуттеры
-        if "fps_skill" not in skill_ids and any(w in haystack for w in ("fps", "шуттер", "стрельб", "пул", "винтовк", "пистолет", "револьвер", "shooter", "gun")):
+        if "fps_skill" not in skill_ids and self._gate(ctx, ("threejs/fps_controller_and_shooting.md", "threejs/shooter_enemy_ai_and_combat.md", "mechanics/cover_and_suppression.md"), ("fps", "шуттер", "стрельб", "пул", "винтовк", "пистолет", "револьвер", "shooter", "gun")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: fps_skill")
             concept.skills.append(SkillDoc(
                 skill_id="fps_skill",
@@ -273,7 +272,14 @@ class SkillGeneratorAgent:
             ))
 
         # 2. Гонки и дрифт
-        if "vehicle_skill" not in skill_ids and self._is_driving_game(ctx):
+        if "vehicle_skill" not in skill_ids and self._gate(
+            ctx,
+            ("threejs/rapier_vehicle_controller.md", "threejs/arcade_racing_and_drift.md",
+             "threejs/vehicle_wheel_rig.md", "threejs/racing_track_and_opponents.md",
+             "mechanics/vehicle_physics.md", "mechanics/drift_scoring.md",
+             "mechanics/checkpoint_lap_racing.md", "patterns/racing_event_loop.md"),
+            self._DRIVING_WORDS,
+        ):
             log_agent("SkillGenerator", "Injecting core skill: vehicle_skill")
             concept.skills.append(SkillDoc(
                 skill_id="vehicle_skill",
@@ -306,7 +312,7 @@ class SkillGeneratorAgent:
             ))
 
         # 3. Слэшеры, комбо и парирование
-        if "melee_skill" not in skill_ids and any(w in haystack for w in ("слэшер", "меч", "комбо", "парир", "удар", "рубк", "slash", "sword", "melee", "combat")):
+        if "melee_skill" not in skill_ids and self._gate(ctx, ("threejs/melee_combat_and_ragdoll.md", "threejs/fighting_game_core.md", "mechanics/parry.md", "mechanics/ragdoll.md", "mechanics/frame_data_combat.md", "mechanics/juggle_combo.md"), ("слэшер", "меч", "комбо", "парир", "удар", "рубк", "slash", "sword", "melee", "combat")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: melee_skill")
             concept.skills.append(SkillDoc(
                 skill_id="melee_skill",
@@ -345,7 +351,7 @@ class SkillGeneratorAgent:
             ))
 
         # 3b. Орда, авто-атака и карточки апгрейдов (survivor)
-        if "survivor_skill" not in skill_ids and any(w in haystack for w in ("орда", "рой", "выживан", "волн", "апгрейд", "карточк", "survivor", "horde", "swarm", "roguelite", "wave")):
+        if "survivor_skill" not in skill_ids and self._gate(ctx, ("threejs/horde_survivor_core.md", "mechanics/wave_survival.md", "mechanics/upgrade_choices.md", "patterns/survivor_loop.md"), ("орда", "рой", "выживан", "волн", "апгрейд", "карточк", "survivor", "horde", "swarm", "roguelite", "wave")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: survivor_skill")
             concept.skills.append(SkillDoc(
                 skill_id="survivor_skill",
@@ -383,7 +389,7 @@ class SkillGeneratorAgent:
             ))
 
         # 4. 2D Рисование путей
-        if "path_drawing_skill" not in skill_ids and any(w in haystack for w in ("траектор", "путь", "рисова", "улитк", "мурав", "draw", "path", "spline")):
+        if "path_drawing_skill" not in skill_ids and self._gate(ctx, (), ("траектор", "путь", "рисова", "улитк", "мурав", "draw", "path", "spline")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: path_drawing_skill")
             concept.skills.append(SkillDoc(
                 skill_id="path_drawing_skill",
@@ -409,7 +415,7 @@ class SkillGeneratorAgent:
             ))
 
         # 5. Детективная доска и Drag & Drop
-        if "detective_skill" not in skill_ids and any(w in haystack for w in ("детектив", "улик", "доск", "нит", "clue", "evidence", "detective", "board")):
+        if "detective_skill" not in skill_ids and self._gate(ctx, ("mechanics/evidence_board.md",), ("детектив", "улик", "доск", "нит", "clue", "evidence", "detective", "board")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: detective_skill")
             concept.skills.append(SkillDoc(
                 skill_id="detective_skill",
@@ -434,7 +440,7 @@ class SkillGeneratorAgent:
                 ]
             ))
 
-        if "stealth_skill" not in skill_ids and any(w in haystack for w in ("стелс", "stealth", "шум", "прят", "взор", "тихая")):
+        if "stealth_skill" not in skill_ids and self._gate(ctx, ("mechanics/stealth_detection.md", "threejs/stealth_and_vision_cones.md"), ("стелс", "stealth", "шум", "прят", "взор", "тихая")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: stealth_skill")
             concept.skills.append(SkillDoc(
                 skill_id="stealth_skill",
@@ -460,7 +466,7 @@ class SkillGeneratorAgent:
                 knowledge_refs=["mechanics/stealth_detection.md"]
             ))
 
-        if "cooking_skill" not in skill_ids and any(w in haystack for w in ("кухн", "повар", "готов", "кафе", "ресторан", "пекарн", "еда", "лапш")):
+        if "cooking_skill" not in skill_ids and self._gate(ctx, ("mechanics/cooking_flow.md",), ("кухн", "повар", "готов", "кафе", "ресторан", "пекарн", "еда", "лапш")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: cooking_skill")
             concept.skills.append(SkillDoc(
                 skill_id="cooking_skill",
@@ -484,7 +490,7 @@ class SkillGeneratorAgent:
                 knowledge_refs=["mechanics/cooking_flow.md"]
             ))
 
-        if "rhythm_skill" not in skill_ids and any(w in haystack for w in ("ритм", "rhythm", "музык", "оркестр", "барабан", "дирижер", "нот")):
+        if "rhythm_skill" not in skill_ids and self._gate(ctx, ("mechanics/rhythm_sync.md",), ("ритм", "rhythm", "музык", "оркестр", "барабан", "дирижер", "нот")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: rhythm_skill")
             concept.skills.append(SkillDoc(
                 skill_id="rhythm_skill",
@@ -508,7 +514,7 @@ class SkillGeneratorAgent:
                 knowledge_refs=["mechanics/rhythm_sync.md"]
             ))
 
-        if "mining_skill" not in skill_ids and any(w in haystack for w in ("шахт", "бур", "копа", "бурен", "майнинг", "miner", "drill", "руда")):
+        if "mining_skill" not in skill_ids and self._gate(ctx, ("mechanics/mining_drill.md",), ("шахт", "бур", "копа", "бурен", "майнинг", "miner", "drill", "руда")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: mining_skill")
             concept.skills.append(SkillDoc(
                 skill_id="mining_skill",
@@ -532,7 +538,7 @@ class SkillGeneratorAgent:
                 knowledge_refs=["mechanics/mining_drill.md"]
             ))
 
-        if "building_skill" not in skill_ids and any(w in haystack for w in ("строит", "базостро", "сетка", "building", "баз", "турел", "конвейер")):
+        if "building_skill" not in skill_ids and self._gate(ctx, ("mechanics/grid_building.md", "mechanics/base_building.md", "threejs/tower_defense_core.md", "mechanics/tower_targeting_priority.md", "patterns/tower_defense_loop.md", "patterns/builder_defense_loop.md"), ("строит", "базостро", "сетка", "building", "баз", "турел", "конвейер")):
             log_agent("SkillGenerator", "Injecting specialized mechanic skill: building_skill")
             concept.skills.append(SkillDoc(
                 skill_id="building_skill",
@@ -555,6 +561,10 @@ class SkillGeneratorAgent:
                 ],
                 knowledge_refs=["mechanics/grid_building.md"]
             ))
+
+        # Документы куратора, не попавшие ни в один из скиллов выше, не должны
+        # потеряться: именно они несут жанровую специфику этого проекта.
+        self._inject_curated_skill(ctx)
 
         # Скилл проверяемости: плотность первой сессии и телеметрия.
         if "experience_skill" not in skill_ids:
@@ -610,6 +620,106 @@ class SkillGeneratorAgent:
             ))
 
         log_agent("SkillGenerator", f"Compiled {len(concept.skills)} reusable skill documents.")
+
+    # ------------------------------------------------------------------
+    # Выбор документов базы знаний.
+    #
+    # Раньше состав знаний был константой: каждому проекту доставались ВСЕ
+    # документы threejs и stack, а специализированные скиллы включались по
+    # подстроке («combat» есть почти в любой концепции). Теперь решение
+    # принимает KnowledgeCuratorAgent, а подстроки остаются только страховкой
+    # на случай, когда план знаний пуст (провайдер был недоступен).
+    # ------------------------------------------------------------------
+
+    # Документы движка, нужные любой игре фабрики независимо от жанра.
+    _ALWAYS_RENDERER_DOCS = (
+        "threejs/performance_guide.md",
+        "threejs/adaptive_quality.md",
+        "threejs/procedural_mesh_builder.md",
+    )
+
+    @staticmethod
+    def _plan_paths(ctx: GenerationContext) -> List[str]:
+        concept = getattr(ctx, "concept", None)
+        plan = getattr(concept, "knowledge_plan", None)
+        return plan.paths() if plan else []
+
+    @classmethod
+    def _gate(cls, ctx: GenerationContext, docs: Sequence[str], words: Sequence[str]) -> bool:
+        """Включать ли специализированный скилл.
+
+        Если куратор знаний отработал, скилл включается только когда куратор
+        выбрал соответствующий документ — а не когда в тексте концепции нашлось
+        похожее слово. Ключевые слова остаются страховкой без сети."""
+        selected = set(cls._plan_paths(ctx))
+        if selected and docs:
+            return any(doc in selected for doc in docs)
+        return any(word in cls._concept_haystack(ctx) for word in words)
+
+    @classmethod
+    def _renderer_refs(cls, ctx: GenerationContext) -> List[str]:
+        """Документы Three.js для скилла рендера: выбранные куратором плюс общие."""
+        selected = [p for p in cls._plan_paths(ctx) if p.startswith("threejs/")]
+        refs = list(cls._ALWAYS_RENDERER_DOCS) + selected + ["audio/procedural_sound_synthesizer.md"]
+        return knowledge.resolve(refs)
+
+    @classmethod
+    def _stack_refs(cls, ctx: GenerationContext) -> List[str]:
+        """Библиотеки стека: только те, что проект действительно использует.
+
+        Документ по recast-navigation в игре без NPC-навигации — прямое
+        приглашение кодовому агенту загрузить лишний WASM и построить навмеш."""
+        selected = [p for p in cls._plan_paths(ctx) if p.startswith("stack/")]
+        if not selected:
+            return knowledge.stack_topics()
+        return knowledge.resolve(["stack/README.md", "stack/rapier3d.md"] + selected)
+
+    def _inject_curated_skill(self, ctx: GenerationContext) -> None:
+        """Собирает выбранные куратором документы, которые не забрал ни один скилл."""
+        concept = ctx.concept
+        plan = concept.knowledge_plan
+        if not plan.selections:
+            return
+        already = {ref for skill in concept.skills for ref in skill.knowledge_refs}
+        leftovers = [p for p in plan.paths() if p not in already and p not in knowledge.MANDATORY_TOPICS]
+        if not leftovers:
+            return
+
+        reasons = "\n".join(
+            f"- `{s.path}` — {s.reason}" for s in plan.selections if s.path in leftovers
+        )
+        log_agent("SkillGenerator", f"Injecting curated knowledge skill: {len(leftovers)} документов")
+        concept.skills.append(SkillDoc(
+            skill_id="project_knowledge_skill",
+            name="Знания, отобранные под этот проект",
+            filename="PROJECT_KNOWLEDGE_SKILL.md",
+            purpose=(
+                "Документы базы знаний, выбранные куратором именно под эту игру: "
+                f"{plan.summary or 'жанровое ядро и архетип петли проекта'}."
+            ),
+            when_to_use=(
+                "Читать перед реализацией ключевых механик проекта — здесь лежит проверенный "
+                "код и числа для них."
+            ),
+            rules=[
+                "Код из этих документов берётся как есть, а не переписывается по памяти.",
+                "Если документ противоречит спецификации проекта — прав документ в части API "
+                "и прав проект в части дизайна; расхождение фиксируется в DEVLOG.md.",
+                f"Архетип петли проекта: {plan.loop_pattern or 'не выбран, петля собственная'}.",
+            ],
+            architecture="Документы отсортированы по роли: сначала ядро жанра, затем вспомогательные материалы.",
+            implementation_guidance=f"Почему выбран каждый документ:\n{reasons}",
+            common_mistakes=[
+                "Реализовать механику по памяти, не открыв документ, который под неё выбран.",
+                "Притащить решение из документа, который куратор для этого проекта отклонил: "
+                f"{', '.join(plan.rejected) or 'список пуст'}.",
+            ],
+            checklist=[
+                "Каждая ключевая механика реализована по своему документу из этого набора.",
+                "Ни одна система не воспроизводит отклонённый жанровый шаблон.",
+            ],
+            knowledge_refs=leftovers,
+        ))
 
     @classmethod
     def _concept_haystack(cls, ctx: GenerationContext) -> str:
