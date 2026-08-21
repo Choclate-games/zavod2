@@ -8,6 +8,12 @@ widely repeated snippet turned out to be wrong, the file says so explicitly.
 Consumed via `app/knowledge.py`; `CRITICAL_RULES.md` is injected verbatim into
 every generated `AI_DEVELOPER_PROMPT.md`.
 
+**The factory ships Three.js only, and for now 3D only** — 2D output is disabled
+via `config/factory.yaml` → `pipeline.enable_2d`. The PixiJS recipes were not
+deleted: they live in `knowledge_archive/pixijs/`, which this loader never reads,
+together with the steps to bring them back. The libraries every game is built on,
+and the tasks each one owns instead of hand-written code, are in `stack/README.md`.
+
 ## Index
 
 | File | What it covers |
@@ -31,13 +37,26 @@ every generated `AI_DEVELOPER_PROMPT.md`.
 | `ux/ui_design_system.md` | Tokens, one geometry, capability-gated layout, no-scroll menus |
 | `audio/web_audio_and_muting.md` | Web Audio only, autoplay unlock, master bus, platform mute |
 | `platform_builds/android_capacitor.md` | Capacitor shell, package/icon setup, native banner reserve |
+| **`stack/README.md`** | The Three.js stack, pinned versions, the "task → library" table, frame order |
+| `stack/rapier3d.md` | Physics: world, bodies, groups, character controller, headless checks |
+| `stack/three_mesh_bvh.md` | Fast raycast/overlap against static geometry, capsule controller |
+| `stack/yuka_ai.md` | Steering, state machines, fuzzy logic, perception |
+| `stack/recast_navigation.md` | Navmesh generation, `NavMeshQuery`, `Crowd`, dynamic obstacles |
+| `stack/bitecs.md` | ECS 0.4 API, mass entities, instanced rendering, system order |
+| `stack/postprocessing.md` | `EffectComposer`, effect budget per device tier, sRGB/AA traps |
+| `threejs/orthographic_2d_and_pointer_input.md` | 2D as an orthographic Three.js scene: pointer→world, splines, drag |
+| `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, hit-stop, pushback, 2.5D camera |
+| `threejs/racing_track_and_opponents.md` | Track from one curve, checkpoints and laps, racing line, fair rubber-banding |
+| `threejs/tower_defense_core.md` | Fixed path vs. maze, target priority, projectiles, wave contract |
+| `threejs/rts_selection_and_command.md` | Frustum selection, order queue, formations, flow fields, fog |
+| `threejs/shooter_enemy_ai_and_combat.md` | Hitscan, TTK, enemy FSM, attack tokens, cover, hit feedback, horde |
 | `threejs/adaptive_quality.md` | Converging quality auto-tuner, the vsync headroom trap |
 | `threejs/rapier_vehicle_controller.md` | Ray-cast vehicle, suspension tuning, cargo that stays in the bed, head-less physics checks |
 | `threejs/vehicle_wheel_rig.md` | Wheel rig for arcade **and** physics cars — the two are opposite, see §0 |
 | `patterns/*.md` | Core-loop blueprints per genre |
 | `mechanics/*.md` | Individual mechanic specs |
 | `references/*.md` | Deconstructed market references |
-| `threejs/*.md`, `pixijs/*.md` | Renderer-specific performance guidance |
+| `threejs/*.md` | Renderer recipes: vehicles, FPS, melee, stealth, VFX, procedural meshes |
 
 ## Editing rules
 

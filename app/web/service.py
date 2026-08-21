@@ -80,7 +80,7 @@ PROVIDER_OPTIONS = [{"key": key, "label": label} for key, label in AGENT_LABELS.
 RENDERER_OPTIONS = [
     {"key": "auto", "label": "✨ auto (Smart Decision)"},
     {"key": "threejs", "label": "threejs (3D WebGL)"},
-    {"key": "pixijs", "label": "pixijs (2D High Perf)"},
+    {"key": "threejs-2d", "label": "threejs + ортографическая камера (2D)"},
 ]
 
 MODE_OPTIONS = [

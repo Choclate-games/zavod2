@@ -98,7 +98,7 @@ class Pipeline:
             progress.update(t4, completed=1)
 
             # 5. Renderer Selector
-            t5 = progress.add_task("[magenta]Renderer Selector: Evaluating Three.js vs PixiJS...", total=1)
+            t5 = progress.add_task("[magenta]Renderer Selector: Configuring Three.js stack...", total=1)
             RendererSelectorAgent().run(ctx)
             progress.update(t5, completed=1)
 

@@ -1,11 +1,15 @@
 import * as THREE from 'three';
-import { VoxelCoord, VoxelModelData } from '../core/Types';
+import { VoxelModelData } from '../core/Types';
+import { RollerBVH, CollisionResult } from '../physics/RollerBVH';
 
 export interface DetachedVoxel {
   worldX: number;
   worldY: number;
   worldZ: number;
   color: number;
+  impulseX?: number;
+  impulseY?: number;
+  impulseZ?: number;
 }
 
 export class VoxelModelObject {
@@ -28,6 +32,18 @@ export class VoxelModelObject {
   private detachedVoxels: DetachedVoxel[] = [];
   private worldPosition = new THREE.Vector3();
   private minActiveLy = 0;
+
+  // BVH Collision Query Objects (reused per frame, zero allocations)
+  private rollerBVH = RollerBVH.getInstance();
+  private queryBox = new THREE.Box3();
+  private colResult: CollisionResult = {
+    collided: false,
+    rollerSide: 'none',
+    impactVelocityX: 0,
+    impactVelocityY: 0,
+    impactVelocityZ: 0,
+    depth: 0
+  };
 
   public posY = 3.8;
   public targetY = 3.8;
@@ -140,6 +156,7 @@ export class VoxelModelObject {
 
   /**
    * Slice voxels that have passed through or reached the contact plane (nipThresholdY)
+   * Calculates physical collision via three-mesh-bvh against rotating roller teeth.
    */
   public sliceVoxels(
     nipThresholdY: number,
@@ -148,7 +165,9 @@ export class VoxelModelObject {
     minContactZ: number,
     maxContactZ: number,
     contactHalfHeight: number,
-    damageThisFrame: number
+    damageThisFrame: number,
+    rollerSpeed: number,
+    isTurbo: boolean
   ): DetachedVoxel[] {
     this.detachedVoxels.length = 0;
     if (this.remainingVoxels <= 0) return this.detachedVoxels;
@@ -156,6 +175,7 @@ export class VoxelModelObject {
     let matrixNeedsUpdate = false;
     const minY = nipThresholdY - contactHalfHeight;
     const maxY = nipThresholdY + contactHalfHeight;
+    const halfVoxel = this.voxelSize / 2;
 
     for (let idx = 0; idx < this.totalVoxels; idx++) {
       if (this.voxelActive[idx] === 0) continue;
@@ -176,7 +196,22 @@ export class VoxelModelObject {
       const crossedY = worldY < minY && (this.previousPosY + ly) >= minY;
       if (!inY && !crossedY) continue;
 
-      this.voxelHealth[idx] -= damageThisFrame;
+      // Construct bounding box for voxel in 3D world space
+      this.queryBox.min.set(worldX - halfVoxel, worldY - halfVoxel, worldZ - halfVoxel);
+      this.queryBox.max.set(worldX + halfVoxel, worldY + halfVoxel, worldZ + halfVoxel);
+
+      // Accelerated geometric collision test against roller teeth via three-mesh-bvh
+      const directToothHit = this.rollerBVH.testVoxelCollision(
+        this.queryBox,
+        rollerSpeed,
+        isTurbo,
+        this.colResult
+      );
+
+      // Tooth impact applies amplified physical damage
+      const effectiveDamage = directToothHit ? damageThisFrame * 1.5 : damageThisFrame;
+      this.voxelHealth[idx] -= effectiveDamage;
+
       if (this.voxelHealth[idx] > 0) {
         continue;
       }
@@ -188,11 +223,28 @@ export class VoxelModelObject {
       this.worldPosition.set(lx, ly, lz);
       this.group.localToWorld(this.worldPosition);
 
+      // Ejection velocity computed from physics collision
+      let impX: number, impY: number, impZ: number;
+      if (directToothHit) {
+        impX = this.colResult.impactVelocityX;
+        impY = this.colResult.impactVelocityY;
+        impZ = this.colResult.impactVelocityZ;
+      } else {
+        const sideSign = worldX > 0 ? -1 : 1;
+        const speedMult = isTurbo ? 1.6 : 1.0;
+        impX = (sideSign * (0.8 + Math.random() * 1.5) + (Math.random() * 0.6 - 0.3)) * speedMult;
+        impY = (-2.5 - Math.random() * 3.5) * speedMult;
+        impZ = (Math.random() * 1.6 - 0.8) * speedMult;
+      }
+
       this.detachedVoxels.push({
         worldX: this.worldPosition.x,
         worldY: this.worldPosition.y,
         worldZ: this.worldPosition.z,
-        color: this.voxelColors[idx]
+        color: this.voxelColors[idx],
+        impulseX: impX,
+        impulseY: impY,
+        impulseZ: impZ
       });
 
       this.instancedMesh.setMatrixAt(idx, this.zeroMatrix);

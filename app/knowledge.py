@@ -12,6 +12,11 @@ from app.config import KNOWLEDGE_DIR
 
 CRITICAL_RULES_FILE = "CRITICAL_RULES.md"
 
+# The factory ships one renderer. Kept as a constant so a stray "pixijs" in a
+# concept or a CLI flag cannot silently produce knowledge for an engine we no
+# longer support.
+RENDERER = "threejs"
+
 # Topics a generated game package almost always needs, in the order they matter
 # during development. Used by the prompt compiler and the skill generator.
 CORE_TOPICS: List[str] = [
@@ -109,7 +114,15 @@ def core_knowledge() -> str:
     return bundle(CORE_TOPICS)
 
 
-def topics_for_renderer(renderer: str) -> List[str]:
-    """Renderer-specific performance knowledge."""
-    folder = "threejs" if str(renderer).lower().startswith("three") else "pixijs"
-    return list_topics(folder)
+def topics_for_renderer(renderer: str = RENDERER) -> List[str]:
+    """Renderer knowledge. The factory ships Three.js only: 2D games are the same
+    scene under an orthographic camera, not a second renderer. The argument is kept
+    so older call sites keep working; anything but Three.js is ignored."""
+    return list_topics("threejs")
+
+
+def stack_topics() -> List[str]:
+    """The libraries every generated game is built on. Injected next to the
+    renderer topics so the coding agent never re-implements what the stack solves —
+    see `knowledge/stack/README.md` §1."""
+    return list_topics("stack")

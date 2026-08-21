@@ -855,7 +855,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         ctk.CTkLabel(col2, text="🎨 Рендерер", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8").pack(anchor="w")
         self.combo_renderer = ctk.CTkComboBox(
             col2,
-            values=["✨ auto (Smart Decision)", "threejs (3D WebGL)", "pixijs (2D High Perf)"],
+            values=["✨ auto (Smart Decision)", "threejs (3D WebGL)", "threejs-2d (ортографическая камера)"],
             height=32,
             fg_color="#0e1626"
         )
@@ -1267,7 +1267,8 @@ class GamePromptFactoryGUI(ctk.CTk):
     def _on_idea_picked_from_brainstorm(self, prompt_seed: str, renderer: str):
         self._set_studio_prompt(prompt_seed)
         if renderer == "pixijs":
-            self.combo_renderer.set("pixijs (2D High Perf)")
+            # Старые проекты могли быть сохранены с pixijs — показываем текущий эквивалент.
+            self.combo_renderer.set("threejs-2d (ортографическая камера)")
         elif renderer == "threejs":
             self.combo_renderer.set("threejs (3D WebGL)")
         self._append_studio_log_raw(f"💡 Идея выбрана из Brainstormer: '{prompt_seed[:70]}...'")

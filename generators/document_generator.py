@@ -22,7 +22,7 @@ class DocumentGenerator:
             "DIFFICULTY_DESIGN.md": self._gen_difficulty,
             "TECHNICAL_SPECIFICATION.md": self._gen_tech_spec,
             "ARCHITECTURE_DOCUMENT.md": self._gen_architecture,
-            "THREEJS_OR_PIXI_ARCHITECTURE.md": self._gen_renderer_arch,
+            "THREEJS_ARCHITECTURE.md": self._gen_renderer_arch,
             "ART_DIRECTION.md": self._gen_art_direction,
             "UI_UX_SPECIFICATION.md": self._gen_ui_ux,
             "MOBILE_CONTROLS.md": self._gen_mobile_controls,
@@ -470,42 +470,54 @@ This document specifies the exact mechanical logic, mathematical formulas, state
 
     def _gen_renderer_arch(self, ctx: GenerationContext) -> str:
         c = ctx.concept
-        if c.renderer == "threejs":
-            return f"""# Three.js 3D Rendering Architecture: {c.title}
+        spatial = "orthograph" not in (c.renderer_reason or "").lower()
+        camera = (
+            "PerspectiveCamera (fov 55, damped follow)" if spatial
+            else "OrthographicCamera (fixed world height, aspect-driven width)"
+        )
+        graph_2d = """Scene (OrthographicCamera)
+├── BackgroundQuad (single plane, gradient/atlas)
+├── PropsGroup (static geometry, renderOrder 10)
+├── EntityInstancedMesh (one InstancedMesh per atlas, renderOrder 20)
+├── VfxPool (additive InstancedMesh, renderOrder 30)
+└── DOM overlay (all text and UI — never rendered into the canvas)"""
+        graph_3d = """Scene (PerspectiveCamera)
+├── DirectionalSunLight (castShadow, tight shadow frustum)
+├── HemisphereLight (fill)
+├── LevelMesh (merged static geometry + MeshBVH for raycasts)
+├── InstancedEnemyMesh / InstancedDebrisMesh
+├── VfxPool (pooled additive particles, zero allocation)
+└── PlayerGroup (chassis/root + nested child groups per DOF)"""
+        return f"""# Three.js Rendering Architecture: {c.title}
 
-## 1. Scene Graph Hierarchy
+The factory ships **Three.js only**. A 2D game is the same scene under an
+orthographic camera, not a second renderer.
+
+## 1. Scene Graph
 ```text
-Scene
-├── DirectionalSunLight (castShadow: true, shadowMap: 1024x1024)
-├── AmbientSkyLight (intensity: 0.6)
-├── ArenaMesh (Merged static geometry with vertex colors)
-├── InstancedDebrisMesh (THREE.InstancedMesh for shattered fragments)
-├── ParticleContainer (Additive sprite mesh pool for sparks and trails)
-├── PlayerGroup (Rigid body bones + attached weapon meshes)
-└── EnemyGroup (Pooled enemy entity meshes)
+{graph_3d if spatial else graph_2d}
 ```
 
-## 2. Mobile Shader Optimizations
-- Use `THREE.MeshLambertMaterial` for bulk enemies.
-- Clamp `pixelRatio` to `Math.min(window.devicePixelRatio, 1.5)`.
-- Use `THREE.PCFSoftShadowMap` with a tight shadow camera frustum.
-"""
-        else:
-            return f"""# PixiJS 2D Rendering Architecture: {c.title}
+**Camera**: {camera}
 
-## 1. Stage Hierarchy
-```text
-Stage (PIXI.Container)
-├── BackgroundLayer (Tiled background)
-├── PropsLayer (Obstacles and interactive objects)
-├── EntityLayer (Player, Enemies, Weapons sorted by Y-depth)
-├── ParticleLayer (PIXI.ParticleContainer for bullet hell and sparks)
-└── UILayer (DOM overlay for crisp resolution independence)
-```
+## 2. Stack
+| Layer | Library | Knowledge |
+|---|---|---|
+| Physics | {c.tech_spec.physics_engine} | `stack/rapier3d.md` |
+| Raycast / static collision | three-mesh-bvh | `stack/three_mesh_bvh.md` |
+| AI (steering, FSM) | Yuka | `stack/yuka_ai.md` |
+| NPC navigation | recast-navigation | `stack/recast_navigation.md` |
+| Mass entities | bitECS | `stack/bitecs.md` |
+| Post FX | postprocessing | `stack/postprocessing.md` |
 
-## 2. Sprite Batching Best Practices
-- Single shared sprite atlas via TexturePacker.
-- Pre-allocated particle pool of 1000 items in `PIXI.ParticleContainer`.
+Anything in `knowledge/stack/README.md` §1 is taken from the library. Hand-rolled
+A*, boids, character controllers or bloom chains are review defects, not optimisations.
+
+## 3. Render Budget
+- Draw calls: < 80 mobile, < 150 desktop. Repeated objects go through `InstancedMesh`.
+- `pixelRatio` clamped by the adaptive quality tuner (`threejs/adaptive_quality.md`).
+- One `EffectPass` for all post effects; the `low` tier renders without a composer.
+- Resolution and shadow-map changes are applied **before** `render()` on a rendered frame.
 """
 
     def _gen_art_direction(self, ctx: GenerationContext) -> str:

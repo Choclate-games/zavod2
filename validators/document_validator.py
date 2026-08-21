@@ -16,7 +16,7 @@ class DocumentValidator:
         "DIFFICULTY_DESIGN.md",
         "TECHNICAL_SPECIFICATION.md",
         "ARCHITECTURE_DOCUMENT.md",
-        "THREEJS_OR_PIXI_ARCHITECTURE.md",
+        "THREEJS_ARCHITECTURE.md",
         "ART_DIRECTION.md",
         "UI_UX_SPECIFICATION.md",
         "MOBILE_CONTROLS.md",

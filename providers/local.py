@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 
 from providers.base import AIProvider, ImageProvider, T
 from app import knowledge
+from app.config import AppConfig
 from app.models import (
     GameConcept, GameScores, ReferenceSpec, MechanicSpec, SystemSpec,
     MonetizationSpec, RewardedAdPlacement, InterstitialAdPlacement, InAppPurchaseItem,
@@ -13,6 +14,9 @@ from app.models import (
     RoadmapPhase, QASpec, RiskItem, SkillDoc
 )
 from agents.idea_brainstormer import BrainstormResult, fallback_catalog
+
+# Один экземпляр на модуль: конфиг читается с диска и не меняется во время генерации.
+_CONFIG = AppConfig()
 
 class LocalAIProvider(AIProvider):
     """
@@ -75,7 +79,7 @@ class LocalAIProvider(AIProvider):
     # «волны врагов → босс» только потому, что она не совпала с шаблоном.
     _GENERIC_PROFILES = {
         "kitchen": {
-            "renderer": "pixijs",
+            "dimension": "2D",
             "genre": "Симулятор заведения / Тайм-менеджмент", "subgenre": "Управление потоком заказов",
             "hook": "Порядок действий важнее скорости: точная последовательность даёт комбо.",
             "fantasy": "Держите своё заведение: собирайте заказы, запоминайте вкусы гостей и расширяйте кухню.",
@@ -111,7 +115,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "nature": {
-            "renderer": "pixijs",
+            "dimension": "2D",
             "genre": "Менеджмент колонии / Idle-стратегия", "subgenre": "Жизнь и рост поселения",
             "hook": "Вы задаёте правила, а колония живёт сама и приносит последствия ваших решений.",
             "fantasy": "Растите колонию через сезоны: распределяйте роли, готовьтесь к непогоде и расширяйте владения.",
@@ -147,7 +151,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "ocean": {
-            "renderer": "threejs",
+            "dimension": "3D",
             "genre": "Исследование / Выживание", "subgenre": "Погружение с ограниченными ресурсами",
             "hook": "Свет, воздух и прочность корпуса — три счётчика, которые нельзя тратить одновременно.",
             "fantasy": "Спускайтесь глубже, чем безопасно, добывайте образцы и возвращайтесь до того, как кончится воздух.",
@@ -183,7 +187,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "winter": {
-            "renderer": "pixijs",
+            "dimension": "2D",
             "genre": "Выживание / Менеджмент ресурсов", "subgenre": "Бюджет дня на холоде",
             "hook": "Каждое действие стоит тепла: день короткий, а дел больше, чем сил.",
             "fantasy": "Продержитесь зиму: топите, добывайте, чините и решайте, чем пожертвовать сегодня.",
@@ -219,7 +223,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "space": {
-            "renderer": "threejs",
+            "dimension": "3D",
             "genre": "Головоломка / Симулятор невесомости", "subgenre": "Работы в открытом космосе",
             "hook": "Каждое движение отдаёт импульсом: остановиться сложнее, чем начать.",
             "fantasy": "Работайте снаружи станции: экономьте топливо ранца, ловите инструменты и укладывайтесь в виток.",
@@ -255,7 +259,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "city": {
-            "renderer": "threejs",
+            "dimension": "3D",
             "genre": "Аркадная езда / Тайм-менеджмент", "subgenre": "Маршруты и доставка",
             "hook": "Груз живёт своей жизнью: резкий манёвр стоит дороже потерянной секунды.",
             "fantasy": "Развозите заказы по городу: стройте маршрут, берегите груз и укладывайтесь в окно доставки.",
@@ -291,7 +295,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "detective": {
-            "renderer": "pixijs",
+            "dimension": "2D",
             "genre": "Детектив / Логическая головоломка", "subgenre": "Доска улик и противоречия",
             "hook": "Улики связываются вручную, и неверная связь заводит следствие в тупик.",
             "fantasy": "Ведите дело: опрашивайте свидетелей, ловите противоречия и предъявляйте обвинение с доказательствами.",
@@ -327,7 +331,7 @@ class LocalAIProvider(AIProvider):
             ]
         },
         "music": {
-            "renderer": "pixijs",
+            "dimension": "2D",
             "genre": "Ритм-игра", "subgenre": "Такт и ведение партии",
             "hook": "Вы держите темп целого ансамбля, а не просто попадаете по нотам.",
             "fantasy": "Проведите выступление: держите такт, вступайте партиями и вытяните пьесу до финальной ноты.",
@@ -606,10 +610,10 @@ class LocalAIProvider(AIProvider):
         return "generic"
 
     @classmethod
-    def _art_for_theme(cls, theme: str, renderer: str) -> ArtSpec:
+    def _art_for_theme(cls, theme: str, dimension: str) -> ArtSpec:
         """Собирает ArtSpec под сеттинг игры."""
         style = cls._ART_THEMES.get(theme, cls._ART_THEMES["generic"])
-        is_3d = renderer == "threejs"
+        is_3d = dimension == "3D"
         return ArtSpec(
             style_name=style["style_name"],
             camera_perspective=(
@@ -712,6 +716,10 @@ class LocalAIProvider(AIProvider):
                        r"deckbuild\w*")
         is_survivor = has(r"survivor\w*", r"vampire\s*survivors", r"автострел\w*",
                           r"орда", r"орды", r"орду", r"хорд\w*")
+
+        # Рендерер один на всю фабрику (Three.js). Различается только размерность
+        # геймплея: она задаёт камеру, арт-спек и заголовок жанра.
+        dimension = "3D"
 
         if is_drift:
             theme = "drift"
@@ -884,8 +892,9 @@ class LocalAIProvider(AIProvider):
             slug = "shadow-draft-dungeon-2d"
             genre = "2D Карточный Рогалик"
             subgenre = "Тактический Драфт-Баттлер"
-            renderer = "pixijs"
-            renderer_reason = "2D карточный интерфейс со спрайтовыми анимациями и спецэффектами частиц на PixiJS."
+            renderer = "threejs"
+            dimension = "2D"
+            renderer_reason = "Three.js с ортографической камерой: карточный интерфейс, инстансинг спрайтов и DOM-слой для текста."
             orientation = "portrait"
             hook = "Драфт карт прямо в бою, комбо-цепочки стихий и процедурные залы подземелья."
             player_fantasy = "Собирайте уникальную колоду артефактов, комбинируйте заморозку с огнем и побеждайте стражей подземелья."
@@ -919,19 +928,21 @@ class LocalAIProvider(AIProvider):
             profile = self._GENERIC_PROFILES.get(theme, self._GENERIC_PROFILES["generic"])
             subgenre = profile["subgenre"]
             # Рендерер: явное пожелание игрока -> подсказка сеттинга -> 2D по умолчанию.
-            if "3d" in lower or "three" in lower or "физик" in lower:
-                renderer = "threejs"
-            else:
-                renderer = profile.get("renderer", "pixijs")
+            dimension = "3D" if ("3d" in lower or "three" in lower or "физик" in lower) \
+                else profile.get("dimension", "2D")
+            renderer = "threejs"
             # Размерность в названии жанра берётся из выбранного рендерера,
             # иначе жанр обещает 2D, а движок оказывается трёхмерным.
-            genre = f"{'3D' if renderer == 'threejs' else '2D'} {profile['genre']}"
-            renderer_reason = f"Оптимально подходит для выбранного стиля ({renderer.upper()}) и требований высокой производительности в браузере."
+            genre = f"{dimension} {profile['genre']}"
+            renderer_reason = (
+                "Three.js: перспективная камера и Rapier3D." if dimension == "3D"
+                else "Three.js с ортографической камерой: плоский геймплей рисуется той же сценой, без второго рендерера."
+            )
             orientation = "landscape"
             hook = profile["hook"]
             player_fantasy = profile["fantasy"]
             target_audience = "Игроки Яндекс Игр, CrazyGames и мобильных веб-порталов."
-            vision = f"Создать качественную веб-игру на {renderer.upper()} с понятной первой сессией и высоким удержанием."
+            vision = "Создать качественную веб-игру на Three.js с понятной первой сессией и высоким удержанием."
             elevator_pitch = profile["pitch"]
             core_loop = profile["core_loop"]
             win_conditions = profile["win"]
@@ -975,10 +986,18 @@ class LocalAIProvider(AIProvider):
             slug = self._slugify(title)
 
         # Explicit overrides
-        if "three.js" in lower or "threejs" in lower:
-            renderer = "threejs"
-        elif "pixijs" in lower or "pixi" in lower:
-            renderer = "pixijs"
+        # Фабрика собирает только Three.js; упоминание другого движка в промпте
+        # меняет только размерность камеры, а не рендерер.
+        renderer = "threejs"
+        if "pixi" in lower or "2d" in lower:
+            dimension = "2D"
+
+        # Поддержка 2D временно отключена (config/factory.yaml → pipeline.enable_2d).
+        # Флаг стоит здесь, а не в ветках выше: иначе каждый новый тематический
+        # шаблон пришлось бы править отдельно, и один из них всё равно протек бы 2D-концептом.
+        if dimension == "2D" and not _CONFIG.enable_2d:
+            dimension = "3D"
+            genre = genre.replace("2D ", "3D ") if genre.startswith("2D ") else genre
 
         # Scores
         scores = GameScores(
@@ -986,7 +1005,7 @@ class LocalAIProvider(AIProvider):
             originality=8,
             replayability=9,
             development_cost=7,
-            visual_appeal=9 if renderer == "threejs" else 8,
+            visual_appeal=9 if dimension == "3D" else 8,
             mobile_fit=9,
             monetization=9,
             platform_fit=10,
@@ -1049,8 +1068,8 @@ class LocalAIProvider(AIProvider):
             language="TypeScript (strict mode)",
             bundler="Vite 5.x",
             renderer=renderer,
-            renderer_version="^0.170.0" if renderer == "threejs" else "^8.0.0",
-            physics_engine="Rapier3D (@dimforge/rapier3d-compat 0.13.x)" if renderer == "threejs" else "Matter.js",
+            renderer_version="^0.185.1",
+            physics_engine="Rapier3D (@dimforge/rapier3d-compat ^0.20.0)",
             state_manager="Custom TinyEventBus & Reactive GameStore",
             audio_engine="Howler.js (^2.2.4) с WebAudio API",
             target_fps=60,
@@ -1167,7 +1186,7 @@ class LocalAIProvider(AIProvider):
 
         # Art Spec: стиль подбирается по сеттингу игры (см. _ART_THEMES),
         # а не задаётся одним «кибер-неоном» на любой жанр.
-        art = self._art_for_theme(theme, renderer)
+        art = self._art_for_theme(theme, dimension)
 
         # UI/UX Spec
         ui_ux = UIUXSpec(
@@ -1353,9 +1372,9 @@ class LocalAIProvider(AIProvider):
             ),
             SkillDoc(
                 skill_id="renderer_skill",
-                name=f"{renderer.upper()} Оптимизация и Шейдеры",
+                name="Three.js: оптимизация и шейдеры",
                 filename="RENDERER_SKILL.md",
-                purpose=f"Руководство по высокой производительности и графике для движка {renderer.upper()}.",
+                purpose="Руководство по высокой производительности и графике для Three.js.",
                 when_to_use="При настройке сцены, материалов, источников света и систем частиц.",
                 rules=[
                     "Держать число Draw Calls строго до 75.",
@@ -1373,7 +1392,7 @@ class LocalAIProvider(AIProvider):
                     "Отсутствие утечек видеопамяти при перезапуске раунда.",
                     "Авто-тюнер качества сходится и фиксируется, а не колеблется."
                 ],
-                knowledge_refs=knowledge.topics_for_renderer(renderer)
+                knowledge_refs=knowledge.topics_for_renderer()
             ),
             SkillDoc(
                 skill_id="playgama_skill",
@@ -1434,7 +1453,7 @@ class LocalAIProvider(AIProvider):
         ]
 
         preview_prompt = (
-            f"Gameplay screenshot of {title}, {genre} built in {renderer.upper()}. "
+            f"Gameplay screenshot of {title}, {genre} built in Three.js. "
             f"Visual style: {art.style_name}. Environment: {art.environment_theme}. "
             f"{hook} Lighting: {art.lighting_setup}. "
             f"Mobile touch HUD overlay with health bar, score and virtual joystick. "

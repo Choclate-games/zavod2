@@ -120,7 +120,7 @@ export class ShredderSystem {
     const baseDps = 5.6; // 5x debuff (28.0 / 5)
     const damageThisFrame = baseDps * dt * sharpnessMult * Math.max(1.0, bitePower);
 
-    // Slice voxels passing through contact nip
+    // Slice voxels passing through contact nip with three-mesh-bvh collision calculation
     const detached = this.currentModel.sliceVoxels(
       nipY,
       this.roller.getContactMinX(),
@@ -128,7 +128,9 @@ export class ShredderSystem {
       this.roller.getContactMinZ(),
       this.roller.getContactMaxZ(),
       contactHalfHeight,
-      damageThisFrame
+      damageThisFrame,
+      bitePower,
+      isTurbo
     );
 
     if (detached.length > 0) {

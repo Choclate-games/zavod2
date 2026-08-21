@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { RollerBVH } from '../physics/RollerBVH';
+import { PhysicsWorld } from '../physics/PhysicsWorld';
 
 export class RollerMechanism {
   public group: THREE.Group;
@@ -197,5 +199,20 @@ export class RollerMechanism {
 
     this.leftRollerGroup.rotation.z = -this.rotationAngle;
     this.rightRollerGroup.rotation.z = this.rotationAngle;
+
+    this.leftRollerGroup.updateMatrixWorld(true);
+    this.rightRollerGroup.updateMatrixWorld(true);
+
+    // Synchronize BVH spatial matrices for teeth collision calculation
+    RollerBVH.getInstance().updateMatrices(
+      this.leftRollerGroup.matrixWorld,
+      this.rightRollerGroup.matrixWorld
+    );
+
+    // Synchronize Rapier3D kinematic roller rotations
+    PhysicsWorld.getInstance().updateRollersKinematics(
+      -this.rotationAngle,
+      this.rotationAngle
+    );
   }
 }

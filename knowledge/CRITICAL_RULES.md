@@ -136,6 +136,38 @@ moderation rejection. Violating any of them ships a broken or rejected game.
     game code: on v2 the config wins, and an `undefined` runtime value overwrites a
     configured one.
 
+## Stack
+
+**S1.** The factory ships **Three.js only**. A 2D game is the same scene under an
+orthographic camera — never a second renderer. See
+`knowledge/threejs/orthographic_2d_and_pointer_input.md`.
+
+**S2.** The stack is fixed and pinned: `three ^0.185.1`,
+`@dimforge/rapier3d-compat ^0.20.0`, `three-mesh-bvh ^0.9.14`, `yuka ^0.7.8`,
+`recast-navigation ^0.43.1`, `bitecs ^0.4.0`, `postprocessing ^6.39.4`. Online
+snippets written for `bitecs 0.3` (`defineComponent`/`defineQuery`) or
+`rapier 0.13` do not compile against these — check `knowledge/stack/`.
+
+**S3.** **If the stack solves it, take the library.** A hand-rolled A\*, boids
+flock, broadphase, character controller, vision/memory timer or bloom chain is a
+review defect, not an optimisation. The full "task → library" table is
+`knowledge/stack/README.md` §1: physics and vehicles → Rapier; raycast against
+static level geometry → three-mesh-bvh; steering, FSM, fuzzy decisions and
+perception → Yuka; NPC pathfinding and crowds → recast-navigation; hundreds of
+identical entities → bitECS + `InstancedMesh`; screen effects → postprocessing.
+
+**S4.** Frame order is fixed: input → AI → controllers → `world.step()` → ECS →
+transform sync → camera → quality changes → `composer.render()`.
+`renderer.render()` is **not** called next to `composer.render()` — that draws the
+scene twice.
+
+**S5.** Physics steps at a **fixed** timestep with a substep cap (≤ 4). Passing
+`dt` into the solver destabilises suspension and joints; an uncapped catch-up loop
+turns a slow frame into a hang.
+
+**S6.** WASM (Rapier, Recast) is initialised on the loading screen behind the boot
+watchdog, and Recast is loaded **only** when the game actually needs a navmesh.
+
 ## Renderer
 
 52. Auto-tuning quality from raw frame time does not work under vsync — every frame

@@ -1,31 +1,74 @@
-# 📋 Регламент: Обязательное создание интерактивных демо для базы знаний (`knowledge/`)
+# 📋 Регламент: обязательное интерактивное демо для каждого знания (`knowledge/`)
 
-Каждый файл в каталоге `knowledge/` содержит авторитарные знания и эталонные куски TypeScript/WebGL кода, на которые опираются все кодовые агенты фабрики.
-
-Чтобы предотвратить появление «бумажного» или неработающего кода, вводится строгое правило:
+Каждый файл в `knowledge/` — авторитарный источник для кодовых агентов фабрики.
+Чтобы в базу не попадал «бумажный» код, действует жёсткое правило.
 
 ---
 
 ## 🎯 Правило «Knowledge + Working Demo»
 
-1. **Никакого кода без проверки**:
-   * При добавлении нового рецепта или механики в `knowledge/` (например, физика машин, конусы видимости, жесты, шейдеры, синтез звука) разработчик или ИИ-агент **обязан создать или обновить интерактивную вкладку в демо-стенде** `workspace/knowledge-showcase/index.html`.
-2. **Критерии качества интерактивного демо**:
-   * **Работоспособность без лишних шагов**: демо должно запускаться мгновенно в браузере (через CDN Three.js/PixiJS или `npm run dev`).
-   * **Тактильный отклик**: управление должно быть плавным, отзывчивым, с визуальным и звуковым откликом.
-   * **Понятность**: на экране должны быть выведены горячие клавиши (<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>Space</kbd>, <kbd>F</kbd> и т.д.) и подсказка по режиму.
-3. **Обновление стенда `workspace/knowledge-showcase/`**:
-   * Все ключевые категории знаний представлены в виде вкладок в `workspace/knowledge-showcase/index.html`:
-     * 🚚 **Гонки и физика авто** (`knowledge/threejs/arcade_racing_and_drift.md`, `knowledge/threejs/rapier_vehicle_controller.md`, `knowledge/threejs/vehicle_wheel_rig.md`, `knowledge/mechanics/vehicle_physics.md`)
-     * 🔫 **FPS шуттер и пинок** (`knowledge/threejs/fps_controller_and_shooting.md`, `knowledge/mechanics/chain_reaction.md`)
-     * ⚔️ **Слэшер и парирование** (`knowledge/threejs/melee_combat_and_ragdoll.md`, `knowledge/mechanics/parry.md`, `knowledge/mechanics/combo_juggling.md`, `knowledge/mechanics/ragdoll.md`)
-     * 🧲 **Трос, Время & Дэш** (`knowledge/mechanics/grappling_hook.md`, `knowledge/mechanics/time_rewind.md`, `knowledge/mechanics/dash.md`)
-     * 🌊 **Вода & Разрушения** (`knowledge/mechanics/fluid_buoyancy.md`, `knowledge/mechanics/physics_destruction.md`, `knowledge/mechanics/mining_drill.md`)
-     * 🐦 **Рой & Выживание** (`knowledge/mechanics/drone_swarm.md`, `knowledge/mechanics/wave_survival.md`, `knowledge/mechanics/upgrade_choices.md`, `knowledge/patterns/survivor_loop.md`)
-     * 🏗️ **Сетка & База** (`knowledge/mechanics/grid_building.md`, `knowledge/mechanics/base_building.md`, `knowledge/patterns/builder_defense_loop.md`)
-     * 👁️ **Стелс & Конусы** (`knowledge/threejs/stealth_and_vision_cones.md`, `knowledge/mechanics/stealth_detection.md`)
-     * 🎨 **Процедурная 3D графика** (`knowledge/threejs/procedural_mesh_builder.md`)
-     * 👆 **2D Сплайны & Доска улик** (`knowledge/pixijs/path_drawing_and_movement.md`, `knowledge/pixijs/card_drag_and_evidence_board.md`, `knowledge/mechanics/evidence_board.md`)
-     * ✨ **VFX и шейдеры** (`knowledge/threejs/juice_and_vfx_pool.md`, `knowledge/threejs/mobile_shaders.md`, `knowledge/threejs/adaptive_quality.md`)
-     * 🔊 **Синтезатор звуков & Ритм** (`knowledge/audio/procedural_sound_synthesizer.md`, `knowledge/audio/web_audio_and_muting.md`, `knowledge/mechanics/rhythm_sync.md`)
+1. **Никакого кода без проверки.** Новый рецепт, механика, контроллер или модуль в
+   `knowledge/` обязан сопровождаться работающей вкладкой в
+   `workspace/knowledge-showcase/`. Теоретический код без демо не принимается.
+2. **Критерии качества демо** (эталон — вкладка «🚚 ЗиЛ-130»):
+   * запускается через `npm run dev` без ручных шагов;
+   * управление отзывчиво, есть визуальный **и** звуковой отклик;
+   * на экране показаны горячие клавиши и одна строка о том, что демонстрируется;
+   * работает на телефоне (тач-управление) или явно помечено как desktop-only;
+   * код демо и код в `knowledge/` **совпадают**: демо — это тот же рецепт, а не
+     «похожая» реализация.
+3. **Стек демо — стек фабрики.** Демо пишутся на Three.js и библиотеках из
+   `knowledge/stack/README.md`. Самописные аналоги того, что закрывает стек, в демо
+   запрещены так же, как и в играх.
 
+---
+
+## Головная проверка вместо «посмотреть глазами»
+
+Демо доказывает, что рецепт **играется**. Что он ещё и **считается верно**, доказывает
+головной прогон без рендерера (`CRITICAL_RULES` §66). Каждая игровая механика в демо
+живёт в модуле, не импортирующем `three`, и покрыта скриптом:
+
+| Скрипт | Что проверяет |
+|---|---|
+| `npm run check:fighting` | фрейм-дата: наказуемость, затухание комбо, hit-stop |
+| `npm run check:racing` | геометрия трассы, 3 круга ботом, границы резинки |
+| `npm run check:td` | 20 волн, приоритет целей, броня, экономика |
+| `npm run check:rts` | флоу-филд через стену, слоты строя, таблица урона |
+| `npm run check:smoke` | дымовой прогон демо без WebGL: исключения и NaN в трансформах |
+| `npm run check:all` | всё сразу; входит в `npm run build` |
+
+Эти прогоны уже поймали четыре бага, невидимых на глаз: сопротивление воздуха считалось
+«за кадр» вместо «за секунду» (машина упиралась в 44 км/ч), очередь флоу-филда молча
+переполнялась (юниты застревали посреди карты), и таблица урона RTS не была замкнутым
+циклом (авиацию не бил никто). Четвёртый нашёл дымовой прогон: `MemorySystem.getRecord()`
+в Yuka возвращает `undefined`, пока не вызван `createRecord()`, и охранник падал при
+первом же обращении к памяти.
+
+## Соответствие вкладок и знаний
+
+Статус: ✅ — вкладка есть в стенде, ⏳ — знание есть, демо в очереди.
+
+| Вкладка | Знания |
+|---|---|
+| ✅ 🚚 ЗиЛ-130 (Rapier 3D) | `stack/rapier3d.md`, `threejs/rapier_vehicle_controller.md`, `threejs/vehicle_wheel_rig.md`, `mechanics/vehicle_physics.md` |
+| ✅ 🏁 Гонка: трасса и соперники | `threejs/racing_track_and_opponents.md`, `threejs/arcade_racing_and_drift.md`, `mechanics/drift_scoring.md`, `mechanics/checkpoint_lap_racing.md`, `mechanics/rubberband_opposition.md` |
+| ✅ 🥊 Файтинг: фрейм-дата | `threejs/fighting_game_core.md`, `mechanics/frame_data_combat.md`, `mechanics/special_move_input.md`, `mechanics/juggle_combo.md`, `mechanics/parry.md` |
+| ✅ 🗼 Tower Defense (bitECS) | `threejs/tower_defense_core.md`, `stack/bitecs.md`, `mechanics/tower_targeting_priority.md`, `mechanics/wave_contract.md`, `patterns/tower_defense_loop.md` |
+| ✅ ⚔️ Стратегия: строй и приказы | `threejs/rts_selection_and_command.md`, `mechanics/unit_selection_and_orders.md`, `mechanics/formation_movement.md` |
+| ✅ 🎯 BVH: рейкаст и капсула | `stack/three_mesh_bvh.md` |
+| ✅ 🧠 Yuka: steering и автомат | `stack/yuka_ai.md`, `mechanics/drone_swarm.md`, `mechanics/stealth_detection.md` |
+| ✅ ✨ Постобработка по тирам | `stack/postprocessing.md`, `threejs/adaptive_quality.md`, `threejs/mobile_shaders.md` |
+| ✅ 🧭 Навигация NPC (recast) | `stack/recast_navigation.md` |
+| ✅ 🔫 FPS: стрельба и ИИ | `threejs/fps_controller_and_shooting.md`, `threejs/shooter_enemy_ai_and_combat.md`, `mechanics/cover_and_suppression.md`, `mechanics/chain_reaction.md` |
+| ⏳ ⚔️ Слэшер и рэгдолл | `threejs/melee_combat_and_ragdoll.md`, `mechanics/ragdoll.md` |
+| ⏳ 🐦 Рой и выживание | `mechanics/wave_survival.md`, `mechanics/upgrade_choices.md`, `patterns/survivor_loop.md` |
+| ⏳ 🏗️ Сетка и база | `mechanics/grid_building.md`, `mechanics/base_building.md`, `patterns/builder_defense_loop.md` |
+| ⏳ 👁️ Стелс и конусы зрения | `threejs/stealth_and_vision_cones.md` |
+| ⏳ 🌊 Вода и разрушения | `mechanics/fluid_buoyancy.md`, `mechanics/physics_destruction.md`, `mechanics/mining_drill.md` |
+| ⏳ 🎨 Процедурная 3D-графика | `threejs/procedural_mesh_builder.md` |
+| ⏳ 👆 2D на ортокамере | `threejs/orthographic_2d_and_pointer_input.md`, `mechanics/evidence_board.md` (2D отключено, см. `knowledge_archive/`) |
+| ⏳ ✨ VFX-пул | `threejs/juice_and_vfx_pool.md` |
+| ⏳ 🔊 Синтез звука и ритм | `audio/procedural_sound_synthesizer.md`, `audio/web_audio_and_muting.md`, `mechanics/rhythm_sync.md` |
+
+Удалённые вкладки (механики выведены из базы): «🧲 Трос, Время & Дэш».

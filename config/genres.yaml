@@ -21,7 +21,7 @@ genres:
 
   survivor_roguelite:
     name: "Survivor Roguelite"
-    default_renderer: "pixijs"
+    default_renderer: "threejs"
     default_orientation: "portrait"
     camera_perspective: "Top-Down 2D / 2.5D Orthographic"
     core_mechanics:
@@ -73,7 +73,7 @@ genres:
 
   card_battler_roguelike:
     name: "Deckbuilder / Card Roguelike"
-    default_renderer: "pixijs"
+    default_renderer: "threejs"
     default_orientation: "portrait"
     camera_perspective: "2D Flat UI Canvas"
     core_mechanics:
@@ -89,7 +89,7 @@ genres:
 
   auto_battler:
     name: "Auto Battler / Squad Strategy"
-    default_renderer: "pixijs"
+    default_renderer: "threejs"
     default_orientation: "landscape"
     camera_perspective: "Top-Down Grid / Isometric 2D"
     core_mechanics:

@@ -308,7 +308,8 @@ class PromptCompilerAgent:
             ]
         systems_block = "\n".join(systems_lines)
 
-        scene_desc = "Three.js scene graph, lights, camera lerp" if is_3d else "PixiJS stage, container layers, camera"
+        scene_desc = ("Three.js scene graph, lights, perspective camera lerp" if is_3d
+                      else "Three.js scene graph under an orthographic camera, layered by renderOrder")
 
         return f"""src/
 ├── main.ts                    # Bootstrap, Playgama Bridge init, Game launch

@@ -48,6 +48,12 @@ class AppConfig:
         self.references_cfg = load_yaml(CONFIG_DIR / "references.yaml")
         self.playgama_cfg = load_yaml(CONFIG_DIR / "playgama.yaml")
         
+        # Стек конвейера. 2D временно отключено, а не удалено: знания по Pixi
+        # лежат в knowledge_archive/pixijs/ и не загружаются фабрикой.
+        pipeline_cfg = self.factory_cfg.get("pipeline", {}) or {}
+        self.renderer = str(pipeline_cfg.get("renderer", "threejs"))
+        self.enable_2d = bool(pipeline_cfg.get("enable_2d", False))
+
         self.default_agent = os.getenv("DEFAULT_AGENT", "opencode")
         self.default_provider = os.getenv("DEFAULT_PROVIDER", self.default_agent)
         self.default_mode = os.getenv("DEFAULT_MODE", "standard")

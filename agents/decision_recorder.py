@@ -39,7 +39,7 @@ class DecisionRecorderAgent:
 
     def _decisions(self, ctx: GenerationContext) -> List[DecisionRecord]:
         c = ctx.concept
-        alt_renderer = "pixijs" if c.renderer == "threejs" else "threejs"
+        alt_renderer = "PixiJS / Phaser (2D-only engines)"
         nucleus_alternatives = [n.name for n in c.design_nucleus if not n.selected]
         return [
             DecisionRecord(

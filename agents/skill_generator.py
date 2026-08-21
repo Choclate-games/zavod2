@@ -104,14 +104,44 @@ class SkillGeneratorAgent:
                     "The quality auto-tuner converges and locks instead of oscillating."
                 ],
                 knowledge_refs=[
-                    *knowledge.topics_for_renderer(concept.renderer),
-                    "threejs/procedural_mesh_builder.md",
-                    "threejs/juice_and_vfx_pool.md",
-                    "audio/procedural_sound_synthesizer.md"
-                ] if concept.renderer == "threejs" else [
-                    *knowledge.topics_for_renderer(concept.renderer),
-                    "audio/procedural_sound_synthesizer.md"
+                    *knowledge.topics_for_renderer(),
+                    "audio/procedural_sound_synthesizer.md",
                 ]
+            ))
+
+        if "stack_skill" not in skill_ids:
+            log_agent("SkillGenerator", "Injecting core skill: stack_skill")
+            concept.skills.append(SkillDoc(
+                skill_id="stack_skill",
+                name="Three.js Stack: Rapier3D, BVH, Yuka, Recast, bitECS, postprocessing",
+                filename="STACK_SKILL.md",
+                purpose="The libraries the game is built on, their verified versions and the tasks each one owns.",
+                when_to_use="Use before writing physics, AI, pathfinding, mass-entity or post-processing code — i.e. before writing any system that a stack library already owns.",
+                rules=[
+                    "Take the library. A hand-rolled A*, boids flock, character controller, broadphase or bloom chain is a review defect, not an optimisation.",
+                    "Rapier3D owns rigid bodies, joints and vehicles; a physics body is never driven by writing setLinvel() every frame.",
+                    "three-mesh-bvh owns raycasts against static level geometry; Raycaster over a raw 50k-triangle mesh is not acceptable.",
+                    "Yuka owns steering, finite state machines, fuzzy decisions and perception.",
+                    "recast-navigation owns NPC pathfinding and crowds; walkableHeight/Climb/Radius are expressed in cells, not metres.",
+                    "bitECS owns entity mass (bullets, hordes, units) rendered through InstancedMesh; it is not used for a handful of unique entities.",
+                    "postprocessing owns screen effects: one EffectPass for all of them, renderer.render() is replaced by composer.render().",
+                    "Frame order is fixed: input -> AI -> vehicle/controllers -> physics.step() -> ECS -> transform sync -> camera -> quality -> composer.render().",
+                    "WASM libraries (Rapier, Recast) are initialised on the loading screen, behind the boot watchdog, and Recast only when the game actually needs a navmesh.",
+                ],
+                architecture="Three.js scene as the render layer; Rapier world as the physics source of truth; Yuka EntityManager and a recast Crowd for smart NPCs; bitECS world for mass entities; one EffectComposer for post FX.",
+                implementation_guidance="Pin the verified versions from knowledge/stack/README.md. Snippets found online for bitecs 0.3 (defineComponent/defineQuery) or rapier 0.13 will not compile against the pinned versions.",
+                common_mistakes=[
+                    "Re-implementing a library feature by hand because 'it is just a few lines'.",
+                    "Calling renderer.render() next to composer.render() — the scene is drawn twice.",
+                    "Stepping the physics world with a variable timestep instead of a fixed one with a substep cap.",
+                    "Loading the Recast WASM in a game that has no NPC navigation.",
+                ],
+                checklist=[
+                    "No custom pathfinding, steering, broadphase or post-processing chain exists in src/.",
+                    "The frame order matches knowledge/stack/README.md section 2.",
+                    "Every stack library used is pinned to the version in knowledge/stack/README.md.",
+                ],
+                knowledge_refs=knowledge.stack_topics(),
             ))
 
         if "playgama_skill" not in skill_ids:
@@ -318,7 +348,7 @@ class SkillGeneratorAgent:
                     "Юниты плавно поворачиваются по касательной к траектории движения.",
                 ],
                 architecture="PathDrawer захватывает ввод и строит кривую, PathFollower перемещает объект.",
-                implementation_guidance="Отрисовывай неоновый шлейф линии с помощью PIXI.Graphics.",
+                implementation_guidance="Строй кривую через THREE.CatmullRomCurve3 (curveType 'centripetal'), шлейф линии — Line2/TubeGeometry по той же кривой.",
                 common_mistakes=[
                     "Движение по сырым несоглаженным точкам приводит к дерганию спрайта.",
                 ],
@@ -326,7 +356,7 @@ class SkillGeneratorAgent:
                     "Нарисованная линия плавно направляет юнита к цели.",
                 ],
                 knowledge_refs=[
-                    "pixijs/path_drawing_and_movement.md"
+                    "threejs/orthographic_2d_and_pointer_input.md"
                 ]
             ))
 
@@ -352,7 +382,7 @@ class SkillGeneratorAgent:
                     "При перетаскивании любой карточки все соединенные нити эластично тянутся за ней.",
                 ],
                 knowledge_refs=[
-                    "pixijs/card_drag_and_evidence_board.md"
+                    "threejs/orthographic_2d_and_pointer_input.md"
                 ]
             ))
 
@@ -380,30 +410,6 @@ class SkillGeneratorAgent:
                     "Шаг крадучись не поднимает тревогу за спиной врага.",
                 ],
                 knowledge_refs=["mechanics/stealth_detection.md"]
-            ))
-
-        if "grappling_skill" not in skill_ids and any(w in haystack for w in ("крюк", "grapple", "кошка", "маятник", "трос")):
-            log_agent("SkillGenerator", "Injecting specialized mechanic skill: grappling_skill")
-            concept.skills.append(SkillDoc(
-                skill_id="grappling_skill",
-                name="Elastic Grappling Hook & Pendulum Swing",
-                filename="GRAPPLING_SKILL.md",
-                purpose="Реализация физического крюка-кошки с маятниковым разгоном и сохранением углового момента.",
-                when_to_use="При создании контроллера перемещения на тросе, раскачивания и зацепа за точки.",
-                rules=[
-                    "Трос моделируется как пружинно-демпферная связь (Spring-Damper) с применением импульсов к RigidBody.",
-                    "Никогда не телепортировать тело игрока через setTranslation во время зацепа.",
-                    "При отсоединении троса тангенциальная скорость сохраняется с катапультирующим множителем.",
-                ],
-                architecture="GrappleHookController управляет лучом привязки, расчетом натяжения и синхронизацией меша троса.",
-                implementation_guidance="Используй raycast с угловым допуском 15 градусов для комфортного авто-прицеливания.",
-                common_mistakes=[
-                    "Жесткое притягивание без инерции маятника — механика ощущается деревянной.",
-                ],
-                checklist=[
-                    "Игрок свободно раскачивается вокруг точки крепления и катапультируется в верхней точке дуги.",
-                ],
-                knowledge_refs=["mechanics/grappling_hook.md"]
             ))
 
         if "cooking_skill" not in skill_ids and any(w in haystack for w in ("кухн", "повар", "готов", "кафе", "ресторан", "пекарн", "еда", "лапш")):

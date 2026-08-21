@@ -1,35 +1,62 @@
 from app.context import GenerationContext
 from app.logging import log_agent
 
+# Фабрика выпускает игры только на Three.js. Двумерные проекты — это та же сцена под
+# ортографической камерой (`knowledge/threejs/orthographic_2d_and_pointer_input.md`),
+# а не второй рендерер: один бандл, одна система качества, один набор уже починенных
+# багов. Агент остался в пайплайне, потому что он всё ещё выбирает *конфигурацию*
+# стека (перспектива/ортография, нужен ли навмеш, нужна ли постобработка).
+RENDERER = "threejs"
+
+# Версии, на которых проверена база знаний (`knowledge/stack/README.md`).
+THREE_VERSION = "^0.185.1"
+PHYSICS_ENGINE = "Rapier3D (@dimforge/rapier3d-compat ^0.20.0)"
+
+_3D_HINTS = (
+    "3d", "ragdoll", "physics", "физик", "глубин", "spatial", "arena", "арен",
+    "гонк", "racing", "drift", "шутер", "shooter", "fps", "стелс", "stealth",
+    "файтинг", "fighting", "машин", "vehicle", "полёт", "flight",
+)
+
+
 class RendererSelectorAgent:
-    """Evaluates 3D vs 2D requirements and selects Three.js or PixiJS with physics engine."""
+    """Фиксирует Three.js и подбирает конфигурацию стека под жанр."""
 
     def run(self, ctx: GenerationContext):
         concept = ctx.concept
-        
-        # Check if user explicitly provided a renderer
-        if ctx.forced_renderer and ctx.forced_renderer != "auto":
-            concept.renderer = ctx.forced_renderer
-            concept.renderer_reason = f"User explicitly specified '{ctx.forced_renderer}'."
-            concept.renderer_confidence = 1.0
-        elif not concept.renderer_reason:
-            lower = (ctx.raw_prompt + " " + concept.genre).lower()
-            if any(w in lower for w in ["3d", "ragdoll", "physics", "физик", "глубин", "spatial", "arena", "арен"]):
-                concept.renderer = "threejs"
-                concept.renderer_reason = "3D spatial gameplay, active ragdoll physics, and lighting require Three.js + Rapier3D."
-                concept.renderer_confidence = 0.95
-            else:
-                concept.renderer = "pixijs"
-                concept.renderer_reason = "2D sprite batching and lightweight canvas rendering require PixiJS."
-                concept.renderer_confidence = 0.92
 
-        # Sync tech spec
-        concept.tech_spec.renderer = concept.renderer
-        if concept.renderer == "threejs":
-            concept.tech_spec.renderer_version = "^0.170.0"
-            concept.tech_spec.physics_engine = "Rapier3D (@dimforge/rapier3d-compat 0.13.x)"
+        forced = (ctx.forced_renderer or "").strip().lower()
+        if forced and forced not in ("auto", "threejs", "three.js", "three"):
+            log_agent(
+                "RendererSelector",
+                f"[warn]Запрошен рендерер '{forced}', но фабрика собирает только Three.js — "
+                f"использую Three.js с ортографической камерой для 2D.[/warn]",
+            )
+
+        concept.renderer = RENDERER
+        concept.renderer_confidence = 1.0
+
+        lower = (ctx.raw_prompt + " " + concept.genre).lower()
+        spatial = any(w in lower for w in _3D_HINTS)
+        if spatial:
+            concept.renderer_reason = (
+                "Three.js + Rapier3D: пространственный геймплей, физика и освещение. "
+                "Перспективная камера."
+            )
         else:
-            concept.tech_spec.renderer_version = "^8.0.0"
-            concept.tech_spec.physics_engine = "Matter.js (^0.19.0)"
+            concept.renderer_reason = (
+                "Three.js + Rapier3D. Выпуск 2D-игр временно отключён "
+                "(pipeline.enable_2d), поэтому даже плоский замысел собирается "
+                "как 3D с перспективной камерой."
+            )
 
-        log_agent("RendererSelector", f"Selected: [highlight]{concept.renderer.upper()}[/highlight] (Confidence: {concept.renderer_confidence:.0%}) | Rationale: {concept.renderer_reason}")
+        concept.tech_spec.renderer = RENDERER
+        concept.tech_spec.renderer_version = THREE_VERSION
+        concept.tech_spec.physics_engine = PHYSICS_ENGINE
+
+        # Ортографическая ветка вернётся вместе с pipeline.enable_2d.
+        camera = "perspective"
+        log_agent(
+            "RendererSelector",
+            f"Renderer: [highlight]THREE.JS[/highlight] ({camera} camera) | {concept.renderer_reason}",
+        )

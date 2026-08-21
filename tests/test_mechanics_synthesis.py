@@ -76,7 +76,7 @@ def test_skill_generator_dynamic_mechanic_skills(tmp_path):
     skill_agent.run(ctx)
     
     skill_ids = [s.skill_id for s in ctx.concept.skills]
-    assert "stealth_skill" in skill_ids or "grappling_skill" in skill_ids
+    assert "stealth_skill" in skill_ids
     
     stealth_skill = next((s for s in ctx.concept.skills if s.skill_id == "stealth_skill"), None)
     if stealth_skill:

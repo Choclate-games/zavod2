@@ -11,7 +11,7 @@ class GenerationContext:
     raw_prompt: str
     output_base_dir: Path
     mode: str = "standard" # fast, standard, deep
-    forced_renderer: Optional[str] = None # threejs, pixijs, auto
+    forced_renderer: Optional[str] = None # threejs | auto (the factory is Three.js only)
     provider_name: str = "local"
     image_provider_name: str = "local"
     

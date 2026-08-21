@@ -6,7 +6,7 @@
 
 ## 🌟 Обзор проекта
 - **Жанр**: Казуальный симулятор / Кликер (ASMR Дробилка / Физический Idle-разрушитель)
-- **Стек**: TypeScript (Strict Mode), Three.js, Web Audio API, Vite
+- **Стек**: TypeScript (Strict Mode), Three.js, Rapier3D (`@dimforge/rapier3d-compat`), `three-mesh-bvh`, Web Audio API, Vite
 - **Платформа**: Playgama Bridge (Яндекс Игры / VK / Web / Android / iOS)
 - **Ориентация**: Portrait (вертикальная)
 - **Целевая аудитория**: Любители расслабляющих ASMR-видео с гидравлическим прессом/дробилками и поклонники медитативного кликер-геймплея.
@@ -61,8 +61,11 @@ src/
 │   ├── Game.ts                 # Главный координатор и менеджер состояний
 │   ├── GameLoop.ts             # Фиксированный 60 Гц цикл с защитой от скачков delta time
 │   └── Types.ts                # TypeScript интерфейсы и структуры данных
+├── physics/
+│   ├── PhysicsWorld.ts         # Rapier3D менеджер физического мира, коллайдеры и пул твердых тел
+│   └── RollerBVH.ts            # three-mesh-bvh пространственный расчет столкновений с зубьями
 ├── data/
-│   ├── ModelsData.ts           # 20 воксельных 3D моделей в 5 коллекциях
+│   ├── ModelsData.ts           # 100 воксельных 3D моделей в 10 коллекциях
 │   ├── UpgradeConfig.ts        # Математические формулы и баланс улучшений
 │   └── Localization.ts         # Локализация на русском и английском языках
 ├── platform/
@@ -73,8 +76,8 @@ src/
 ├── rendering/
 │   ├── SceneManager.ts         # Студийное освещение Three.js, мягкие тени и камера (42° FOV)
 │   ├── RollerMechanism.ts      # Двойные зубчатые валы со встречным вращением и скинами
-│   ├── VoxelModelObject.ts     # Послойный срез вокселей через Three.InstancedMesh
-│   ├── ParticleStream.ts       # Пул физических частиц (1500 кубиков) с гравитацией
+│   ├── VoxelModelObject.ts     # Физический контакт и срез вокселей через BVH и InstancedMesh
+│   ├── ParticleStream.ts       # Синхронизация InstancedMesh с твердыми телами Rapier3D
 │   └── SparkVFX.ts             # Искры и динамическое свечение в точке контакта
 ├── systems/
 │   ├── ShredderSystem.ts       # Физика затягивания модели и скола вокселей

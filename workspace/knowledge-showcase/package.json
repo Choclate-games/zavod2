@@ -5,16 +5,30 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "npm run check:all && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "check:fighting": "tsx scripts/fighting-check.ts",
+    "check:racing": "tsx scripts/racing-check.ts",
+    "check:all": "tsc --noEmit && tsx scripts/fighting-check.ts && tsx scripts/racing-check.ts && tsx scripts/td-check.ts && tsx scripts/rts-check.ts && tsx scripts/smoke-check.ts",
+    "check:td": "tsx scripts/td-check.ts",
+    "check:rts": "tsx scripts/rts-check.ts",
+    "check:smoke": "tsx scripts/smoke-check.ts"
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
     "typescript": "^7.0.2",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "tsx": "^4.19.2"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
-    "three": "^0.185.1"
+    "@recast-navigation/three": "^0.43.1",
+    "bitecs": "^0.4.0",
+    "postprocessing": "^6.39.4",
+    "recast-navigation": "^0.43.1",
+    "three": "^0.185.1",
+    "three-mesh-bvh": "^0.9.14",
+    "yuka": "^0.7.8"
   }
 }

@@ -27,8 +27,8 @@ class ConsistencyValidator:
             if renderer == "threejs" and "three.js" not in prompt_text and "threejs" not in prompt_text:
                 results.append({"item": "Renderer Consistency", "status": "FAIL", "detail": "AI Developer Prompt does not mention Three.js"})
                 all_passed = False
-            elif renderer == "pixijs" and "pixijs" not in prompt_text and "pixi" not in prompt_text:
-                results.append({"item": "Renderer Consistency", "status": "FAIL", "detail": "AI Developer Prompt does not mention PixiJS"})
+            elif renderer != "threejs":
+                results.append({"item": "Renderer Consistency", "status": "FAIL", "detail": f"Unsupported renderer '{renderer}': the factory ships Three.js only"})
                 all_passed = False
             else:
                 results.append({"item": "Renderer Consistency", "status": "PASS", "detail": f"Correct renderer ({renderer}) referenced"})

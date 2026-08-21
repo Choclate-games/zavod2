@@ -15,16 +15,17 @@ class SelfCritiqueAgent:
         corrections = []
 
         # 1. Check Renderer Consistency
-        if concept.renderer == "threejs" and "pixi" in concept.tech_spec.renderer.lower():
-            issues_found.append("Mismatch: Concept renderer is threejs but TechSpec specifies PixiJS.")
+        # Фабрика собирает только Three.js: любой другой рендерер в концепте или техспеке — это
+        # остаток промпта или галлюцинация модели, а не решение.
+        if concept.renderer != "threejs":
+            issues_found.append(f"Unsupported renderer '{concept.renderer}': the factory ships Three.js only.")
+            concept.renderer = "threejs"
+            corrections.append("Forced renderer to Three.js.")
+        if "three" not in concept.tech_spec.renderer.lower():
+            issues_found.append("Mismatch: TechSpec renderer is not Three.js.")
             concept.tech_spec.renderer = "threejs"
-            concept.tech_spec.physics_engine = "Rapier3D (@dimforge/rapier3d-compat 0.13.x)"
+            concept.tech_spec.physics_engine = "Rapier3D (@dimforge/rapier3d-compat ^0.20.0)"
             corrections.append("Synchronized TechSpec renderer and physics to Three.js + Rapier3D.")
-        elif concept.renderer == "pixijs" and "three" in concept.tech_spec.renderer.lower():
-            issues_found.append("Mismatch: Concept renderer is pixijs but TechSpec specifies Three.js.")
-            concept.tech_spec.renderer = "pixijs"
-            concept.tech_spec.physics_engine = "Matter.js (^0.19.0)"
-            corrections.append("Synchronized TechSpec renderer and physics to PixiJS + Matter.js.")
 
         # 2. Check Playgama completeness
         if not concept.playgama.cloud_save_keys:

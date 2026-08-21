@@ -9,6 +9,14 @@ factory:
   templates_dir: "templates"
   knowledge_dir: "knowledge"
 
+# Стек и ограничения конвейера.
+pipeline:
+  renderer: "threejs"        # единственный рендерер фабрики
+  # Поддержка 2D-игр ВРЕМЕННО отключена, а не удалена: фабрика
+  # выпускает только 3D. Знания по PixiJS лежат в knowledge_archive/pixijs/
+  # и не загружаются; порядок возврата — в knowledge_archive/README.md.
+  enable_2d: false
+
 modes:
   fast:
     description: "Fast generation: essential docs, preview prompt, preview image, and AI developer prompt"
@@ -59,7 +67,7 @@ documents:
     - DIFFICULTY_DESIGN.md
     - TECHNICAL_SPECIFICATION.md
     - ARCHITECTURE_DOCUMENT.md
-    - THREEJS_OR_PIXI_ARCHITECTURE.md
+    - THREEJS_ARCHITECTURE.md
     - ART_DIRECTION.md
     - UI_UX_SPECIFICATION.md
     - MOBILE_CONTROLS.md

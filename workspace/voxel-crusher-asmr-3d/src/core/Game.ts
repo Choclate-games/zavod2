@@ -3,6 +3,7 @@ import { GameState, VoxelModelData } from './Types';
 import { PlaygamaService } from '../platform/PlaygamaService';
 import { StorageService } from '../platform/StorageService';
 import { AudioManager } from '../audio/AudioManager';
+import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { SceneManager } from '../rendering/SceneManager';
 import { RollerMechanism } from '../rendering/RollerMechanism';
 import { ParticleStream } from '../rendering/ParticleStream';
@@ -21,6 +22,7 @@ export class Game {
   private playgama: PlaygamaService;
   private storage: StorageService;
   private audio: AudioManager;
+  private physicsWorld: PhysicsWorld;
 
   private sceneManager!: SceneManager;
   private roller!: RollerMechanism;
@@ -45,27 +47,31 @@ export class Game {
     this.playgama = PlaygamaService.getInstance();
     this.storage = StorageService.getInstance();
     this.audio = AudioManager.getInstance();
+    this.physicsWorld = PhysicsWorld.getInstance();
     this.allModels = getAllModels();
   }
 
   public async init(): Promise<void> {
     console.log('[Game] Initializing systems...');
 
-    // 1. Audio Engine
+    // 1. Physics Engine (Rapier3D)
+    await this.physicsWorld.init();
+
+    // 2. Audio Engine
     this.audio.init();
 
-    // 2. Storage & Saved Progress
+    // 3. Storage & Saved Progress
     const saved = await this.storage.load();
     this.audio.setPlayerMuted(!saved.soundEnabled);
 
-    // 3. Three.js Scene & Visuals
+    // 4. Three.js Scene & Visuals
     const container = document.getElementById('game-container') || document.body;
     this.sceneManager = new SceneManager(container);
     this.roller = new RollerMechanism(this.sceneManager.scene);
     this.particleStream = new ParticleStream(this.sceneManager.scene);
     this.sparkVFX = new SparkVFX(this.sceneManager.scene);
 
-    // 4. Gameplay Systems
+    // 5. Gameplay Systems
     this.economy = new EconomySystem(this.eventBus);
     this.upgrades = new UpgradeSystem(this.eventBus, this.economy);
     this.combo = new ComboSystem(this.eventBus);
@@ -82,7 +88,7 @@ export class Game {
       this.economy
     );
 
-    // 5. Controls & UI
+    // 6. Controls & UI
     this.touchControls = new TouchControls(this.eventBus);
     this.ui = new UIManager(
       this.eventBus,
@@ -95,20 +101,20 @@ export class Game {
     this.setupListeners();
     this.applyUpgradesToVisuals();
 
-    // 6. Setup Game Loop
+    // 7. Setup Game Loop
     this.gameLoop = new GameLoop(
       (dt) => this.update(dt),
       () => this.render()
     );
 
-    // 7. Load starting model
+    // 8. Load starting model
     this.currentModelIndex = saved.currentModelIndex || 0;
     if (this.currentModelIndex >= this.allModels.length) {
       this.currentModelIndex = 0;
     }
     this.shredder.loadModel(this.allModels[this.currentModelIndex]);
 
-    // 8. Lifecycle bindings with Playgama
+    // 9. Lifecycle bindings with Playgama
     this.playgama.onPauseStateChanged((paused) => {
       this.gameLoop.setPaused(paused);
       this.audio.setPlatformMuted(paused);
@@ -118,13 +124,13 @@ export class Game {
       this.audio.setPlatformMuted(muted);
     });
 
-    // 9. Start loop and dismiss loading screen
+    // 10. Start loop and dismiss loading screen
     this.gameLoop.start();
     this.currentState = 'PLAYING';
     this.ui.hideLoading();
     this.playgama.sendGameReady();
 
-    console.log('[Game] Ready and running at 60 FPS!');
+    console.log('[Game] Ready and running with Rapier3D and three-mesh-bvh at 60 FPS!');
   }
 
   private setupListeners(): void {
@@ -209,10 +215,10 @@ export class Game {
     this.combo.update(dt);
     const speedMult = this.combo.getSpeedMultiplier() * this.upgrades.getMultiplier('SPEED');
 
-    // 2. Rollers rotation
+    // 2. Rollers rotation (syncs BVH & Rapier kinematic colliders)
     this.roller.update(dt, speedMult);
 
-    // 3. Shredder destruction & falling particles
+    // 3. Shredder destruction & falling physics particles
     this.shredder.update(dt);
     this.particleStream.update(dt);
     this.sparkVFX.update(dt);

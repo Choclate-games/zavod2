@@ -40,14 +40,19 @@ def test_local_provider_synthesizes_mech_builder():
     haystack = (concept.hook + concept.player_fantasy + " ".join(m.name for m in concept.mechanics)).lower()
     assert "мех" in haystack or "турел" in haystack or "баз" in haystack
 
-def test_local_provider_synthesizes_cards_pixijs():
+def test_local_provider_downgrades_2d_while_disabled():
     provider = LocalAIProvider()
     concept = provider.generate_structured(
         "system prompt",
         "2D карточный рогалик с комбо и колодой",
         GameConcept
     )
-    assert concept.renderer == "pixijs"
+    # Пока pipeline.enable_2d = false, явный запрос 2D не падает, а поднимается до 3D:
+    # фабрика выпускает только Three.js-игры с перспективной камерой.
+    from app.config import AppConfig
+    assert AppConfig().enable_2d is False, "тест описывает поведение при отключённом 2D"
+    assert concept.renderer == "threejs"
+    assert "2D" not in concept.genre
     assert concept.orientation == "portrait"
 
 def test_local_image_generation(tmp_path: Path):

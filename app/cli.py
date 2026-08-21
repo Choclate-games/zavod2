@@ -38,7 +38,7 @@ def create(
     file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read idea from text/markdown file"),
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Run interactive prompt wizard"),
     mode: str = typer.Option("standard", "--mode", "-m", help="Generation mode: fast, standard, deep"),
-    renderer: str = typer.Option("auto", "--renderer", "-r", help="Rendering engine: auto, threejs, pixijs"),
+    renderer: str = typer.Option("auto", "--renderer", "-r", help="Rendering engine (Three.js only): auto | threejs"),
     provider: str = typer.Option("local", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, kimi, opencode, local"),
     image_provider: str = typer.Option("local", "--image-provider", help="Image generator: qwen, agy, local, none"),
     output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o", help="Target output directory")
@@ -53,7 +53,7 @@ def create(
         genre = Prompt.ask("[bold white]2. Жанр (или Enter для авто-определения)[/bold white]", default="")
         special = Prompt.ask("[bold white]3. Особые требования / Механики[/bold white]", default="")
         platform = Prompt.ask("[bold white]4. Платформа[/bold white]", default="Яндекс Игры / Playgama Bridge")
-        pref_renderer = Prompt.ask("[bold white]5. Renderer (auto / threejs / pixijs)[/bold white]", default="auto")
+        pref_renderer = Prompt.ask("[bold white]5. Renderer (auto / threejs)[/bold white]", default="auto")
         if pref_renderer != "auto":
             renderer = pref_renderer
         

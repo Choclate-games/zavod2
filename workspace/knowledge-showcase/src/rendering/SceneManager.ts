@@ -101,8 +101,19 @@ export class SceneManager {
   private readonly sky = new THREE.Color(0x95ad9e);
   private sun: THREE.DirectionalLight | null = null;
   private garageOrbitAngle = 0;
+  private readonly ownsRenderer: boolean;
 
-  constructor() {
+  /**
+   * `external` — рендерер стенда. Стенд владеет одним WebGL-контекстом на все
+   * демо: второй контекст в той же вкладке вытесняет первый (браузер держит
+   * ограниченное число), и вкладки начинают гаснуть при переключении.
+   */
+  constructor(external?: THREE.WebGLRenderer) {
+    this.ownsRenderer = external === undefined;
+    if (external) {
+      this.renderer = external;
+      return;
+    }
     this.renderer = new THREE.WebGLRenderer({
       antialias: false,
       powerPreference: 'high-performance',
@@ -120,9 +131,11 @@ export class SceneManager {
   }
 
   initialize(): void {
-    this.renderer.domElement.className = 'game-canvas';
-    this.renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
-    document.getElementById('game-root')?.append(this.renderer.domElement);
+    if (this.ownsRenderer) {
+      this.renderer.domElement.className = 'game-canvas';
+      this.renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+      document.getElementById('game-root')?.append(this.renderer.domElement);
+    }
     this.scene.fog = new THREE.Fog(0x95ad9e, 90, 360);
     this.scene.add(this.roadGroup, this.trackGroup, this.decorationGroup, this.truckGroup, this.cargoGroup, this.particleGroup);
     this.scene.add(new THREE.HemisphereLight(0xe4ede2, 0x504130, 2.2));
@@ -188,6 +201,7 @@ export class SceneManager {
 
     this.camera.updateProjectionMatrix();
     // Cap at 1.0 DPR on mobile/retina screens to eliminate GPU fillrate bottleneck.
+    if (!this.ownsRenderer) return;   // размером и DPR общего рендерера владеет хост
     const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 || width < 900;
     const maxDpr = isMobile ? Math.min(window.devicePixelRatio, 1.0) : Math.min(window.devicePixelRatio, 1.25);
     this.renderer.setPixelRatio(maxDpr);
@@ -229,7 +243,7 @@ export class SceneManager {
     this.camera.lookAt(this.lookTarget);
 
     this.followSun(target);
-    this.renderer.render(this.scene, this.camera);
+    if (this.ownsRenderer) this.renderer.render(this.scene, this.camera);
   }
 
   /** Showroom camera for the Garage */
@@ -248,7 +262,7 @@ export class SceneManager {
     this.camera.lookAt(this.lookTarget);
 
     this.followSun(target);
-    this.renderer.render(this.scene, this.camera);
+    if (this.ownsRenderer) this.renderer.render(this.scene, this.camera);
   }
 
   resetCamera(target: THREE.Vector3): void {
