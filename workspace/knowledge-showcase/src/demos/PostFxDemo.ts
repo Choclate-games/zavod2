@@ -24,6 +24,8 @@ export class PostFxDemo implements Demo {
     '<b>1</b> bloom · <b>2</b> depth of field · <b>3</b> контур · <b>4</b> сканлайны · <b>Space</b> импульс удара (без пересборки прохода) · тир качества — в шапке',
     '<b>1</b> bloom · <b>2</b> depth of field · <b>3</b> outline · <b>4</b> scanlines · <b>Space</b> hit impulse (no pass rebuild) · quality tier is in the header',
   ] as const;
+  readonly category = ['✨ Графика и VFX', '✨ Graphics & VFX'] as const;
+  readonly tags = ['постобработка', 'postprocessing', 'bloom', 'dof', 'шейдеры', 'эффекты', 'outline', 'scanlines'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);

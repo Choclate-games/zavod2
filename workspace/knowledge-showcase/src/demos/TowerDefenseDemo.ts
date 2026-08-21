@@ -41,6 +41,8 @@ export class TowerDefenseDemo implements Demo {
     '<b>ЛКМ</b> построить / выбрать · <b>1</b>/<b>2</b>/<b>3</b> пулемёт / мортира / лазер · <b>T</b> приоритет цели · <b>U</b> улучшить · <b>X</b> продать · <b>Space</b> волна досрочно',
     '<b>LMB</b> build / select · <b>1</b>/<b>2</b>/<b>3</b> gun / cannon / laser · <b>T</b> target priority · <b>U</b> upgrade · <b>X</b> sell · <b>Space</b> call wave early',
   ] as const;
+  readonly category = ['🧠 Стратегия и AI', '🧠 Strategy & AI'] as const;
+  readonly tags = ['башни', 'tower defense', 'bitecs', 'ecs', 'волны', 'апгрейды', 'instanced mesh'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.5, 400);

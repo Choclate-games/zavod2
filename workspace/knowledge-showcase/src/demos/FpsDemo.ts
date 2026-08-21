@@ -55,6 +55,8 @@ export class FpsDemo implements Demo {
     '<b>Клик</b> захватить мышь · <b>WASD</b> движение · <b>ЛКМ</b> огонь · <b>Shift</b> прицел · <b>R</b> перезарядка · <b>G</b> рестарт. Красные бочки детонируют цепочкой.',
     '<b>Click</b> to lock the mouse · <b>WASD</b> move · <b>LMB</b> fire · <b>Shift</b> aim · <b>R</b> reload · <b>G</b> restart. Red barrels chain-detonate.',
   ] as const;
+  readonly category = ['⚔️ Экшен и боёвка', '⚔️ Action & Combat'] as const;
+  readonly tags = ['шутер', 'fps', 'стрельба', 'hitscan', 'отдача', 'ии', 'бочки', 'взрывы', 'shooter', 'gun'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300);

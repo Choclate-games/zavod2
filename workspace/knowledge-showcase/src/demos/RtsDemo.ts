@@ -53,6 +53,8 @@ export class RtsDemo implements Demo {
     '<b>ЛКМ</b> рамка выделения · <b>ПКМ</b>/<b>ЛКМ+Shift</b> приказ · <b>Ctrl+Shift</b> добавить к выделению · <b>A</b> выделить всех · <b>F</b> флоу-филд · <b>R</b> рестарт',
     '<b>LMB</b> selection box · <b>RMB</b>/<b>LMB+Shift</b> order · <b>Ctrl+Shift</b> add to selection · <b>A</b> select all · <b>F</b> flow field · <b>R</b> restart',
   ] as const;
+  readonly category = ['🧠 Стратегия и AI', '🧠 Strategy & AI'] as const;
+  readonly tags = ['стратегия', 'rts', 'строй', 'приказы', 'выделение рамкой', 'флоуфилд', 'юниты', 'instanced mesh'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.5, 400);

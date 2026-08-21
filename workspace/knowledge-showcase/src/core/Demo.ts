@@ -41,6 +41,10 @@ export interface Demo {
   readonly title: readonly [string, string];
   /** Подсказка по управлению: [ru, en]. HTML разрешён. */
   readonly hint: readonly [string, string];
+  /** Категория демо для каталога: [ru, en]. */
+  readonly category?: readonly [string, string];
+  /** Ключевые слова для поиска. */
+  readonly tags?: readonly string[];
 
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;

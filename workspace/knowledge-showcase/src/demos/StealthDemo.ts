@@ -65,6 +65,8 @@ export class StealthDemo implements Demo {
     '<b>WASD</b> move · <b>Shift</b> sneak (silent) · <b>Space</b> run (heard from 9 m)'
     + ' · <b>R</b> restart<br>Shadows slow detection 2.5×. Reach the yellow zone without raising the alarm.',
   ] as const;
+  readonly category = ['🧟 Выживание и стелс', '🧟 Survival & Stealth'] as const;
+  readonly tags = ['стелс', 'зрение', 'конусы', 'патруль', 'тревога', 'тени', 'stealth', 'vision', 'guard', 'alarm'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.5, 160);

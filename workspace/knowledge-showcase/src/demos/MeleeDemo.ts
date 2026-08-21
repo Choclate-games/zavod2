@@ -63,6 +63,8 @@ export class MeleeDemo implements Demo {
     + ' · <b>Tab</b> lock on · <b>R</b> restart<br>'
     + 'Parry within 6 frames of the blow to open a riposte (85 dmg). Combo lingers for 22 frames.',
   ] as const;
+  readonly category = ['⚔️ Экшен и боёвка', '⚔️ Action & Combat'] as const;
+  readonly tags = ['слэшер', 'комбо', 'парирование', 'рэгдолл', 'rapier3d', 'ближний бой', 'melee', 'combat', 'ragdoll'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(48, 1, 0.1, 120);

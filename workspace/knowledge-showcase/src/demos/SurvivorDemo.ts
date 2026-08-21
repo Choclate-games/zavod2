@@ -37,6 +37,8 @@ export class SurvivorDemo implements Demo {
     '<b>WASD</b> move · auto-fire and blades · <b>1</b>/<b>2</b>/<b>3</b> pick a card'
     + ' · <b>R</b> restart<br>The run pauses on level-up — that pause is the decision window.',
   ] as const;
+  readonly category = ['🧟 Выживание и стелс', '🧟 Survival & Stealth'] as const;
+  readonly tags = ['выживание', 'рой', 'орда', 'рогалик', 'карточки', 'апгрейды', 'bitecs', 'survivor', 'roguelike'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(52, 1, 0.5, 200);

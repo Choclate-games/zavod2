@@ -20,6 +20,8 @@ export class YukaDemo implements Demo {
     '<b>WASD</b> двигать игрока · охранник патрулирует, замечает вас конусом зрения и переходит в погоню · <b>Space</b> «спрятаться» (охранник помнит последнюю позицию 4 с) · <b>1</b>/<b>2</b>/<b>3</b> поведение роя',
     '<b>WASD</b> move the player · the guard patrols, spots you with a vision cone and switches to pursuit · <b>Space</b> hide (guard remembers your last position for 4s) · <b>1</b>/<b>2</b>/<b>3</b> flock behaviour',
   ] as const;
+  readonly category = ['🧠 Стратегия и AI', '🧠 Strategy & AI'] as const;
+  readonly tags = ['yuka', 'ai', 'steering', 'fsm', 'рой', 'boids', 'погоня', 'конус зрения', 'flock'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(52, 1, 0.5, 400);

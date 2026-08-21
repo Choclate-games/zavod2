@@ -43,6 +43,8 @@ export class RacingDemo implements Demo {
     '<b>W</b>/<b>S</b> газ и тормоз · <b>A</b>/<b>D</b> руль · <b>Space</b> ручник (занос копит очки) · <b>C</b> камера · <b>R</b> рестарт',
     '<b>W</b>/<b>S</b> throttle and brake · <b>A</b>/<b>D</b> steer · <b>Space</b> handbrake (drift scores) · <b>C</b> camera · <b>R</b> restart',
   ] as const;
+  readonly category = ['🚚 Физика и транспорт', '🚚 Physics & Vehicles'] as const;
+  readonly tags = ['гонка', 'трасса', 'соперники', 'дрифт', 'чекпойнты', 'racing', 'car', 'drift', 'opponents'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(58, 1, 0.5, 900);

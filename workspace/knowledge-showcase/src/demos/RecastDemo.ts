@@ -24,6 +24,8 @@ export class RecastDemo implements Demo {
     '<b>ЛКМ</b> отправить толпу в точку · <b>N</b> показать навмеш · <b>R</b> разбросать агентов · толпа сама обходит препятствия и друг друга',
     '<b>LMB</b> send the crowd to a point · <b>N</b> show the navmesh · <b>R</b> scatter agents · the crowd avoids obstacles and each other',
   ] as const;
+  readonly category = ['🧠 Стратегия и AI', '🧠 Strategy & AI'] as const;
+  readonly tags = ['recast', 'navmesh', 'навмеш', 'поиск пути', 'толпа', 'crowd', 'detour', 'navigation', 'ai'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.5, 400);

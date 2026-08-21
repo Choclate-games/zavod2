@@ -14,12 +14,19 @@
     <div id="ui-overlay">
         <div class="header interactive">
             <div class="header-left">
-                <div id="title-text" class="app-title">⚡ Стенд базы знаний фабрики</div>
+                <div id="title-text" class="app-title">⚡ Стенд базы знаний</div>
             </div>
 
-            <!-- Вкладки строятся из реестра демо в main.ts, а не руками в разметке:
-                 разъезжание списка вкладок и списка режимов было отдельным багом. -->
-            <div class="tabs" id="tab-bar"></div>
+            <!-- Компактный переключатель демо с каталогом -->
+            <div class="demo-nav-group">
+                <button class="nav-arrow-btn" id="demo-prev-btn" title="Предыдущее демо (Q / [)" aria-label="Предыдущее демо">◀</button>
+                <button class="demo-selector-btn" id="demo-catalog-trigger" title="Открыть каталог всех демо" aria-haspopup="dialog">
+                    <span class="demo-selector-text" id="current-demo-title">Загрузка…</span>
+                    <span class="demo-count-badge" id="demo-count-badge">13</span>
+                    <span class="demo-chevron">▼</span>
+                </button>
+                <button class="nav-arrow-btn" id="demo-next-btn" title="Следующее демо (E / ])" aria-label="Следующее демо">▶</button>
+            </div>
 
             <div class="header-right">
                 <select class="utility-btn" id="quality-select" title="Тир качества">
@@ -29,6 +36,48 @@
                 </select>
                 <button class="utility-btn" id="lang-toggle">🌐 RU</button>
                 <button class="utility-btn" id="mute-toggle">🔊 Звук</button>
+            </div>
+        </div>
+
+        <!-- Каталог демонстраций (модальное окно с поиском и категориями) -->
+        <div id="catalog-modal" class="catalog-modal-backdrop" style="display: none;">
+            <div class="catalog-modal-card interactive" role="dialog" aria-modal="true" aria-labelledby="catalog-title">
+                <div class="catalog-header">
+                    <div class="catalog-header-title-row">
+                        <div class="catalog-title-group">
+                            <span class="catalog-icon">🎮</span>
+                            <h2 id="catalog-title" class="catalog-title">Каталог демонстраций</h2>
+                            <span class="catalog-badge-total" id="catalog-total-badge">13</span>
+                        </div>
+                        <button class="catalog-close-btn" id="catalog-close-btn" aria-label="Закрыть каталог">✕</button>
+                    </div>
+
+                    <div class="catalog-search-row">
+                        <div class="search-input-wrapper">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="catalog-search" class="catalog-search-input" placeholder="Поиск по названию или тегам…" autocomplete="off" spellcheck="false">
+                            <button id="catalog-search-clear" class="search-clear-btn" style="display: none;" title="Очистить">✕</button>
+                        </div>
+                    </div>
+
+                    <div class="catalog-categories" id="catalog-categories">
+                        <!-- Чипсы категорий рендерятся динамически -->
+                    </div>
+                </div>
+
+                <div class="catalog-body">
+                    <div class="catalog-grid" id="catalog-grid">
+                        <!-- Карточки демо рендерятся динамически -->
+                    </div>
+                    <div class="catalog-empty" id="catalog-empty" style="display: none;">
+                        <div class="empty-icon">🔍</div>
+                        <div class="empty-text" id="catalog-empty-text">Ничего не найдено</div>
+                    </div>
+                </div>
+
+                <div class="catalog-footer">
+                    <span class="footer-hint" id="catalog-footer-hint">Быстрое переключение: <b>Q</b> / <b>E</b> или <b>[</b> / <b>]</b> · Закрыть: <b>Esc</b></span>
+                </div>
             </div>
         </div>
 

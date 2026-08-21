@@ -20,6 +20,8 @@ export class TruckDemo implements Demo {
     '<b>W</b>/<b>S</b> газ и тормоз · <b>A</b>/<b>D</b> руль · <b>Space</b> ручник (дрифт) · <b>R</b> восстановить',
     '<b>W</b>/<b>S</b> throttle and brake · <b>A</b>/<b>D</b> steer · <b>Space</b> handbrake (drift) · <b>R</b> recover',
   ] as const;
+  readonly category = ['🚚 Физика и транспорт', '🚚 Physics & Vehicles'] as const;
+  readonly tags = ['грузовик', 'зил-130', 'rapier3d', 'физика', 'колеса', 'подвеска', 'truck', 'physics', 'vehicle'] as const;
 
   scene!: THREE.Scene;
   camera!: THREE.PerspectiveCamera;

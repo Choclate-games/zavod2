@@ -25,6 +25,8 @@ export class BvhDemo implements Demo {
     '<b>WASD</b> ходьба по мешу (капсула через shapecast) · <b>Space</b> прыжок · <b>ЛКМ</b> выстрел-отметина · <b>B</b> включить/выключить BVH · <b>V</b> показать дерево',
     '<b>WASD</b> walk the mesh (capsule via shapecast) · <b>Space</b> jump · <b>LMB</b> shoot a decal · <b>B</b> toggle BVH · <b>V</b> show the tree',
   ] as const;
+  readonly category = ['🚚 Физика и транспорт', '🚚 Physics & Vehicles'] as const;
+  readonly tags = ['bvh', 'рейкаст', 'капсула', 'three-mesh-bvh', 'коллизии', 'дерево', 'raycast', 'shapecast'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 500);

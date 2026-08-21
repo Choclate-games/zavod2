@@ -85,6 +85,8 @@ export class FightingDemo implements Demo {
     '<b>A</b>/<b>D</b> шаги (назад = блок) · <b>S</b> присед · <b>J</b> лёгкий (4к) · <b>K</b> средний (7к) · <b>L</b> тяжёлый (14к) · <b>I</b> апперкот · <b>H</b> хитбоксы',
     '<b>A</b>/<b>D</b> walk (back = block) · <b>S</b> crouch · <b>J</b> light (4f) · <b>K</b> medium (7f) · <b>L</b> heavy (14f) · <b>I</b> uppercut · <b>H</b> hitboxes',
   ] as const;
+  readonly category = ['⚔️ Экшен и боёвка', '⚔️ Action & Combat'] as const;
+  readonly tags = ['файтинг', 'бой', 'фреймдата', 'хитбокс', 'комбо', 'fighting', 'framedata', 'hitbox', 'combo'] as const;
 
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
