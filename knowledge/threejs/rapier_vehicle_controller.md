@@ -1,8 +1,8 @@
 # Three.js + Rapier 3D: Dynamic Raycast Vehicle Controller (Эталонная физика)
 
-> 💡 **Интерактивное демо**: Протестируйте работу этой физики в `workspace/knowledge-showcase/` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D)»*).
+> 💡 **Интерактивные демо**: Протестируйте работу этой физики в `workspace/knowledge-showcase/` (Режимы: *«🚚 ЗиЛ-130 (Rapier 3D)»* и *«🏁 Гонка: трасса и соперники (Rapier 3D)»*).
 
-Настоящая, проверенная в продакшене физика грузовика/автомобиля на связке **Three.js** и физического движка **Rapier3D (WebAssembly)** через `RAPIER.DynamicRayCastVehicleController`.
+Настоящая, проверенная в продакшене физика автомобиля и грузовика на связке **Three.js** и физического движка **Rapier3D (WebAssembly)** через `RAPIER.DynamicRayCastVehicleController`.
 
 ---
 
@@ -19,6 +19,7 @@ export const GROUP_VEHICLE = 0x0002;
 export const GROUP_CARGO = 0x0004;
 
 export const GROUND_GROUPS = groups(GROUP_GROUND, GROUP_VEHICLE | GROUP_CARGO);
+export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_CARGO);
 export const WHEEL_RAY_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND);
 
 export class PhysicsWorld {
@@ -64,7 +65,7 @@ export class PhysicsWorld {
 
 ---
 
-## 2. Контроллер транспортного средства (`TruckController.ts`)
+## 2. Контроллер транспортного средства (`VehicleController.ts`)
 
 ### Полный цикл кадра (Без микродерганий на любых FPS):
 1. **`fixedUpdate(dt)` (Pre-step)**: сохраняет `prevPosition`/`prevRotation`, прикладывает силы к колесам (`engineForce`/`brake`), вызывает `vehicle.updateVehicle(dt)` и сопротивление среды.
@@ -86,7 +87,7 @@ export interface VehicleInput {
   recover: boolean;
 }
 
-export class TruckController {
+export class VehicleController {
   readonly chassis = new THREE.Group();
   readonly position = new THREE.Vector3();
   readonly rotation = new THREE.Quaternion();
@@ -106,26 +107,26 @@ export class TruckController {
   private steerAngle = 0;
 
   private config = {
-    wheelRadius: 0.6,
-    wheelHalfWidth: 0.22,
+    wheelRadius: 0.35,
+    wheelHalfWidth: 0.15,
     suspension: {
-      connectionY: -0.1,
-      restLength: 0.5,
-      stiffness: 70.0,
-      compression: 3.4,
-      relaxation: 5.2,
-      maxTravel: 0.35,
-      maxForce: 40000.0,
+      connectionY: 0.05,
+      restLength: 0.26,
+      stiffness: 85.0,
+      compression: 4.2,
+      relaxation: 6.0,
+      maxTravel: 0.22,
+      maxForce: 38000.0,
     },
     tire: {
-      frictionSlip: 2.6,
-      sideFrictionStiffness: 0.8,
+      frictionSlip: 3.2,
+      sideFrictionStiffness: 1.6,
     },
     engine: {
-      baseForce: 1950.0,
-      maxSpeed: 16.0, // м/с (~58 км/ч)
-      reverseForce: 950.0,
-      maxReverseSpeed: 6.0,
+      baseForce: 4200.0,
+      maxSpeed: 60.0, // м/с (~216 км/ч)
+      reverseForce: 1600.0,
+      maxReverseSpeed: 14.0,
     }
   };
 
@@ -145,10 +146,10 @@ export class TruckController {
     const axle = { x: -1, y: 0, z: 0 };
 
     const wheelPositions = [
-      { x: -1.08, y: this.config.suspension.connectionY, z: 2.0 },
-      { x: 1.08,  y: this.config.suspension.connectionY, z: 2.0 },
-      { x: -1.08, y: this.config.suspension.connectionY, z: -2.0 },
-      { x: 1.08,  y: this.config.suspension.connectionY, z: -2.0 },
+      { x: -0.88, y: this.config.suspension.connectionY, z: 1.25 },
+      { x: 0.88,  y: this.config.suspension.connectionY, z: 1.25 },
+      { x: -0.90, y: this.config.suspension.connectionY, z: -1.25 },
+      { x: 0.90,  y: this.config.suspension.connectionY, z: -1.25 },
     ];
 
     for (let i = 0; i < 4; i++) {
@@ -174,26 +175,25 @@ export class TruckController {
   fixedUpdate(dt: number, input: VehicleInput): void {
     if (!this.vehicle || !this.body) return;
 
-    // Сохраняем снимок начала шага
     this.prevPosition.copy(this.position);
     this.prevRotation.copy(this.rotation);
 
-    // Руление с адаптивной скоростью
-    const targetSteer = input.steer * 0.52;
+    // Руление с адаптивной скоростью (знак -1 для indexForwardAxis=2)
+    const targetSteer = input.steer * -0.52;
     this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteer, 8.0 * dt);
     this.vehicle.setWheelSteering(0, this.steerAngle);
     this.vehicle.setWheelSteering(1, this.steerAngle);
 
-    // Двигатель и тормоза (CRITICAL_RULES §60)
+    // Двигатель и тормоза
     const forwardSpeed = this.vehicle.currentVehicleSpeed();
     for (let i = 0; i < 4; i++) {
-      const isDrive = i >= 2; // задний привод
+      const isDrive = true; // AWD
       if (input.throttle > 0 && forwardSpeed < this.config.engine.maxSpeed) {
         if (isDrive) this.vehicle.setWheelEngineForce(i, input.throttle * this.config.engine.baseForce);
         this.vehicle.setWheelBrake(i, 0);
       } else if (input.brake > 0) {
         if (forwardSpeed > 0.5) {
-          this.vehicle.setWheelBrake(i, input.brake * 26.0);
+          this.vehicle.setWheelBrake(i, input.brake * 40.0);
           this.vehicle.setWheelEngineForce(i, 0);
         } else {
           if (isDrive) this.vehicle.setWheelEngineForce(i, -input.brake * this.config.engine.reverseForce);
@@ -204,7 +204,7 @@ export class TruckController {
         this.vehicle.setWheelBrake(i, 90.0);
       } else {
         this.vehicle.setWheelEngineForce(i, 0);
-        this.vehicle.setWheelBrake(i, 2.6); // сопротивление холостого хода
+        this.vehicle.setWheelBrake(i, 0);
       }
     }
 
@@ -268,3 +268,19 @@ renderer.setClearColor(skyColor, 1);
 | **Интерполяция** | `lerp(prevPosition, position, alpha)` | Исключает микро-джиттер (stutter) между дискретными физическими шагами (60 Гц) и частотой монитора (120/144+ Гц). |
 | **Слежение камеры** | `camera.position.lerp(interpTarget, 1 - exp(-k * dt))` | Камера следует за интерполированной позицией меша с FPS-независимым сглаживанием по `dt`. |
 | **`scene.background`** | `scene.background = skyColor` | Защищает от черного неба при постобработке через `EffectComposer` / `RenderPass`. |
+
+---
+
+## 5. Частые проблемы и способы их устранения (Troubleshooting)
+
+### 1. Машина обездвижена на спавне / колёса проваливаются
+* **Причина**: Некорректные индексы в `PhysicsWorld.createTerrain()`, когда геометрия дороги, поребриков и террейна соединяется без учета базового смещения индексов каждой секции (`roadPositions.length / 3`). Из-за этого образуются вывернутые самопересекающиеся полигоны.
+* **Решение**: Добавлять каждую секцию с явным оффсетом индекса: `skirtIndices[i] + roadVertCount`.
+
+### 2. Машина цепляется кузовом за асфальт («лежит на брюхе»)
+* **Причина**: Нижняя грань коллайдера `addBoxCollider` находится на одной высоте или ниже точек контакта колес под весом автомобиля.
+* **Решение**: Приподнимать центр коробки кузова (`offset.y = 0.22`), уменьшать её полувысоту (`half.y = 0.16`) и обеспечивать достаточный запас сжатия подвески (`restLength = 0.26, maxTravel = 0.22`).
+
+### 3. Колёса визуально поворачиваются в другую сторону
+* **Причина**: В Rapier 3D `indexForwardAxis = 2` положительный угол `wheelSteering` направляет машину влево.
+* **Решение**: Умножать входной угол руля на `steerSign = -1` перед передачей в `vehicle.setWheelSteering(i, steerAngle)`.

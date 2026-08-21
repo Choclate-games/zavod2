@@ -1,6 +1,6 @@
 # Three.js + Rapier 3D: Arcade Racing, Drift & Skidmarks
 
-> 💡 **Интерактивное демо**: `workspace/knowledge-showcase/index.html` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D 1:1)»*).
+> 💡 **Интерактивные демо**: `workspace/knowledge-showcase/index.html` (Режимы: *«🏁 Гонка: трасса и соперники (Rapier 3D)»* и *«🚚 ЗиЛ-130 (Rapier 3D 1:1)»*).
 
 Аркадные гонки и дрифт на Three.js строятся **исключительно на базе физического движка Rapier 3D (WASM)** через `RAPIER.DynamicRayCastVehicleController`.
 
