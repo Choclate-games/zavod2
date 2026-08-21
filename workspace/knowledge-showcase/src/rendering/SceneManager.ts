@@ -5,6 +5,7 @@ export class SceneManager {
   readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 560);
   readonly renderer: THREE.WebGLRenderer;
   readonly roadGroup = new THREE.Group();
+  readonly trackGroup = new THREE.Group(); // Persistent: never cleared by road rebuilds
   readonly decorationGroup = new THREE.Group();
   readonly truckGroup = new THREE.Group();
   readonly cargoGroup = new THREE.Group();
@@ -40,6 +41,8 @@ export class SceneManager {
     dustParticle: new THREE.MeshLambertMaterial({ color: 0xbfad93, transparent: true, opacity: 0.28, depthWrite: false }),
     smokeParticle: new THREE.MeshLambertMaterial({ color: 0x2e2c2a, transparent: true, opacity: 0.50, depthWrite: false }),
     smokeIdle: new THREE.MeshLambertMaterial({ color: 0xb5b2ad, transparent: true, opacity: 0.20, depthWrite: false }),
+    // Burnt-rubber tire smoke: near-white, denser and much more opaque than diesel exhaust
+    tireSmokeParticle: new THREE.MeshLambertMaterial({ color: 0xd8d5cf, transparent: true, opacity: 0.55, depthWrite: false }),
     sparkParticle: new THREE.MeshBasicMaterial({ color: 0xffe066 }),
     leafGold: new THREE.MeshLambertMaterial({ color: 0xdf9b20, side: THREE.DoubleSide }),
     leafOrange: new THREE.MeshLambertMaterial({ color: 0xd95725, side: THREE.DoubleSide }),
@@ -121,7 +124,7 @@ export class SceneManager {
     this.renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
     document.getElementById('game-root')?.append(this.renderer.domElement);
     this.scene.fog = new THREE.Fog(0x95ad9e, 90, 360);
-    this.scene.add(this.roadGroup, this.decorationGroup, this.truckGroup, this.cargoGroup, this.particleGroup);
+    this.scene.add(this.roadGroup, this.trackGroup, this.decorationGroup, this.truckGroup, this.cargoGroup, this.particleGroup);
     this.scene.add(new THREE.HemisphereLight(0xe4ede2, 0x504130, 2.2));
 
     const sun = new THREE.DirectionalLight(0xffc583, 3.4);

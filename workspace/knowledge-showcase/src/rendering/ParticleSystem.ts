@@ -4,6 +4,7 @@ import { RoadGenerator } from '../world/RoadGenerator';
 
 export type ParticleKind =
   | 'exhaust'
+  | 'tireSmoke'
   | 'dust'
   | 'mud'
   | 'waterSpray'
@@ -35,6 +36,7 @@ interface Particle {
 
 const KIND_LIMITS: Record<ParticleKind, number> = {
   exhaust: 24,
+  tireSmoke: 90,
   dust: 24,
   mud: 30,
   waterSpray: 24,
@@ -122,6 +124,12 @@ export class ParticleSystem {
       imesh.visible = false;
       imesh.castShadow = false;
       imesh.receiveShadow = false;
+      // Particles live in world space while the mesh itself sits at the origin.
+      // THREE.Frustum.intersectsObject computes InstancedMesh.boundingSphere once and then
+      // caches it forever, so the sphere stays pinned near the spawn point: as soon as the
+      // truck drives away every emitter is culled and no particle is ever drawn again.
+      // Same trap as the tire tracks buffer — see TireTracksManager.
+      imesh.frustumCulled = false;
       this.scene.particleGroup.add(imesh);
       this.instancedMeshes.set(kind, imesh);
 
@@ -148,6 +156,7 @@ export class ParticleSystem {
     };
 
     setupKind('exhaust', this.puffGeom, mats.smokeParticle, KIND_LIMITS.exhaust);
+    setupKind('tireSmoke', this.puffGeom, mats.tireSmokeParticle, KIND_LIMITS.tireSmoke);
     setupKind('dust', this.puffGeom, mats.dustParticle, KIND_LIMITS.dust);
     setupKind('mud', this.chunkGeom, mats.mudParticle, KIND_LIMITS.mud);
     setupKind('waterSpray', this.dropletGeom, mats.waterSpray, KIND_LIMITS.waterSpray);
@@ -342,6 +351,56 @@ export class ParticleSystem {
 
     p.rotVelocity.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);
     p.quaternion.identity();
+  }
+
+  /**
+   * Thick burnt-rubber smoke billowing from a spinning / locked tire (burnout, lockup, drift).
+   * Emitted right at the contact patch and rolls outward low along the ground before rising.
+   */
+  emitTireSmoke(
+    pos: THREE.Vector3,
+    forward: THREE.Vector3,
+    intensity: number,
+    wheelRadius = 0.6,
+    count = 2,
+  ): void {
+    const clamped = Math.min(1.0, Math.max(0, intensity));
+    const total = Math.max(1, Math.round(count * (0.5 + clamped * 0.9)));
+
+    for (let n = 0; n < total; n += 1) {
+      const p = this.acquire('tireSmoke');
+      if (!p) return;
+
+      p.active = true;
+      p.life = 0;
+
+      // Long-lived, large and slow: rubber smoke lingers far longer than dust
+      p.maxLife = 1.1 + Math.random() * 0.9 * (0.5 + clamped);
+      p.startScale = 0.16 + Math.random() * 0.10;
+      p.endScale = 1.15 + Math.random() * 0.85 * (0.4 + clamped);
+      p.startOpacity = 0.30 * (0.35 + clamped * 0.65);
+      p.endOpacity = 0.0;
+      p.gravity = 0.85; // buoyant — hot smoke rises
+      p.drag = 0.90;
+      p.turbScale = 1.15; // strong curl/turbulence
+      p.color = undefined;
+
+      // Spawn at the contact patch, spread across the tire width
+      const spreadX = (Math.random() - 0.5) * 0.55;
+      const groundY = pos.y - wheelRadius * 0.90 + 0.03;
+      p.position.set(pos.x + spreadX, groundY + Math.random() * 0.12, pos.z + (Math.random() - 0.5) * 0.4);
+
+      // Rubber smoke is thrown backwards off the rim, then billows sideways and up
+      const backSpeed = 1.2 + Math.random() * 2.4 * (0.4 + clamped);
+      p.velocity.set(
+        -forward.x * backSpeed + spreadX * 3.6,
+        0.55 + Math.random() * 0.85,
+        -forward.z * backSpeed + (Math.random() - 0.5) * 1.5,
+      );
+
+      p.rotVelocity.set((Math.random() - 0.5) * 1.8, (Math.random() - 0.5) * 1.8, (Math.random() - 0.5) * 1.8);
+      p.quaternion.identity();
+    }
   }
 
   /**
@@ -615,6 +674,7 @@ export class ParticleSystem {
     // 2. Build instance matrices and update InstancedMesh counts (10 draw calls max)
     const activeCounts: Record<ParticleKind, number> = {
       exhaust: 0,
+      tireSmoke: 0,
       dust: 0,
       mud: 0,
       waterSpray: 0,

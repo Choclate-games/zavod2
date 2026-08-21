@@ -186,7 +186,7 @@ export class TireTracksManager {
     this.mesh = new THREE.Mesh(this.geometry, mat);
     this.mesh.frustumCulled = false; // Dynamic world-space geometry — bounding sphere is unreliable
     this.mesh.renderOrder = 2; // Render directly above ground mesh
-    this.scene.roadGroup.add(this.mesh);
+    this.scene.trackGroup.add(this.mesh);
   }
 
   reset(): void {
@@ -284,6 +284,10 @@ export class TireTracksManager {
   /**
    * Records a tire track segment for a wheel in contact with the ground.
    * Handles regular driving, wheel spin (пробуксовка), braking (торможение) and drift.
+   *
+   * @returns true if a quad was actually written this call. Callers use this to keep
+   *   tire smoke in lockstep with the visible skidmark instead of running their own
+   *   independent rate limiter, which drifts out of sync and makes smoke look sparse.
    */
   addPoint(
     wheelIndex: number,
@@ -298,8 +302,8 @@ export class TireTracksManager {
     isSpinning = false,
     isBraking = false,
     isDrifting = false,
-  ): void {
-    if (wheelIndex < 0 || wheelIndex >= this.maxWheels) return;
+  ): boolean {
+    if (wheelIndex < 0 || wheelIndex >= this.maxWheels) return false;
 
     const state = this.wheelStates[wheelIndex];
 
@@ -328,7 +332,7 @@ export class TireTracksManager {
       state.lastRight.set(rx, ry, rz);
       state.lastPos.set(worldX, centerY, worldZ);
       state.hasValidLast = true;
-      return;
+      return false;
     }
 
     const dx = worldX - state.lastPos.x;
@@ -339,12 +343,12 @@ export class TireTracksManager {
     if (isSpinning || isBraking || isDrifting) {
       state.spinAccumTimer += 0.016;
       if (dist < 0.06 && state.spinAccumTimer < 0.06) {
-        return;
+        return false;
       }
       state.spinAccumTimer = 0;
     } else {
       // Minimum distance between segments to keep smooth ribbon without overcrowding
-      if (dist < 0.14) return;
+      if (dist < 0.14) return false;
     }
 
     // If wheel moved too far in one step (teleport/respawn/huge collision), break track
@@ -352,7 +356,7 @@ export class TireTracksManager {
       state.lastLeft.set(lx, ly, lz);
       state.lastRight.set(rx, ry, rz);
       state.lastPos.set(worldX, centerY, worldZ);
-      return;
+      return false;
     }
 
     // Determine track tint and opacity based on environmental surface and vehicle action
@@ -455,6 +459,7 @@ export class TireTracksManager {
     this.headQuad += 1;
     this.quadCount = Math.min(this.maxQuads, this.quadCount + 1);
     this.dirty = true;
+    return true; // a segment was actually laid — callers hang tire smoke off this
   }
 
   flush(): void {
@@ -470,4 +475,3 @@ export class TireTracksManager {
     }
   }
 }
-

@@ -299,6 +299,26 @@ export const SUSPENSION = TRUCKS.zil.suspension;
 export const TIRE = TRUCKS.zil.tire;
 export const ENGINE = TRUCKS.zil.engine;
 export const BRAKE = { foot: 26, hand: 90, idle: 2.6 } as const;
+/**
+ * Line-lock burnout (throttle + brake held together): the braked axle anchors the truck
+ * while the driven axle spins freely and smokes.
+ */
+export const BURNOUT = {
+  torqueBoost: 1.35,      // extra torque on the spinning axle — no speed falloff applies
+  gripLoss: 0.72,         // fraction of longitudinal grip removed so the tire actually spins
+  sideGripLoss: 0.30,     // slight sideways looseness so the tail wiggles under power
+  rampUpPerSec: 3.2,      // how fast smoke/soot builds after the pedals are pinned
+  rampDownPerSec: 1.6,    // how fast it dies down after release
+  smokeSpacing: 0.40,     // metres of laid skidmark between tire smoke puffs
+  // Rapier's raycast vehicle has no wheel inertia: brake values (BRAKE.hand = 90) are an
+  // order of magnitude below engine force (~2600 N), so the braked axle cannot possibly
+  // anchor the truck. The hold is therefore an explicit counter-impulse on the forward
+  // axis: the fraction of forward momentum cancelled per step. 0 = free, 1 = nailed down.
+  chassisHold: 0.90,
+  // ...and for the same reason wheelRotation() is derived from chassis speed, so a truck
+  // held in place shows frozen wheels. The driven axle gets a visual spin override (rad/s).
+  visualSpinRate: 26.0,
+} as const;
 export const STEERING = {
   maxAngle: 0.52,
   turnRate: 3.2,

@@ -9,6 +9,7 @@ import { ParticleSystem } from '../rendering/ParticleSystem';
 import { TireTracksManager } from '../rendering/TireTracksManager';
 import {
   BRAKE,
+  BURNOUT,
   MUD,
   RIDE_HEIGHT,
   STEERING,
@@ -94,6 +95,18 @@ export class TruckController {
   private exhaustTimer = 0;
   private dustTimer = 0;
   private leafTimer = 0;
+  /** 0..1 ramp of how hard the truck is currently sitting on a line-lock burnout. */
+  private burnoutIntensity = 0;
+  /** Per-wheel distance of laid skidmark since the last smoke puff (metres). */
+  private readonly smokeDistAccum: number[] = [0, 0, 0, 0, 0, 0];
+  /** Accumulated visual spin of the driven axle during a burnout (radians). */
+  private burnoutSpinAngle = 0;
+  /**
+   * True only while both pedals are actually held. Drives the physics anchor, which must
+   * release the instant the driver lifts off — unlike burnoutIntensity, which is a VFX
+   * ramp that deliberately lingers so smoke and soot fade out instead of snapping off.
+   */
+  private burnoutHolding = false;
 
   constructor(
     private readonly physics: PhysicsWorld,
@@ -171,6 +184,10 @@ export class TruckController {
     this.particles.reset();
     this.tireTracks.reset();
     this.wetTimer = 0;
+    this.burnoutIntensity = 0;
+    this.burnoutSpinAngle = 0;
+    this.burnoutHolding = false;
+    for (let i = 0; i < this.smokeDistAccum.length; i += 1) this.smokeDistAccum[i] = 0;
 
     if (this.vehicle) {
       for (let i = 0; i < this.wheels.length; i += 1) {
@@ -198,7 +215,7 @@ export class TruckController {
 
     const speed = vehicle.currentVehicleSpeed();
     this.applySteering(vehicle, dt, controls, speed, invertSteering);
-    this.applyDrive(vehicle, controls, upgrades, speed);
+    this.applyDrive(vehicle, controls, upgrades, speed, dt);
 
     vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
 
@@ -246,29 +263,41 @@ export class TruckController {
    */
   private updateVFX(dt: number, controls: InputSnapshot, speed: number): void {
     // 1. Diesel exhaust smoke puffs
+    // A stalled engine under full throttle (burnout) belches far more soot than cruising,
+    // so the burnout ramp both shortens the interval and fakes a heavier load.
+    const burning = this.burnoutIntensity;
     this.exhaustTimer += dt;
-    const exhaustInterval = controls.throttle > 0 ? 0.08 : 0.22;
+    const exhaustInterval = burning > 0.05
+      ? 0.035 + (1 - burning) * 0.045
+      : (controls.throttle > 0 ? 0.08 : 0.22);
     if (this.exhaustTimer >= exhaustInterval) {
       this.exhaustTimer = 0;
       const exWorld = this.localToWorld(this.scratchVec.copy(this.exhaustLocalPos));
       this.particles.emitExhaust(
         exWorld,
         this.forward,
-        controls.throttle,
+        Math.min(1, controls.throttle + burning * 0.8), // soot-heavy under load
         this.speed,
         this.exhaustIsVertical,
       );
     }
 
-    // 2. Wheel dust clouds on dry ground
-    if (this.currentMudFactor < 0.12 && this.currentWaterFactor < 0.1 && this.speed > 8) {
+    // 2. Wheel dust clouds on dry ground.
+    // Normally only kicked up at speed, but a stationary burnout blasts dust out from
+    // under the spinning axle too — that is the launch cloud, so it must not need speed.
+    const dryGround = this.currentMudFactor < 0.12 && this.currentWaterFactor < 0.1;
+    if (dryGround && (this.speed > 8 || burning > 0.05)) {
       this.dustTimer += dt;
-      if (this.dustTimer >= 0.12) {
+      const dustInterval = burning > 0.05 ? 0.05 : 0.12;
+      if (this.dustTimer >= dustInterval) {
         this.dustTimer = 0;
         for (let i = 0; i < this.wheels.length; i += 1) {
+          // While burning out, only the spinning axle throws dust; the locked axle sits still
+          if (burning > 0.05 && this.speed <= 8 && !this.isBurnoutSpinWheel(i)) continue;
           const wCfg = this.config.wheels[i];
           const wWorld = this.localToWorld(this.scratchVec.set(wCfg.x, this.config.suspension.connectionY - this.config.wheelRadius * 0.7, wCfg.z));
-          this.particles.emitDustCloud(wWorld, this.forward, speed, Math.min(1.0, this.speed / 30), this.config.wheelRadius);
+          const intensity = Math.max(Math.min(1.0, this.speed / 30), burning * 0.9);
+          this.particles.emitDustCloud(wWorld, this.forward, speed, intensity, this.config.wheelRadius);
         }
       }
     }
@@ -330,8 +359,14 @@ export class TruckController {
       avgWater += water / wheelCount;
 
       // Dynamic traction & hydroplaning
-      const friction = this.config.tire.frictionSlip * (1 - mud * frictionDropCoeff) * (1 - water * 0.45);
-      const sideStiff = this.config.tire.sideFrictionStiffness * (1 - mud * MUD.sideFrictionDrop * (1 - tireUp * 0.18)) * (1 - water * 0.35);
+      // During a burnout the driven axle deliberately loses most of its longitudinal grip,
+      // otherwise the tire would simply hook up against the locked front axle and sit still.
+      const burnoutOnWheel = this.burnoutIntensity > 0.01 && this.isBurnoutSpinWheel(i);
+      const burnoutGrip = burnoutOnWheel ? 1 - BURNOUT.gripLoss * this.burnoutIntensity : 1;
+      const burnoutSideGrip = burnoutOnWheel ? 1 - BURNOUT.sideGripLoss * this.burnoutIntensity : 1;
+
+      const friction = this.config.tire.frictionSlip * (1 - mud * frictionDropCoeff) * (1 - water * 0.45) * burnoutGrip;
+      const sideStiff = this.config.tire.sideFrictionStiffness * (1 - mud * MUD.sideFrictionDrop * (1 - tireUp * 0.18)) * (1 - water * 0.35) * burnoutSideGrip;
       vehicle.setWheelFrictionSlip(i, friction);
       vehicle.setWheelSideFrictionStiffness(i, sideStiff);
 
@@ -356,6 +391,7 @@ export class TruckController {
         // ── 3 Conditions for Tire Tracks ────────────────────────────────────
         // 1. При резком старте / пробуксовке (Hard launch / burnout / wheel spin)
         const isSpinning =
+          burnoutOnWheel ||
           (slipRatio > 0.18 && controls.throttle > 0.1) ||
           (controls.throttle > 0.5 && absSpeed < 3.0 && rimSpeed > absSpeed + 0.8) ||
           (controls.throttle > 0.2 && absSpeed < 0.5 && Math.abs(angularVel) > 1.2);
@@ -387,7 +423,7 @@ export class TruckController {
         const wheelForwardZ = -this.forward.x * sinS + this.forward.z * cosS;
 
         if (leaveTrack) {
-          this.tireTracks.addPoint(
+          const laidSegment = this.tireTracks.addPoint(
             i,
             wheelWorld.x,
             wheelWorld.z,
@@ -401,9 +437,48 @@ export class TruckController {
             isBraking,
             isDrifting,
           );
+
+          // ── Burnt rubber smoke, locked to the skidmark ────────────────────
+          // Smoke only fires when a track quad was actually laid, so it can never drift
+          // out of sync with the stripe. It previously ran its own independent timer,
+          // which is why it looked sparse and unrelated to the marks on the ground.
+          //
+          // Cadence is spatial (one puff per ~0.4 m of stripe) rather than per quad:
+          // quads land every 0.14 m, so six wheels at speed would emit hundreds of
+          // particles a second and thrash the pool. A stationary burnout lays quads on a
+          // timer with near-zero travel, so it is exempt or it would never smoke at all.
+          const stationarySpin = burnoutOnWheel || (isSpinning && absSpeed < 2.0);
+          if (laidSegment) {
+            this.smokeDistAccum[i] += Math.max(0.14, absSpeed * dt);
+          }
+          const smokeReady = laidSegment && (stationarySpin || this.smokeDistAccum[i] >= BURNOUT.smokeSpacing);
+
+          if (smokeReady) {
+            this.smokeDistAccum[i] = 0;
+            const burnoutSmoke = burnoutOnWheel ? 0.60 + this.burnoutIntensity * 0.40 : 0;
+            const spinSmoke = isSpinning ? Math.max(0.35, Math.min(0.9, Math.abs(slipRatio) * 0.8)) : 0;
+            const lockSmoke = isBraking ? Math.max(0.30, Math.min(0.8, absSpeed / 12)) : 0;
+            const driftSmoke = isDrifting ? Math.max(0.30, Math.min(0.8, lateralSlipRatio * 0.9)) : 0;
+
+            // Wet or muddy rubber throws spray instead of smoke — taper rather than hard-cut,
+            // otherwise ordinary damp dirt road silently suppresses smoke everywhere.
+            const surfaceDamping = Math.max(0, 1 - mud * 0.9 - water * 1.6);
+            const smoke = Math.max(burnoutSmoke, spinSmoke, lockSmoke, driftSmoke) * surfaceDamping;
+
+            if (smoke > 0.05) {
+              this.particles.emitTireSmoke(
+                wheelWorld,
+                this.forward,
+                smoke,
+                this.config.wheelRadius,
+                burnoutOnWheel ? 2 : 1,
+              );
+            }
+          }
         } else {
           // No slip → clean rolling → break track so the next slip creates a fresh mark
           this.tireTracks.breakTrack(i);
+          this.smokeDistAccum[i] = 0; // next stripe starts smoking immediately, not mid-cadence
         }
 
         // Particle emissions on spinning/sliding tires
@@ -429,6 +504,18 @@ export class TruckController {
       this.wetTimer = 4.5;
     } else if (this.wetTimer > 0) {
       this.wetTimer = Math.max(0, this.wetTimer - dt);
+    }
+
+    // 0. Line-lock anchor.
+    // The braked axle cannot hold the truck on force balance alone (see BURNOUT.chassisHold),
+    // so cancel most of the forward momentum outright each step. What is left is a slow
+    // creep, which is exactly how a real burnout looks.
+    if (this.burnoutHolding && anyInContact) {
+      const holdImpulse = -forwardSpeed * body.mass() * BURNOUT.chassisHold;
+      body.applyImpulse(
+        { x: this.forward.x * holdImpulse, y: 0, z: this.forward.z * holdImpulse },
+        true,
+      );
     }
 
     // 1. Mud drag
@@ -493,7 +580,10 @@ export class TruckController {
 
       rig.steer.position.y = this.config.suspension.connectionY - suspension - targetSink;
       rig.steer.rotation.y = vehicle.wheelSteering(i) ?? 0;
-      rig.spin.rotation.x = vehicle.wheelRotation(i) ?? 0;
+      const burnoutSpin = this.burnoutIntensity > 0.01 && this.isBurnoutSpinWheel(i)
+        ? this.burnoutSpinAngle
+        : 0;
+      rig.spin.rotation.x = (vehicle.wheelRotation(i) ?? 0) + burnoutSpin;
     }
   }
 
@@ -523,12 +613,46 @@ export class TruckController {
     controls: InputSnapshot,
     upgrades?: Partial<TruckUpgrades>,
     speed = 0,
+    dt = 1 / 60,
   ): void {
     const engUp = upgrades?.engine ?? this.currentUpgrades.engine;
     const maxSpeed = this.config.engine.maxSpeed + engUp * this.config.engine.speedPerUpgrade;
     const power = this.config.engine.baseForce + engUp * this.config.engine.forcePerUpgrade;
     let engineForce = 0;
     let brake: number = BRAKE.idle;
+
+    // ── Line-lock burnout: throttle and brake held together ────────────────────
+    // Previously throttle simply won this contest and the truck drove off as if the
+    // brake were not pressed. A real truck holds still on the braked axle while the
+    // driven axle spins up and shreds rubber, so we split the two across axles
+    // instead of picking one: brakes clamp the front, engine torque goes to the rear.
+    const wantsBurnout =
+      controls.throttle > 0.05 && controls.brake > 0.05 && !controls.handbrake
+      && Math.abs(speed) < 4.0; // abs: at speed, both pedals must still mean "brake", not burnout
+
+    this.burnoutHolding = wantsBurnout;
+
+    if (wantsBurnout) {
+      // Full torque with no speed falloff — the truck is barely moving by definition
+      this.burnoutIntensity = Math.min(1, this.burnoutIntensity + BURNOUT.rampUpPerSec * dt);
+      // Rapier derives wheelRotation() from chassis speed, so a truck held in place would
+      // show dead-still wheels. Drive the visual spin ourselves.
+      this.burnoutSpinAngle += BURNOUT.visualSpinRate * controls.throttle * dt;
+      const spinForce = power * controls.throttle * BURNOUT.torqueBoost;
+
+      for (let i = 0; i < this.wheels.length; i += 1) {
+        if (this.isBurnoutSpinWheel(i)) {
+          vehicle.setWheelEngineForce(i, spinForce);
+          vehicle.setWheelBrake(i, 0);
+        } else {
+          vehicle.setWheelEngineForce(i, 0);
+          vehicle.setWheelBrake(i, BRAKE.hand * controls.brake);
+        }
+      }
+      return;
+    }
+
+    this.burnoutIntensity = Math.max(0, this.burnoutIntensity - BURNOUT.rampDownPerSec * dt);
 
     if (controls.throttle > 0 && speed > -0.8) {
       engineForce = power * controls.throttle * Math.max(0, 1 - Math.max(0, speed) / maxSpeed);
@@ -551,6 +675,17 @@ export class TruckController {
       }
       vehicle.setWheelBrake(i, brake);
     }
+  }
+
+  /**
+   * Which wheels are allowed to spin during a line-lock burnout.
+   * Prefers the rear driven axle (RWD/6x4 trucks). On all-wheel-drive rigs every wheel
+   * is a drive wheel, so the steering axle is still used as the anchor — otherwise there
+   * would be nothing left to hold the truck in place and it would just drive away.
+   */
+  private isBurnoutSpinWheel(index: number): boolean {
+    const w = this.wheels[index];
+    return w.isDrive && !w.isSteering;
   }
 
   private recoverFromRollover(body: RAPIER.RigidBody, dt: number): void {
