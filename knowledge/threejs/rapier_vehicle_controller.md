@@ -19,7 +19,7 @@ export const GROUP_VEHICLE = 0x0002;
 export const GROUP_CARGO = 0x0004;
 
 export const GROUND_GROUPS = groups(GROUP_GROUND, GROUP_VEHICLE | GROUP_CARGO);
-export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_CARGO);
+export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO);
 export const WHEEL_RAY_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND);
 
 export class PhysicsWorld {
@@ -178,7 +178,8 @@ export class VehicleController {
     this.prevPosition.copy(this.position);
     this.prevRotation.copy(this.rotation);
 
-    // Руление с адаптивной скоростью (знак -1 для indexForwardAxis=2)
+    // Руление с адаптивной скоростью: в Rapier 3D при axle=(-1,0,0) и forward=+Z (+2)
+    // отрицательный угол поворачивает вправо, положительный — влево, поэтому используется знак -1
     const targetSteer = input.steer * -0.52;
     this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteer, 8.0 * dt);
     this.vehicle.setWheelSteering(0, this.steerAngle);
@@ -281,6 +282,10 @@ renderer.setClearColor(skyColor, 1);
 * **Причина**: Нижняя грань коллайдера `addBoxCollider` находится на одной высоте или ниже точек контакта колес под весом автомобиля.
 * **Решение**: Приподнимать центр коробки кузова (`offset.y = 0.22`), уменьшать её полувысоту (`half.y = 0.16`) и обеспечивать достаточный запас сжатия подвески (`restLength = 0.26, maxTravel = 0.22`).
 
-### 3. Колёса визуально поворачиваются в другую сторону
-* **Причина**: В Rapier 3D `indexForwardAxis = 2` положительный угол `wheelSteering` направляет машину влево.
-* **Решение**: Умножать входной угол руля на `steerSign = -1` перед передачей в `vehicle.setWheelSteering(i, steerAngle)`.
+### 3. Автомобили проезжают сквозь друг друга (нет коллизий между машинами)
+* **Причина**: В маске `VEHICLE_GROUPS` забыли добавить саму группу `GROUP_VEHICLE` в фильтр (`groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_CARGO)`). В результате `0x0002 & 0x0005 === 0`, и движок отключает контакты между корпусами.
+* **Решение**: Использовать `groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO)`, а для лучей подвески передавать `WHEEL_RAY_GROUPS`, чтобы колёса не отталкивались от кузовов соседей.
+
+### 4. Направление руления в Rapier 3D
+* **Физика**: В Rapier 3D при `indexForwardAxis = 2` (+Z) и `axle = (-1, 0, 0)` положительный угол `setWheelSteering(i, +angle)` поворачивает колёса **влево (-X)**, а отрицательный (`-angle`) — **вправо (+X)**.
+* **Решение**: Контроллер автомобиля умножает ввод руля на `steerSign = -1` (`targetSteer = input.steer * -lock`), чтобы нажатие клавиши вправо (`steer = +1`) приводило к повороту направо, а ИИ соперников передаёт `steer = clamp(-toTarget.x * 1.5, -1, 1)` для наведения на целевую точку.

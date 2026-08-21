@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { PhysicsWorld } from '../physics/PhysicsWorld';
+import { PhysicsWorld, WHEEL_RAY_GROUPS } from '../physics/PhysicsWorld';
 
 export interface RacingCarInput {
   throttle: number;
@@ -274,7 +274,7 @@ export class RacingCarController {
     body.applyImpulse({ x: 0, y: -downforce * dt, z: 0 }, true);
 
     // 5. Update vehicle wheel rays
-    vehicle.updateVehicle(dt);
+    vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
 
     // 6. Rollover Recovery
     this.checkRollover(body, dt);

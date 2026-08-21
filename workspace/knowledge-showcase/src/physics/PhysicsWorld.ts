@@ -8,7 +8,7 @@ export const GROUP_VEHICLE = 0x0002;
 export const GROUP_CARGO = 0x0004;
 
 export const GROUND_GROUPS = groups(GROUP_GROUND, GROUP_VEHICLE | GROUP_CARGO);
-export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_CARGO);
+export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO);
 export const CARGO_GROUPS = groups(GROUP_CARGO, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO);
 /** Wheel ray-casts must see the ground and nothing else — not the cargo, not the truck itself. */
 export const WHEEL_RAY_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND);

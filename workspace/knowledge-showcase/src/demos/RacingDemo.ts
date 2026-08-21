@@ -65,21 +65,21 @@ export class RacingDemo implements Demo {
     await this.physics.initialize();
 
     // Scene Sky & Fog
-    const skyColor = new THREE.Color(0x8bb8e8);
+    const skyColor = new THREE.Color(0x8cbbe8);
     this.scene.background = skyColor;
-    this.scene.fog = new THREE.Fog(skyColor, 120, 560);
+    this.scene.fog = new THREE.Fog(skyColor, 180, 750);
 
     const sun = new THREE.DirectionalLight(0xfffae0, 2.8);
-    sun.position.set(-70, 110, 50);
+    sun.position.set(-90, 140, 70);
     sun.castShadow = ctx.tier === 'high';
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -95;
-    sun.shadow.camera.right = 95;
-    sun.shadow.camera.top = 95;
-    sun.shadow.camera.bottom = -95;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -220;
+    sun.shadow.camera.right = 220;
+    sun.shadow.camera.top = 220;
+    sun.shadow.camera.bottom = -220;
     sun.shadow.camera.near = 20;
-    sun.shadow.camera.far = 300;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.camera.far = 450;
+    sun.shadow.bias = -0.0004;
     this.scene.add(sun, sun.target);
 
     this.scene.add(new THREE.HemisphereLight(0xddeeff, 0x445533, 1.8));
@@ -221,7 +221,7 @@ export class RacingDemo implements Demo {
     const t = racer.t;
 
     // Lookahead expands with speed
-    const lookaheadMeters = 7.5 + speed * 0.28;
+    const lookaheadMeters = 8.5 + speed * 0.26;
     const targetT = (t + lookaheadMeters / this.track.length) % 1;
 
     // Target point on the 3D racing line with bot's lane bias
@@ -233,18 +233,19 @@ export class RacingDemo implements Demo {
     const invRot = car.rotation.clone().invert();
     toTarget.applyQuaternion(invRot);
 
+    const trackTanLocal = this.track.tangentAt(t).applyQuaternion(invRot);
+
     let steer = 0;
-    if (toTarget.z < 0) {
-      // Facing backward: orient towards track tangent
-      const trackTan = this.track.tangentAt(t).applyQuaternion(invRot);
-      steer = THREE.MathUtils.clamp(trackTan.x * 2.2, -1, 1);
+    if (trackTanLocal.z < -0.2) {
+      // Facing backward: turn aggressively towards the forward direction
+      steer = trackTanLocal.x >= 0 ? -1.0 : 1.0;
     } else {
-      steer = THREE.MathUtils.clamp(toTarget.x * 1.6, -1, 1);
+      steer = THREE.MathUtils.clamp(-toTarget.x * 1.5, -1, 1);
     }
 
     // Safe entry speed based on 3D track curvature ahead
     const curveRadius = this.track.curvatureRadiusAhead(targetT, 25);
-    const maxSafeSpeed = Math.sqrt(curveRadius * 36) * 3.6; // km/h
+    const maxSafeSpeed = Math.sqrt(curveRadius * 38) * 3.6; // km/h
 
     let throttle = 1.0;
     let brake = 0.0;
@@ -314,6 +315,7 @@ export class RacingDemo implements Demo {
 
     const nextCp = (r.cp + 1) % CHECKPOINTS;
     const distToCp = car.position.distanceTo(this.track.checkpoints[nextCp]);
+    const cpT = nextCp / CHECKPOINTS;
 
     // Stuck check & recovery for bots
     if (!r.isPlayer) {
@@ -327,7 +329,10 @@ export class RacingDemo implements Demo {
       }
     }
 
-    if (distToCp < this.track.checkpointSpacing * 1.2) {
+    const tDiff = Math.abs(r.t - cpT);
+    const passedT = tDiff < 0.045 || (nextCp === 0 && r.t < 0.045 && r.cp === CHECKPOINTS - 1);
+
+    if (distToCp < this.track.checkpointSpacing * 1.35 || passedT) {
       r.cp = nextCp;
       if (nextCp === 0) {
         const now = performance.now();
@@ -501,8 +506,8 @@ export class RacingDemo implements Demo {
       this.camera.position.copy(this.camTarget);
       this.camera.lookAt(this.camLook);
     } else {
-      // Orbit / High Overview
-      this.camTarget.set(targetPos.x, targetPos.y + 34, targetPos.z + 22);
+      // Orbit / Top-Down View following the player car
+      this.camTarget.set(targetPos.x, targetPos.y + 95, targetPos.z + 5);
       this.camLook.copy(targetPos);
       this.camera.position.lerp(this.camTarget, 1 - Math.exp(-6 * dt));
       this.camera.lookAt(this.camLook);

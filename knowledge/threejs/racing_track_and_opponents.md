@@ -4,9 +4,10 @@
 > трасса и соперники (Rapier 3D)»*).
 > Головная проверка: `npm run check:racing` — валидирует геометрию 3D трассы,
 > стабильность 3D репера, гоночную линию, отсутствие самопересечений и параметры спорткара.
+> Полный гайд по созданию игровых карт и ландшафтов: `game_map_and_world_design.md`.
 
 Управление спорткаром и занос — в `arcade_racing_and_drift.md` и
-`rapier_vehicle_controller.md`. Здесь — то, что превращает «машину на физике» в
+`rapier_vehicle_controller.md`. Общие принципы создания карт, рельефа и заземления декораций — в `game_map_and_world_design.md`. Здесь — то, что превращает «машину на физике» в
 **полноценную 3D-гонку**: замкнутая 3D-трасса с рельефом и виражами, персистентные следы шин и партиклы, чекпойнты и круги, соперники на честном физдвижке Rapier 3D и результат заезда.
 
 ---
@@ -140,9 +141,10 @@ function driveBotAI(racer: RacerEntry, dt: number): RacingCarInput {
   if (toTarget.z < 0) {
     // Развернуло: рулить по касательной трассы для быстрого выхода из разворота
     const trackTan = track.tangentAt(racer.t).applyQuaternion(car.rotation.clone().invert());
-    steer = THREE.MathUtils.clamp(trackTan.x * 2.2, -1, 1);
+    steer = THREE.MathUtils.clamp(-trackTan.x * 2.2, -1, 1);
   } else {
-    steer = THREE.MathUtils.clamp(toTarget.x * 1.6, -1, 1);
+    // Знак минус согласован с физическим контроллером (steerSign = -1)
+    steer = THREE.MathUtils.clamp(-toTarget.x * 1.6, -1, 1);
   }
   
   // Расчет безопасной скорости в повороте по кривизне впереди:
@@ -192,6 +194,10 @@ function driveBotAI(racer: RacerEntry, dt: number): RacingCarInput {
 * **Причина**: Использование глобальных осей без матричного базиса `makeBasis(startRight, startUp, startTan)`.
   * **Решение**: Создавать группу арки с базисом из касательной и правого вектора, а лампы и плакат размещать со смещением по локальной оси `-Z` навстречу стартующим автомобилям.
 
-### ❌ Проблема 4: Инвертированный поворот колес
-* **Причина**: В Rapier 3D `DynamicRayCastVehicleController` при `indexForwardAxis = 2` положительный угол `wheelSteering` поворачивает машину влево, а отрицательный — вправо.
-  * **Решение**: Применять `steerSign = -1` для физики, а меш колеса связывать напрямую: `rig.steer.rotation.y = vehicle.wheelSteering(i)`.
+### ❌ Проблема 4: Противники разворачиваются и едут назад
+* **Причина**: Несогласованный знак в формуле ИИ бота: в физическом контроллере `steerSign = -1` (чтобы клавиша D/вправо поворачивала колеса направо), а в `driveBotAI` передавался `+toTarget.x` вместо `-toTarget.x`. В результате ИИ при попытке довернуть к трассе выворачивал руль наружу, совершал разворот на 180° и уезжал в обратную сторону.
+* **Решение**: В `driveBotAI` вычислять `steer = clamp(-toTarget.x * 1.6, -1, 1)` (со знаком минус).
+
+### ❌ Проблема 5: Машины проезжают сквозь друг друга (нет коллизий)
+* **Причина**: В `VEHICLE_GROUPS` маска фильтрации не содержала саму группу `GROUP_VEHICLE`.
+* **Решение**: Задавать `export const VEHICLE_GROUPS = groups(GROUP_VEHICLE, GROUP_GROUND | GROUP_VEHICLE | GROUP_CARGO);` и передавать `WHEEL_RAY_GROUPS` в `updateVehicle(dt, undefined, WHEEL_RAY_GROUPS)`.

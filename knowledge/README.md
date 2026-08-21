@@ -47,6 +47,7 @@ and the tasks each one owns instead of hand-written code, are in `stack/README.m
 | `threejs/orthographic_2d_and_pointer_input.md` | 2D as an orthographic Three.js scene: pointer→world, splines, drag |
 | `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, hit-stop, pushback, 2.5D camera |
 | `threejs/racing_track_and_opponents.md` | Track from one curve, checkpoints and laps, racing line, fair rubber-banding |
+| `threejs/game_map_and_world_design.md` | Procedural game maps, terrain recessed corridors, anti-z-fighting, prop grounding |
 | `threejs/tower_defense_core.md` | Fixed path vs. maze, target priority, projectiles, wave contract |
 | `threejs/rts_selection_and_command.md` | Frustum selection, order queue, formations, flow fields, fog |
 | `threejs/shooter_enemy_ai_and_combat.md` | Hitscan, TTK, enemy FSM, attack tokens, cover, hit feedback, horde |
