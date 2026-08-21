@@ -11,6 +11,9 @@ import { YukaDemo } from './demos/YukaDemo';
 import { PostFxDemo } from './demos/PostFxDemo';
 import { RecastDemo } from './demos/RecastDemo';
 import { FpsDemo } from './demos/FpsDemo';
+import { MeleeDemo } from './demos/MeleeDemo';
+import { SurvivorDemo } from './demos/SurvivorDemo';
+import { StealthDemo } from './demos/StealthDemo';
 
 type Lang = 'ru' | 'en';
 let lang: Lang = 'ru';
@@ -27,6 +30,9 @@ const REGISTRY: Array<() => Demo> = [
   () => new TowerDefenseDemo(),
   () => new RtsDemo(),
   () => new FpsDemo(),
+  () => new MeleeDemo(),
+  () => new SurvivorDemo(),
+  () => new StealthDemo(),
   () => new BvhDemo(),
   () => new YukaDemo(),
   () => new PostFxDemo(),

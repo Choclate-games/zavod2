@@ -10,7 +10,10 @@
     "check": "tsc --noEmit",
     "check:fighting": "tsx scripts/fighting-check.ts",
     "check:racing": "tsx scripts/racing-check.ts",
-    "check:all": "tsc --noEmit && tsx scripts/fighting-check.ts && tsx scripts/racing-check.ts && tsx scripts/td-check.ts && tsx scripts/rts-check.ts && tsx scripts/smoke-check.ts",
+    "check:all": "tsc --noEmit && tsx scripts/fighting-check.ts && tsx scripts/racing-check.ts && tsx scripts/td-check.ts && tsx scripts/rts-check.ts && tsx scripts/melee-check.ts && tsx scripts/survivor-check.ts && tsx scripts/stealth-check.ts && tsx scripts/smoke-check.ts",
+    "check:melee": "tsx scripts/melee-check.ts",
+    "check:survivor": "tsx scripts/survivor-check.ts",
+    "check:stealth": "tsx scripts/stealth-check.ts",
     "check:td": "tsx scripts/td-check.ts",
     "check:rts": "tsx scripts/rts-check.ts",
     "check:smoke": "tsx scripts/smoke-check.ts"

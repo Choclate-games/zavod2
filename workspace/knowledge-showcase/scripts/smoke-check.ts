@@ -19,6 +19,9 @@ import { TowerDefenseDemo } from '../src/demos/TowerDefenseDemo';
 import { YukaDemo } from '../src/demos/YukaDemo';
 import { RecastDemo } from '../src/demos/RecastDemo';
 import { FpsDemo } from '../src/demos/FpsDemo';
+import { MeleeDemo } from '../src/demos/MeleeDemo';
+import { SurvivorDemo } from '../src/demos/SurvivorDemo';
+import { StealthDemo } from '../src/demos/StealthDemo';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -26,9 +29,30 @@ function check(name: string, ok: boolean, detail = ''): void {
   else { failed++; console.error(`  FAIL ${name} ${detail}`); }
 }
 
-/** Заглушка контекста: ввод «ничего не нажато», звук и HUD — пустышки. */
-function stubContext(): DemoContext {
+interface Script {
+  /** Держать ЛКМ зажатой. */
+  pointerDown?: boolean;
+  /** Нажимать клавишу `code` каждые `every` тиков. */
+  key?: { code: string; every: number };
+  /** Водить персонажа по кругу — нужно там, где игрок обязан двигаться. */
+  move?: boolean;
+}
+
+/** Куда стенд отдал обработчик клавиш демо — по нему прогон «нажимает». */
+let keyHandler: ((code: string) => void) | null = null;
+/** Номер текущего тика: по нему считается «движение» в сценарии. */
+let tick = 0;
+
+/**
+ * Заглушка контекста: звук и HUD — пустышки, ввод задаётся сценарием.
+ *
+ * Без ввода демо не доходит до интересных веток: в слэшере никто не атакует,
+ * значит не срабатывают ни смерть врага, ни рэгдолл, ни смена волны — и
+ * прогон «зелёный» ровно потому, что ничего не произошло.
+ */
+function stubContext(script: Script): DemoContext {
   const noop = (): void => {};
+  keyHandler = null;
   return {
     renderer: null as unknown as THREE.WebGLRenderer,
     tier: 'high',
@@ -38,15 +62,19 @@ function stubContext(): DemoContext {
     audio: new Proxy({}, { get: () => noop }) as never,
     input: {
       isDown: () => false,
-      moveVector: (out = new THREE.Vector2()) => out.set(0, 0),
-      onKey: () => noop,
+      moveVector: (out = new THREE.Vector2()) => (script.move
+        ? out.set(Math.cos(tick / 90), Math.sin(tick / 90))
+        : out.set(0, 0)),
+      onKey: (down: (code: string) => void) => { keyHandler = down; return noop; },
       clearSubscribers: noop,
       releaseAll: noop,
       endFrame: noop,
       consumeLockDelta: (out = new THREE.Vector2()) => out.set(0, 0),
       requestPointerLock: noop,
       isPointerLocked: false,
-      primary: null,
+      primary: script.pointerDown
+        ? { id: 1, ndc: new THREE.Vector2(), delta: new THREE.Vector2(), down: true }
+        : null,
       activePointers: [],
       vehicleSnapshot: () => ({ throttle: 0, brake: 0, steer: 0, handbrake: false, pause: false }),
       vehicle: null,
@@ -67,8 +95,8 @@ function hasBadTransform(scene: THREE.Object3D): string | null {
   return bad;
 }
 
-async function run(name: string, demo: Demo, ticks: number): Promise<void> {
-  const ctx = stubContext();
+async function run(name: string, demo: Demo, ticks: number, script: Script = {}): Promise<void> {
+  const ctx = stubContext(script);
   const t0 = performance.now();
   try {
     await demo.init(ctx);
@@ -82,6 +110,8 @@ async function run(name: string, demo: Demo, ticks: number): Promise<void> {
   try {
     demo.enter?.();
     for (let i = 0; i < ticks; i++) {
+      tick = i;
+      if (script.key && i % script.key.every === 0) keyHandler?.(script.key.code);
       demo.fixedUpdate?.(1 / 60);
       demo.update(1 / 60, 0);
     }
@@ -105,6 +135,17 @@ await run('yuka', new YukaDemo(), 600);
 // Recast тянет WASM и строит навмеш — самый вероятный кандидат на падение при старте.
 await run('recast', new RecastDemo(), 600);
 await run('fps', new FpsDemo(), 900);
+// Слэшер: зажатая атака + периодический захват цели. Без захвата игрок машет
+// в пустоту, никто не умирает и ветки «смерть → рэгдолл → новая волна»
+// остаются непроверенными — прогон зелёный просто потому, что ничего не было.
+// Со сценарием за 1800 тиков набирается ~17 убийств и 5-я волна.
+await run('слэшер', new MeleeDemo(), 1800, { pointerDown: true, key: { code: 'Tab', every: 30 } });
+// Рой: 3600 тиков = минута забега. Карточки выбираются нажатием «1», иначе
+// забег встанет на первом же уровне и орда никогда не дорастёт до сотен.
+await run('рой', new SurvivorDemo(), 3600, { key: { code: 'Digit1', every: 20 }, move: true });
+// Стелс: игрок ходит по кругу и попадает в конусы — иначе охранники патрулируют
+// пустую карту и ни один переход состояния не проверяется.
+await run('стелс', new StealthDemo(), 1800, { move: true });
 
 console.log(failed === 0 ? '\nВсе проверки пройдены.' : `\nПровалено проверок: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

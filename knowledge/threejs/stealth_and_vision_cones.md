@@ -1,113 +1,139 @@
-# Three.js: Stealth, Dynamic Vision Cones & Alarm System
+# Three.js: стелс, конусы зрения и шкала тревоги
 
-Эталонная реализация процедурного 3D-конуса зрения патрульных врагов, срезания лучами препятствий и системы тревоги.
+> 💡 **Интерактивное демо**: `workspace/knowledge-showcase/` (вкладка *«👁️ Стелс и
+> конусы зрения»*): 4 охранника, конусы с перекрытием по стенам, тени, шум.
+> Логика обнаружения — в `src/game/stealthSensing.ts` (без рендерера).
+> Головные проверки: `npm run check:stealth` и `npm run check:smoke`.
 
----
-
-## 1. Процедурный конус зрения (`VisionConeMesh.ts`)
-
-```typescript
-import * as THREE from 'three';
-
-export class VisionConeMesh {
-    public mesh: THREE.Mesh;
-    private geometry: THREE.BufferGeometry;
-    private segments = 24;
-    private fovAngle = Math.PI / 2.2; // ~82 градуса
-    private maxDistance = 12.0;
-
-    constructor(scene: THREE.Scene) {
-        this.geometry = new THREE.BufferGeometry();
-        const material = new THREE.MeshBasicMaterial({
-            color: 0x2ecc71,
-            transparent: true,
-            opacity: 0.35,
-            side: THREE.DoubleSide,
-            depthWrite: false
-        });
-
-        this.mesh = new THREE.Mesh(this.geometry, material);
-        scene.add(this.mesh);
-    }
-
-    public setColor(hex: number) {
-        (this.mesh.material as THREE.MeshBasicMaterial).color.setHex(hex);
-    }
-
-    /**
-     * Перестраивает полигональный меш конуса зрения с учётом препятствий
-     */
-    public update(
-        origin: THREE.Vector3,
-        forwardAngle: number,
-        obstacles: THREE.Object3D[],
-        raycaster: THREE.Raycaster
-    ) {
-        const vertices: number[] = [0, 0, 0]; // Вершина конуса (глаза охранника)
-        const halfFov = this.fovAngle / 2;
-
-        for (let i = 0; i <= this.segments; i++) {
-            const angle = forwardAngle - halfFov + (i / this.segments) * this.fovAngle;
-            const dir = new THREE.Vector3(-Math.sin(angle), 0, -Math.cos(angle));
-
-            raycaster.set(origin, dir);
-            raycaster.far = this.maxDistance;
-            const hits = raycaster.intersectObjects(obstacles, false);
-
-            let dist = this.maxDistance;
-            if (hits.length > 0) {
-                dist = hits[0].distance;
-            }
-
-            // Точки на полу
-            vertices.push(
-                origin.x + dir.x * dist,
-                origin.y - 0.9, // На уровне пола
-                origin.z + dir.z * dist
-            );
-        }
-
-        const indices: number[] = [];
-        for (let i = 1; i <= this.segments; i++) {
-            indices.push(0, i, i + 1);
-        }
-
-        this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        this.geometry.setIndex(indices);
-        this.geometry.computeVertexNormals();
-    }
-}
-```
+Смежное: `knowledge/mechanics/stealth_detection.md` (спецификация каналов
+восприятия), `knowledge/stack/three_mesh_bvh.md` (лучи по статике),
+`knowledge/stack/yuka_ai.md` (`Vision` + `MemorySystem`, если нужен готовый ИИ).
 
 ---
 
-## 2. Шкала подозрительности и тревоги (`StealthAlarmSystem.ts`)
+## 1. Двухступенчатая проверка — не оптимизация, а условие работоспособности
 
 ```typescript
-export type GuardState = 'PATROL' | 'SUSPICIOUS' | 'COMBAT';
+// Ступень 1: скалярное произведение. Каждый кадр, для каждого охранника.
+const inCone = inVisionCone(dx, dz, guard.facing);
 
-export class StealthAlarmSystem {
-    public suspicionLevel = 0; // 0..100%
-    public state: GuardState = 'PATROL';
-
-    public update(dt: number, isPlayerInSight: boolean): GuardState {
-        if (isPlayerInSight) {
-            // Накопление тревоги (2.5 сек до тревоги)
-            this.suspicionLevel = Math.min(100, this.suspicionLevel + 40 * dt);
-        } else {
-            // Плавный спад
-            this.suspicionLevel = Math.max(0, this.suspicionLevel - 20 * dt);
-        }
-
-        if (this.suspicionLevel >= 100) {
-            this.state = 'COMBAT';
-        } else if (this.suspicionLevel > 15) {
-            this.state = 'SUSPICIOUS';
-        } else {
-            this.state = 'PATROL';
-        }
-
-        return this.state;
-    }
+// Ступень 2: рейкаст сквозь стены. ТОЛЬКО если ступень 1 прошла и ТОЛЬКО 10 Гц.
+if (inCone && (frame + guard.rayOffset) % RAY_INTERVAL === 0) {
+  guard.visible = this.hasLineOfSight(guard);
 }
 ```
+
+Замер из демо: 4 охранника, наивная схема «рейкаст каждым каждый кадр» — **240
+лучей в секунду**; двухступенчатая — **порядка 15–30**, и только когда игрок
+действительно в секторе. Разница в десять раз, и она не зависит от железа.
+
+`rayOffset` (смещение по индексу охранника) обязателен: без него все проверки
+приходятся на один и тот же кадр раз в 100 мс, и вместо ровной нагрузки получается
+пила.
+
+Луч пускается по **слитому мешу стен с BVH** (`computeBoundsTree`), а не по десятку
+отдельных объектов: `intersectObjects` по списку перебирает каждый объект отдельно.
+
+---
+
+## 2. Меш конуса: буфер выделяется ОДИН раз
+
+Наивная реализация пересоздаёт `Float32BufferAttribute` каждый кадр на каждого
+охранника. Это мусор в куче и пила сборщика мусора — самый заметный источник
+подёргиваний в стелс-сценах.
+
+```typescript
+// При создании охранника:
+const geom = new THREE.BufferGeometry();
+geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array((SEG + 2) * 3), 3));
+geom.setIndex(indices);          // индексы не меняются никогда
+
+// В кадре — пишем в тот же массив:
+const arr = (geom.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
+arr[o] = ...;
+pos.needsUpdate = true;
+geom.computeBoundingSphere();    // иначе фрустум-каллинг отсечёт конус
+```
+
+Конусы перестраиваются **по очереди, один охранник в кадр** (15 Гц при четырёх
+охранниках): визуально это незаметно, а стоимость делится на число охранников.
+
+⚠️ **Ловушка координат.** Меш конуса лежит либо в сцене (тогда вершины пишутся в
+**мировых** координатах), либо в группе охранника (тогда в **локальных**, без учёта
+`facing`). Смешать одно с другим — значит либо оставить конус у начала координат,
+либо повернуть его дважды. Эта ошибка была допущена и поймана в этом самом демо.
+
+---
+
+## 3. Шкала подозрения: три числа, которые делают стелс честным
+
+```typescript
+export const VISION = { halfAngle: Math.PI / 4, range: 14, grace: 0.25, rayHz: 10 };
+export const SHADOW_FACTOR = 2.5;
+
+export function suspicionRate(distance: number, inShadow: boolean): number {
+  const closeness = 1 - 0.6 * Math.min(distance / VISION.range, 1);
+  return (60 * closeness) / (inShadow ? SHADOW_FACTOR : 1);   // процентов в секунду
+}
+```
+
+1. **Grace period 0.25 с.** Игрок, мелькнувший в углу конуса на два кадра, не должен
+   становиться подозрительным. Отсчёт сбрасывается при потере цели.
+2. **Линейная зависимость от дистанции, а не ступенька.** Отойти на два шага
+   действительно помогает — это читаемая обратная связь.
+3. **Гистерезис на выходе из тревоги.** Из `alerted` охранник выходит на 55 %, а не
+   на тех же 100 %. Без гистерезиса при мерцающей видимости (игрок за углом
+   колонны) состояние переключается каждый кадр, и это видно по цвету конуса.
+
+Проверенные числа времени до тревоги при непрерывном наблюдении:
+
+| Дистанция | На свету | В тени |
+|---|---|---|
+| 2 м | 2.07 с | 4.81 с |
+| 7 м | 2.63 с | 6.20 с |
+| 14 м (край) | 4.42 с | 10.67 с |
+
+Нижняя граница — «даже в упор игрок успевает среагировать» (≥ 1 с), верхняя —
+«стоять в конусе на краю дальности нельзя вечно» (≤ 8 с). Обе проверяются головно.
+
+---
+
+## 4. Шум — второй канал, и он не поднимает тревогу
+
+```typescript
+export const NOISE = { sneak: 0, walk: 3.5, run: 9, gunshot: 22 };
+```
+
+Услышанный шум переводит охранника в `investigating` (шкала подтягивается до 45 %)
+и даёт ему точку для проверки — но **не доводит до `alerted`**. Тревога поднимается
+только глазами. Иначе бег в соседней комнате мгновенно поднимает всю карту, и
+единственная рабочая тактика — красться всю игру, то есть не играть.
+
+Радиус выстрела (22 м) намеренно больше дальности зрения (14 м): шумное решение
+должно иметь последствия шире, чем видит один охранник.
+
+---
+
+## 5. Поведение по состояниям
+
+| Состояние | Что делает | Скорость |
+|---|---|---|
+| `patrol` | Идёт по маршруту, на точке пауза 1.4 с и **осматривается** | 2.4 м/с |
+| `suspicious` | То же, шкала растёт | — |
+| `investigating` | Идёт к последней известной позиции, дойдя — осматривается | 3.6 м/с |
+| `alerted` | Преследует игрока напрямую | 5.2 м/с |
+
+Два обязательных штриха, без которых охранники выглядят механизмами:
+* на паузе маршрута охранник **вращает голову** — статичный конус читается как «спит»;
+* поворот головы **плавный** (ограничение угловой скорости), иначе конус телепортируется.
+
+---
+
+## 6. Что проверяется головно
+
+`npm run check:stealth` (26 проверок): границы конуса и его поворот вместе с
+охранником, монотонность скорости подозрения, время до тревоги на трёх дистанциях
+и в тени, работа grace period и его сброс, отсутствие мигания состояний при
+мерцающей видимости, возврат в патруль за ≤ 10 с, радиусы слышимости и то, что шум
+не поднимает полную тревогу, и наконец бюджет рейкастов — экономия не меньше чем
+в десять раз против наивной схемы.

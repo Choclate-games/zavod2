@@ -1,170 +1,224 @@
-# Three.js: Melee Combat, Combo State Machine, Hit-Stop & Parry
+# Three.js: ближний бой, связки, парирование, hit-stop и рэгдолл
 
-Эталонная реализация боевой системы ближнего боя на Three.js: связки ударов (комбо), точное окно парирования, микро-заморозка кадра (Hit-Stop), импульсы камеры и отклик врагов.
+> 💡 **Интерактивное демо**: `workspace/knowledge-showcase/` (вкладка *«⚔️ Слэшер и
+> рэгдолл»*). Логика — в `src/game/meleeCombat.ts` (без рендерера), рэгдолл — в
+> `src/world/ragdoll.ts`. Головные проверки: `npm run check:melee` (фрейм-дата,
+> связка, парирование, сектор, физика трупа) и `npm run check:smoke`.
 
----
-
-## 1. Менеджер комбо-атак (`MeleeCombatSystem.ts`)
-
-```typescript
-import * as THREE from 'three';
-
-export interface AttackStep {
-    name: string;
-    windupTime: number;   // Подготовка к удару (с)
-    activeTime: number;   // Время активности хитбокса (с)
-    recoveryTime: number; // Восстановление (с)
-    damage: number;
-    knockback: number;
-    hitStopMs: number;
-}
-
-export class MeleeCombatSystem {
-    public comboIndex = 0;
-    public state: 'IDLE' | 'WINDUP' | 'ACTIVE' | 'RECOVERY' | 'PARRYING' = 'IDLE';
-    public stateTimer = 0;
-    public isParryWindow = false;
-
-    // 3-ударная комбо-цепочка
-    public comboChain: AttackStep[] = [
-        { name: 'Slash Right', windupTime: 0.08, activeTime: 0.12, recoveryTime: 0.18, damage: 25, knockback: 6.0, hitStopMs: 40 },
-        { name: 'Slash Left',  windupTime: 0.06, activeTime: 0.12, recoveryTime: 0.20, damage: 35, knockback: 8.0, hitStopMs: 50 },
-        { name: 'Heavy Slam',  windupTime: 0.18, activeTime: 0.16, recoveryTime: 0.35, damage: 70, knockback: 18.0, hitStopMs: 80 }
-    ];
-
-    public weaponMesh: THREE.Group;
-    public hitboxCenter = new THREE.Vector3();
-    public hitboxRadius = 1.6;
-
-    constructor(parentEntity: THREE.Object3D) {
-        this.weaponMesh = this.buildProceduralSword();
-        parentEntity.add(this.weaponMesh);
-        this.weaponMesh.position.set(0.4, 0.9, 0.4);
-    }
-
-    private buildProceduralSword(): THREE.Group {
-        const sword = new THREE.Group();
-        const matBlade = new THREE.MeshStandardMaterial({ color: 0xecf0f1, metalness: 0.9, roughness: 0.15 });
-        const matGold = new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.8, roughness: 0.3 });
-        const matGrip = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.8 });
-
-        // Лезвие
-        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.95, 0.02), matBlade);
-        blade.position.y = 0.55;
-        blade.castShadow = true;
-        sword.add(blade);
-
-        // Гарда
-        const guard = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.06), matGold);
-        guard.position.y = 0.08;
-        sword.add(guard);
-
-        // Рукоять
-        const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.22, 8), matGrip);
-        grip.position.y = -0.05;
-        sword.add(grip);
-
-        return sword;
-    }
-
-    public requestAttack(): boolean {
-        if (this.state === 'IDLE' || this.state === 'RECOVERY') {
-            if (this.state === 'RECOVERY') {
-                this.comboIndex = (this.comboIndex + 1) % this.comboChain.length;
-            } else {
-                this.comboIndex = 0;
-            }
-            this.state = 'WINDUP';
-            this.stateTimer = this.comboChain[this.comboIndex].windupTime;
-            return true;
-        }
-        return false;
-    }
-
-    public requestParry(): boolean {
-        if (this.state === 'IDLE') {
-            this.state = 'PARRYING';
-            this.stateTimer = 0.25;
-            this.isParryWindow = true;
-            return true;
-        }
-        return false;
-    }
-
-    public update(dt: number, onHit: (step: AttackStep, center: THREE.Vector3) => void) {
-        if (this.state === 'IDLE') return;
-
-        this.stateTimer -= dt;
-        const currentStep = this.comboChain[this.comboIndex];
-
-        switch (this.state) {
-            case 'WINDUP':
-                // Отвод меча назад
-                this.weaponMesh.rotation.z = THREE.MathUtils.lerp(this.weaponMesh.rotation.z, 1.2, 20.0 * dt);
-                if (this.stateTimer <= 0) {
-                    this.state = 'ACTIVE';
-                    this.stateTimer = currentStep.activeTime;
-                }
-                break;
-
-            case 'ACTIVE':
-                // Взмах меча вперед
-                this.weaponMesh.rotation.z = THREE.MathUtils.lerp(this.weaponMesh.rotation.z, -1.6, 30.0 * dt);
-                this.weaponMesh.getWorldPosition(this.hitboxCenter);
-                onHit(currentStep, this.hitboxCenter);
-
-                if (this.stateTimer <= 0) {
-                    this.state = 'RECOVERY';
-                    this.stateTimer = currentStep.recoveryTime;
-                }
-                break;
-
-            case 'RECOVERY':
-                this.weaponMesh.rotation.z = THREE.MathUtils.lerp(this.weaponMesh.rotation.z, 0, 10.0 * dt);
-                if (this.stateTimer <= 0) {
-                    this.state = 'IDLE';
-                    this.comboIndex = 0;
-                }
-                break;
-
-            case 'PARRYING':
-                this.weaponMesh.rotation.x = Math.PI / 2;
-                if (this.stateTimer <= 0.1) {
-                    this.isParryWindow = false; // Окно идеального парирования закрылось
-                }
-                if (this.stateTimer <= 0) {
-                    this.weaponMesh.rotation.x = 0;
-                    this.state = 'IDLE';
-                }
-                break;
-        }
-    }
-}
-```
+Слэшер отличается от файтинга (`fighting_game_core.md`) не жанром, а тем, что бой
+идёт в 3D против нескольких противников сразу. Отсюда три отличия, которые надо
+заложить сразу, а не «докрутить потом»: сектор поражения вместо хитбокса, токены
+атаки вместо честной свалки и рэгдолл вместо анимации смерти.
 
 ---
 
-## 2. Менеджер Hit-Stop (Микро-заморозка времени) (`HitStopManager.ts`)
+## 1. Единица времени — кадр, а не секунда
+
+Вся боёвка живёт в `fixedUpdate(1/60)` и считается в кадрах.
 
 ```typescript
-export class HitStopManager {
-    private static isFrozen = false;
-
-    /**
-     * Замораживает игровой цикл на несколько миллисекунд (эффект сочного удара)
-     */
-    public static trigger(durationMs = 45, onComplete?: () => void) {
-        if (this.isFrozen) return;
-        this.isFrozen = true;
-
-        setTimeout(() => {
-            this.isFrozen = false;
-            onComplete?.();
-        }, durationMs);
-    }
-
-    public static shouldSkipFrame(): boolean {
-        return this.isFrozen;
-    }
+export interface Swing {
+  startup: number;    // замах: отменить уже нельзя, урона ещё нет
+  active: number;     // единственные кадры, когда существует хитбокс
+  recovery: number;   // окно, в котором за промах наказывают
+  hitstop: number;    // заморозка обоих при попадании
+  cancelFrom: number; // кадр восстановления, с которого разрешён следующий удар связки
 }
 ```
+
+Почему не секунды: игрок физически ощущает разницу между 5 и 7 кадрами замаха, а
+«0.1 с» на 58 FPS превращается в 5.8 кадра — и приём становится другим приёмом.
+Дробное число кадров ещё и ломает окна отмены: они перестают совпадать сами с собой
+от запуска к запуску.
+
+Проверенная связка из стенда:
+
+| Приём | startup/active/recovery | Урон | Отмена с | Hit-stop |
+|---|---|---|---|---|
+| `slash-r` | 7 / 5 / 16 | 24 | 4 | 4 |
+| `slash-l` | 5 / 5 / 18 | 30 | 5 | 5 |
+| `slam` (финишер) | 14 / 7 / 30 | 62 | — | 9 |
+| `riposte` (после парри) | 4 / 6 / 12 | 85 | — | 11 |
+| удар врага | 26 / 6 / 34 | 18 | — | 3 |
+
+Замах врага **26 кадров** — это не «медленный ИИ», а обязательное условие: на
+реакцию человеку нужно ~11 кадров, окно идеального парирования — 6, и без запаса
+парирование превращается в лотерею. `check:melee` проверяет это правилом
+`ENEMY_SWING.startup >= 22`.
+
+---
+
+## 2. Связка: окна отмены + буфер ввода + память связки
+
+Три механизма, и все три обязательны — уберите любой, и связка перестаёт собираться.
+
+```typescript
+// 1. Окно отмены: следующий удар стартует ДО конца восстановления.
+private canStartFromBuffer(frame: number): boolean {
+  if (frame - this.bufferedAt > INPUT_BUFFER) return false;   // 2. буфер, 8 кадров
+  if (this.state === 'idle') return true;
+  if (this.state !== 'recovery' || !this.swing) return false;
+  const elapsed = this.swing.recovery - this.timer;
+  return elapsed >= this.swing.cancelFrom;
+}
+```
+
+* **Окно отмены** (`cancelFrom`) — то, что делает связку связкой. Без него три удара
+  идут за сумму всех кадров, бой ощущается вязким. Головная проверка сравнивает
+  длину связки с суммой трёх приёмов подряд и падает, если отмена не работает.
+* **Буфер ввода** (`INPUT_BUFFER = 8`) — нажатие чуть раньше открытия окна не
+  теряется. Без буфера игрок обязан попадать в окно кадр-в-кадр; на практике это
+  читается как «игра съедает нажатия».
+* **Память связки** (`COMBO_LINGER = 22`) — сколько кадров цепочка помнит себя после
+  конца приёма.
+
+⚠️ **Ловушка, найденная головной проверкой.** Память связки должна тратиться
+**только в простое**:
+
+```typescript
+if (this.state === 'idle') {
+  if (this.linger > 0) this.linger--;
+  if (this.linger === 0) this.stepIndex = 0;
+}
+```
+
+Если уменьшать `linger` каждый кадр, финишный удар (14+7+30 = 51 кадр) съедает окно
+сам собой, и третий удар связки **физически невозможно собрать** — при этом на экране
+всё выглядит нормально, просто третий удар «иногда не выходит».
+
+Вторая ловушка там же: после финишера связка обязана начинаться заново
+(`stepIndex + 1 < COMBO.length`), иначе игрок зацикливает самый сильный приём.
+
+---
+
+## 3. Hit-stop — счётчик кадров, НЕ `setTimeout`
+
+```typescript
+fixedUpdate(dt: number): void {
+  this.frame++;
+  if (this.hitstop > 0) { this.hitstop--; return; }   // замирает ВСЁ, включая физику
+  ...
+}
+```
+
+`setTimeout(..., 45)` в роли hit-stop — ошибка, а не сокращение:
+* таймер реального времени не знает про паузу и про свёрнутую вкладку;
+* на 30 FPS он даёт другое число пропущенных кадров, то есть другой геймплей;
+* он не отменяется при смене состояния — заморозка «догоняет» уже мёртвого врага;
+* при нескольких попаданиях подряд таймеры накладываются.
+
+Замирать обязано **всё**, включая `world.step()` для трупов. Если заморозить только
+бойцов, кадр веса удара выглядит как зависание, по которому продолжают ехать трупы.
+
+---
+
+## 4. Сектор поражения вместо хитбокса
+
+В 2D-файтинге хитбокс — прямоугольник. В 3D против нескольких врагов прямоугольник
+промахивается мимо стоящего чуть сбоку и задевает того, кто за спиной.
+
+```typescript
+export function inSwingArc(dx, dz, facing, swing, targetRadius): boolean {
+  const distSq = dx * dx + dz * dz;
+  const reach = swing.reach + targetRadius;
+  if (distSq > reach * reach) return false;
+  const dist = Math.sqrt(distSq);
+  const cos = (Math.sin(facing) * dx + Math.cos(facing) * dz) / dist;
+  return cos >= Math.cos(swing.arc);   // arc — ПОЛОВИНА угла сектора
+}
+```
+
+Дальность + арка совпадают с тем, что игрок видит по анимации взмаха, и не требуют
+ни физических тел, ни рейкастов. Правило «один взмах — одно попадание на цель»
+держится множеством `hitThisSwing`, которое чистится при входе в `startup`.
+
+---
+
+## 5. Парирование: три исхода, а не два
+
+```typescript
+export const PARRY = { perfect: 6, block: 14, total: 22 };
+```
+
+| Кадр стойки | Исход | Что происходит |
+|---|---|---|
+| 0..5 | `perfect` | Атакующий уходит в стан, защитнику открывается риспост (85 урона), hit-stop 12 кадров |
+| 6..13 | `block` | Проходит 25 % урона (chip), ответа нет |
+| 14..21 | `none` | Хвост стойки: удар проходит полностью |
+
+Уязвимый хвост — не украшение, а цена за нажатие: без него парирование спамится
+вместо блока. Парировать во время приёма нельзя, иначе стойка отменяет любой промах.
+
+---
+
+## 6. Несколько противников: токены атаки
+
+```typescript
+let tokens = ATTACK_TOKENS;              // 2 на всю арену
+for (const e of enemies) if (e.attacking) tokens--;
+// ... бить разрешено, только пока tokens > 0
+```
+
+Пять врагов, каждый со своим ИИ, атакуют одновременно — и бой превращается в
+лотерею, где парирование бессмысленно (парируешь одного, получаешь от четверых).
+Токены плюс кружение (враг без токена обходит игрока по дуге) дают читаемый бой,
+в котором видно, кто именно замахнулся. Тот же приём — в `shooter_enemy_ai_and_combat.md`.
+
+Затухание урона по стану (`staggerScaling`: −18 % за удар, дно 35 %) не даёт связке
+убивать любого врага «в упор» и запрещает бесконечный лок. Головная проверка
+дополнительно требует, чтобы стан был **короче** полного цикла приёма — иначе враг
+встаёт ровно под следующий удар, и это тот же лок с другой стороны.
+
+---
+
+## 7. Рэгдолл на Rapier — только для трупа
+
+Полный разбор — в `knowledge/mechanics/ragdoll.md` и `src/world/ragdoll.ts`.
+Коротко: пока враг жив, им управляет автомат состояний с предсказуемыми кадрами;
+физика включается ровно в момент смерти и получает импульс от последнего удара
+(в голову — если удар был тяжёлым).
+
+Семь тел (таз, грудь, голова, две руки, две ноги), шесть сферических суставов,
+`RAPIER.JointData.spherical(anchor1, anchor2)` с якорями в локальных координатах тел.
+
+Три ловушки, каждая проверяется в `check:melee`:
+
+1. **Части одного рэгдолла не должны сталкиваться друг с другом.** Соседние капсулы
+   всегда пересекаются в суставе; решатель контактов и решатель суставов начинают
+   спорить, труп дрожит и уползает. Лечится группами столкновений: одна membership
+   на все части, фильтр — только «земля».
+2. **Угловое демпфирование обязательно** (`setAngularDamping(4)`). Без него труп
+   вращается до конца сессии.
+3. **Импульс прикладывается один раз и клампится** (у нас 26 Н·с). «Кинематографичный»
+   импульс разрывает суставы: тела разлетаются, решатель стягивает их обратно —
+   получается судорога. Проверка бьёт трупу импульсом 400 Н·с и требует, чтобы все
+   тела остались в пределах 1.3 м от таза.
+
+**Измеренный факт:** `body.isSleeping()` у рэгдолла **никогда не срабатывает** — за
+15 секунд ни одно тело не уснуло, потому что решатель суставов постоянно
+подталкивает соседей и таймер сна сбрасывается. Поэтому «труп успокоился» считается
+по скорости (`maxSpeed() < 0.06 м/с`, достигается за ~1.3 с), а не по сну. Если
+ждать сна — трупы не удалятся никогда, а утечка спишется на «редкий случай».
+
+Уборка: лимит на количество трупов (у нас 6, старший вытесняется) плюс TTL, причём
+удалять можно **только успокоившийся** — труп, растворившийся в полёте, читается как
+баг. `Ragdoll.dispose()` обязан снимать и суставы, и тела: WASM-память Rapier не
+собирается сборщиком мусора JS.
+
+---
+
+## 8. Что проверять головно
+
+`npm run check:melee` (34 проверки) закрывает:
+* читаемость приёмов (стартап 3..20 кадров, активные ≥ 3, hit-stop ≥ 4);
+* парируемость замаха врага;
+* что связка действительно собирается, ускоряется отменой и сбрасывается после
+  финишера и после паузы;
+* что буфер ввода ловит раннее нажатие и не ловит слишком раннее;
+* границы всех трёх окон парирования;
+* сектор поражения: перед/за спиной/за краем арки/поворот вместе с бойцом;
+* физику трупа на настоящем Rapier (NaN, проваливание сквозь пол, разрыв суставов,
+  успокоение, освобождение тел).
+
+Rapier работает в Node без изменений — `-compat` несёт WASM внутри JS. Значит,
+физика проверяется по-настоящему, а не «на модели».
