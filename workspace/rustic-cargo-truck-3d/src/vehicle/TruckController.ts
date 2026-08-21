@@ -199,18 +199,21 @@ export class TruckController {
     const speed = vehicle.currentVehicleSpeed();
     this.applySteering(vehicle, dt, controls, speed, invertSteering);
     this.applyDrive(vehicle, controls, upgrades, speed);
-    this.applyEnvironmentalPhysics(vehicle, body, dt, speed, controls, upgrades);
 
     vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
 
-    // Read the vehicle speed after the controller step so the HUD never lags one
-    // physics frame behind the actual chassis motion.
+    // Read the vehicle speed and transform after the physics step
     this.speed = Math.abs(vehicle.currentVehicleSpeed()) * 3.6;
     const p = body.translation();
     const r = body.rotation();
     this.position.set(p.x, p.y, p.z);
     this.rotation.set(r.x, r.y, r.z, r.w);
     this.positionZ = p.z;
+    this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
+
+    this.applyEnvironmentalPhysics(vehicle, body, dt, speed, controls, upgrades);
+    this.tireTracks.update(dt);
+
     this.updateVFX(dt, controls, speed);
     this.particles.update(dt);
     if (controls.recover) {
@@ -224,6 +227,7 @@ export class TruckController {
     const body = this.body;
     if (!body) return;
     this.upsideDownFor = 0;
+    this.tireTracks.breakAllTracks();
     const heading = Math.atan2(this.forward.x, this.forward.z);
     this.physics.placeBody(
       body,
@@ -304,12 +308,21 @@ export class TruckController {
     const frictionDropCoeff = MUD.frictionDrop * (1 - tireUp * 0.20);
     const dragReduction = 1 - tireUp * 0.16;
 
+    // Vehicle linear speed in m/s along the forward axis
+    const linVel = body.linvel();
+    const forwardSpeed = this.forward.x * linVel.x + this.forward.z * linVel.z; // signed, m/s
+    const absSpeed = Math.abs(forwardSpeed);
+
+    // Lateral slip: side component of velocity relative to the truck heading
+    const lateralVel = Math.abs(-this.forward.z * linVel.x + this.forward.x * linVel.z);
     const wheelCount = this.wheels.length;
 
     for (let i = 0; i < wheelCount; i += 1) {
       const inContact = vehicle.wheelIsInContact(i);
       const wheelCfg = this.config.wheels[i] || this.config.wheels[0];
-      const wheelWorld = this.localToWorld(this.scratchVec.set(wheelCfg.x, this.config.suspension.connectionY, wheelCfg.z));
+      const wheelWorld = this.localToWorld(
+        this.scratchVec.set(wheelCfg.x, this.config.suspension.connectionY - this.config.wheelRadius * 0.85, wheelCfg.z),
+      );
 
       const mud = this.road.getMudIntensity(wheelWorld.x, wheelWorld.z);
       const water = this.road.getWaterIntensity(wheelWorld.x, wheelWorld.z);
@@ -325,40 +338,84 @@ export class TruckController {
       if (inContact) {
         anyInContact = true;
 
-        // Dynamic wheel spin detection
+        // ── Physically-correct tire slip detection ──────────────────────────
         const curRot = vehicle.wheelRotation(i) ?? 0;
-        const rotDelta = (curRot - (this.prevWheelRotations[i] ?? 0)) / Math.max(1e-4, dt);
+        const angularVel = (curRot - (this.prevWheelRotations[i] ?? curRot)) / Math.max(dt, 1e-4);
         this.prevWheelRotations[i] = curRot;
-        const isSpinning = Math.abs(rotDelta) > 4.2 && Math.abs(speed) < 4.5 && controls.throttle > 0;
+        const rimSpeed = angularVel * this.config.wheelRadius; // m/s at rim
 
-        // Real-time SnowRunner-style road rut deformation across all road surfaces
-        const baseRut = 0.032;
-        const mudRut = mud * 0.075;
-        const throttleBonus = controls.throttle > 0 ? 0.025 : 0;
-        const spinBonus = isSpinning ? 0.05 : 0;
-        const rutDepth = baseRut + mudRut + throttleBonus + spinBonus;
+        // Slip ratio: how much rim speed deviates from vehicle forward speed.
+        // > 0  → wheel spinning faster than ground (burnout / пробуксовка)
+        // < 0  → wheel slower than ground (braking lockup / торможение)
+        const slipVelocity = rimSpeed - forwardSpeed;
+        const slipRef = Math.max(absSpeed, Math.abs(rimSpeed), 0.5);
+        const slipRatio = slipVelocity / slipRef;
+
+        const lateralSlipRatio = lateralVel / Math.max(absSpeed, 0.5);
+
+        // ── 3 Conditions for Tire Tracks ────────────────────────────────────
+        // 1. При резком старте / пробуксовке (Hard launch / burnout / wheel spin)
+        const isSpinning =
+          (slipRatio > 0.18 && controls.throttle > 0.1) ||
+          (controls.throttle > 0.5 && absSpeed < 3.0 && rimSpeed > absSpeed + 0.8) ||
+          (controls.throttle > 0.2 && absSpeed < 0.5 && Math.abs(angularVel) > 1.2);
+
+        // 2. При торможении (Braking / lockup)
+        const isBraking =
+          (controls.brake > 0.05 && absSpeed > 0.4) ||
+          (slipRatio < -0.15 && absSpeed > 0.5);
+
+        // 3. При заносе / ручнике (Drift / sideslip / handbrake)
+        const isDrifting =
+          (lateralSlipRatio > 0.20 && absSpeed > 0.8) ||
+          (controls.handbrake && absSpeed > 0.3);
+
+        // Отрисовка строго по 3 условиям: торможение, занос, резкий старт
+        const leaveTrack = isBraking || isDrifting || isSpinning;
+
+        // Real-time SnowRunner-style road rut deformation
+        const rutDepth = 0.032 + mud * 0.075
+          + (controls.throttle > 0 ? 0.020 : 0)
+          + (isSpinning ? 0.055 : 0);
         this.road.deformRoad(wheelWorld.x, wheelWorld.z, rutDepth, isSpinning);
 
-        // Persistent 3D dynamic tire tracks
-        this.tireTracks.addPoint(
-          i,
-          wheelWorld.x,
-          wheelWorld.z,
-          this.forward.x,
-          this.forward.z,
-          this.config.wheelHalfWidth,
-          mud,
-          water,
-          this.wetTimer,
-        );
+        // Wheel heading including steering angle for authentic curvature in turns
+        const steerAngle = vehicle.wheelSteering(i) ?? 0;
+        const cosS = Math.cos(steerAngle);
+        const sinS = Math.sin(steerAngle);
+        const wheelForwardX = this.forward.x * cosS + this.forward.z * sinS;
+        const wheelForwardZ = -this.forward.x * sinS + this.forward.z * cosS;
 
-        // Particle emissions on spinning tires
-        if (mud > 0.10 && (Math.abs(rotDelta) > 2.2 || isSpinning)) {
-          this.particles.emitMudSpray(wheelWorld, this.forward, rotDelta, mud, this.config.wheelRadius);
+        if (leaveTrack) {
+          this.tireTracks.addPoint(
+            i,
+            wheelWorld.x,
+            wheelWorld.z,
+            wheelForwardX,
+            wheelForwardZ,
+            this.config.wheelHalfWidth,
+            mud,
+            water,
+            this.wetTimer,
+            isSpinning,
+            isBraking,
+            isDrifting,
+          );
+        } else {
+          // No slip → clean rolling → break track so the next slip creates a fresh mark
+          this.tireTracks.breakTrack(i);
         }
-        if (water > 0.12 && (Math.abs(speed) > 1.8 || Math.abs(rotDelta) > 3.0)) {
-          this.particles.emitWaterSplash(wheelWorld, this.forward, speed, water, this.config.wheelRadius);
+
+        // Particle emissions on spinning/sliding tires
+        if (mud > 0.10 && (Math.abs(angularVel) > 2.0 || isSpinning)) {
+          this.particles.emitMudSpray(wheelWorld, this.forward, angularVel, mud, this.config.wheelRadius);
         }
+        if (water > 0.12 && (absSpeed > 1.8 || Math.abs(angularVel) > 3.0)) {
+          this.particles.emitWaterSplash(wheelWorld, this.forward, forwardSpeed, water, this.config.wheelRadius);
+        }
+      } else {
+        // Wheel is airborne – break track ribbon to avoid floating lines
+        this.tireTracks.breakTrack(i);
       }
     }
 
@@ -505,6 +562,7 @@ export class TruckController {
     this.upsideDownFor += dt;
     if (this.upsideDownFor < 2) return;
     this.upsideDownFor = 0;
+    this.tireTracks.breakAllTracks();
     const heading = Math.atan2(this.forward.x, this.forward.z);
     this.physics.placeBody(
       body,

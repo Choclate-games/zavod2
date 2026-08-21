@@ -192,6 +192,21 @@ export class TruckController {
     this.position.set(p.x, p.y, p.z);
     this.rotation.set(r.x, r.y, r.z, r.w);
     this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
+
+    // 5. Интеграция со следами шин (TireTracksManager)
+    for (let i = 0; i < 4; i++) {
+      if (this.vehicle.wheelIsInContact(i)) {
+        const steer = this.vehicle.wheelSteering(i) ?? 0;
+        const cosS = Math.cos(steer);
+        const sinS = Math.sin(steer);
+        const wheelFwdX = this.forward.x * cosS + this.forward.z * sinS;
+        const wheelFwdZ = -this.forward.x * sinS + this.forward.z * cosS;
+        // this.tireTracks.addPoint(i, wheelWorldX, wheelWorldZ, wheelFwdX, wheelFwdZ, ...);
+      } else {
+        // Колесо в воздухе — сбрасываем начальную точку отрезка
+        // this.tireTracks.breakTrack(i);
+      }
+    }
   }
 
   render(alpha: number): void {
