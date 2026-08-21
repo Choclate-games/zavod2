@@ -63,16 +63,20 @@ export class TruckDemo implements Demo {
 
   fixedUpdate(dt: number): void {
     const input = this.ctx.input.vehicleSnapshot();
-    // Контроллер ДО шага мира: иначе колёса на кадр отстают от кузова.
+    // 1. Контроллер ДО шага мира: вычисление сил лучей и подвески (CRITICAL_RULES §62)
     this.truck.fixedUpdate(dt, input);
+    // 2. Шаг физического мира
     this.physics.step();
+    // 3. Синхронизация состояния ПОСЛЕ шага мира (позиция, скорость, следы)
+    this.truck.postStep(dt, input);
   }
 
   update(dt: number, alpha: number): void {
     this.truck.render(alpha);
     const input = this.ctx.input.vehicleSnapshot();
     this.ctx.audio.updateEngineRPM(Math.abs(this.truck.speed) / 60, input.throttle);
-    this.sceneManager.render(this.truck.position, this.truck.forward, this.truck.speed);
+    // Камера следует за сглаженной интерполированной позицией и направлением
+    this.sceneManager.render(this.truck.interpPosition, this.truck.interpForward, this.truck.speed, dt);
 
     this.statusTimer += dt;
     if (this.statusTimer > 0.12) {

@@ -67,8 +67,9 @@ export class TruckController {
   // Interpolation state: previous physics-step position/rotation for smooth rendering at any FPS
   private readonly prevPosition = new THREE.Vector3();
   private readonly prevRotation = new THREE.Quaternion();
-  private readonly interpPosition = new THREE.Vector3();
-  private readonly interpRotation = new THREE.Quaternion();
+  readonly interpPosition = new THREE.Vector3();
+  readonly interpRotation = new THREE.Quaternion();
+  readonly interpForward = new THREE.Vector3(0, 0, 1);
 
   private readonly scratchVec = new THREE.Vector3();
   private readonly scratchVec2 = new THREE.Vector3();
@@ -176,6 +177,9 @@ export class TruckController {
     // Reset interpolation state so we start clean at the spawn point
     this.prevPosition.copy(this.spawn);
     this.prevRotation.identity();
+    this.interpPosition.copy(this.spawn);
+    this.interpRotation.identity();
+    this.interpForward.set(0, 0, 1);
 
     if (this.truckMat) this.truckMat.color.copy(this.baseTruckColor);
     if (this.truckDarkMat) this.truckDarkMat.color.copy(this.baseTruckDarkColor);
@@ -204,12 +208,20 @@ export class TruckController {
     return local.applyQuaternion(this.rotation).add(this.position);
   }
 
+  interpLocalToWorld(local: THREE.Vector3): THREE.Vector3 {
+    return local.applyQuaternion(this.interpRotation).add(this.interpPosition);
+  }
+
+  /**
+   * Шаг 1: Подготовка контроллера ДО world.step().
+   * Вычисляет управление, обновляет подвеску и прикладывает внешние силы/сопротивление к телу.
+   */
   fixedUpdate(dt: number, controls: InputSnapshot, upgrades?: Partial<TruckUpgrades>, invertSteering = false): void {
     const vehicle = this.vehicle;
     const body = this.body;
     if (!vehicle || !body) return;
 
-    // Save previous state BEFORE the physics step for render interpolation
+    // Сохраняем состояние ДО шага мира для бесшовной интерполяции в render(alpha)
     this.prevPosition.copy(this.position);
     this.prevRotation.copy(this.rotation);
 
@@ -218,8 +230,18 @@ export class TruckController {
     this.applyDrive(vehicle, controls, upgrades, speed, dt);
 
     vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+    this.applyEnvironmentalPhysics(vehicle, body, dt, speed, controls, upgrades);
+  }
 
-    // Read the vehicle speed and transform after the physics step
+  /**
+   * Шаг 2: Синхронизация состояния ПОСЛЕ world.step().
+   * Считывает результирующую позицию тела, скорость и обновляет следы/частицы.
+   */
+  postStep(dt: number, controls: InputSnapshot): void {
+    const vehicle = this.vehicle;
+    const body = this.body;
+    if (!vehicle || !body) return;
+
     this.speed = Math.abs(vehicle.currentVehicleSpeed()) * 3.6;
     const p = body.translation();
     const r = body.rotation();
@@ -228,11 +250,10 @@ export class TruckController {
     this.positionZ = p.z;
     this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
 
-    this.applyEnvironmentalPhysics(vehicle, body, dt, speed, controls, upgrades);
     this.tireTracks.update(dt);
-
-    this.updateVFX(dt, controls, speed);
+    this.updateVFX(dt, controls, vehicle.currentVehicleSpeed());
     this.particles.update(dt);
+
     if (controls.recover) {
       this.recoverNow();
     } else {
@@ -559,6 +580,7 @@ export class TruckController {
     // This makes the truck visually smooth at ANY frame rate, not just 60 FPS.
     this.interpPosition.lerpVectors(this.prevPosition, this.position, alpha);
     this.interpRotation.slerpQuaternions(this.prevRotation, this.rotation, alpha);
+    this.interpForward.set(0, 0, 1).applyQuaternion(this.interpRotation);
     this.chassis.position.copy(this.interpPosition);
     this.chassis.quaternion.copy(this.interpRotation);
 
@@ -568,7 +590,7 @@ export class TruckController {
       const suspension = vehicle.wheelSuspensionLength(i) ?? this.config.suspension.restLength;
 
       const wheelCfg = this.config.wheels[i] || this.config.wheels[0];
-      const wheelWorld = this.localToWorld(this.scratchVec2.set(wheelCfg.x, this.config.suspension.connectionY, wheelCfg.z));
+      const wheelWorld = this.interpLocalToWorld(this.scratchVec2.set(wheelCfg.x, this.config.suspension.connectionY, wheelCfg.z));
       const mud = this.road.getMudIntensity(wheelWorld.x, wheelWorld.z);
       const water = this.road.getWaterIntensity(wheelWorld.x, wheelWorld.z);
       const inContact = vehicle.wheelIsInContact(i);

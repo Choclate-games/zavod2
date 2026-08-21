@@ -136,6 +136,8 @@ export class SceneManager {
       this.renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
       document.getElementById('game-root')?.append(this.renderer.domElement);
     }
+    this.scene.background = this.sky;
+    this.renderer.setClearColor(this.sky, 1);
     this.scene.fog = new THREE.Fog(0x95ad9e, 90, 360);
     this.scene.add(this.roadGroup, this.trackGroup, this.decorationGroup, this.truckGroup, this.cargoGroup, this.particleGroup);
     this.scene.add(new THREE.HemisphereLight(0xe4ede2, 0x504130, 2.2));
@@ -165,6 +167,7 @@ export class SceneManager {
    */
   setFog(near: number, far: number, skyHex?: number): void {
     const color = skyHex !== undefined ? new THREE.Color(skyHex) : this.sky;
+    this.scene.background = color;
     this.renderer.setClearColor(color, 1);
     if (this.scene.fog instanceof THREE.Fog) {
       this.scene.fog.color.copy(color);
@@ -212,13 +215,18 @@ export class SceneManager {
    * Smooth, stable chase camera.
    * Smoothes vehicle heading to eliminate jitter on bumps and avoids disorienting reverse yaw swings.
    */
-  render(target: THREE.Vector3, forward: THREE.Vector3, speed: number): void {
+  render(target: THREE.Vector3, forward: THREE.Vector3, speed: number, dt = 1 / 60): void {
     const forwardXZ = this.scratchForwardXZ.set(forward.x, 0, forward.z);
     if (forwardXZ.lengthSq() < 1e-4) forwardXZ.set(0, 0, 1);
     forwardXZ.normalize();
 
+    // Frame-rate independent exponential smoothing
+    const forwardSmooth = 1 - Math.exp(-8 * dt);
+    const posSmooth = 1 - Math.exp(-7 * dt);
+    const lookSmooth = 1 - Math.exp(-11 * dt);
+
     // Smooth forward heading to follow truck orientation without jarring
-    this.smoothedForward.lerp(forwardXZ, 0.12).normalize();
+    this.smoothedForward.lerp(forwardXZ, forwardSmooth).normalize();
 
     const isPortrait = window.innerWidth < window.innerHeight;
     const baseDistance = isPortrait ? 11.6 : 10.2;
@@ -232,14 +240,14 @@ export class SceneManager {
       .addScaledVector(this.smoothedForward, -distance)
       .setY(target.y + heightOffset);
 
-    this.camera.position.lerp(this.cameraTarget, 0.10);
+    this.camera.position.lerp(this.cameraTarget, posSmooth);
 
     // Look directly at the truck chassis center to prevent counter-steer screen drift
     this.aim
       .copy(target)
       .setY(target.y + lookHeight);
 
-    this.lookTarget.lerp(this.aim, 0.16);
+    this.lookTarget.lerp(this.aim, lookSmooth);
     this.camera.lookAt(this.lookTarget);
 
     this.followSun(target);

@@ -1,6 +1,6 @@
 # Three.js + Rapier 3D: Dynamic Raycast Vehicle Controller (Эталонная физика)
 
-> 💡 **Интерактивное демо**: Протестируйте работу этой физики в `workspace/knowledge-showcase/` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D 1:1)»*).
+> 💡 **Интерактивное демо**: Протестируйте работу этой физики в `workspace/knowledge-showcase/` (Режим: *«🚚 ЗиЛ-130 (Rapier 3D)»*).
 
 Настоящая, проверенная в продакшене физика грузовика/автомобиля на связке **Three.js** и физического движка **Rapier3D (WebAssembly)** через `RAPIER.DynamicRayCastVehicleController`.
 
@@ -26,7 +26,7 @@ export class PhysicsWorld {
 
   async initialize(): Promise<void> {
     await RAPIER.init();
-    // Гравитация y = -14 для плотного и динамичного аркадного сцепления
+    // Гравитация y = -14 для плотного и динамичного сцепления
     this.world = new RAPIER.World({ x: 0, y: -14, z: 0 });
     this.world.timestep = 1 / 60;
   }
@@ -66,6 +66,13 @@ export class PhysicsWorld {
 
 ## 2. Контроллер транспортного средства (`TruckController.ts`)
 
+### Полный цикл кадра (Без микродерганий на любых FPS):
+1. **`fixedUpdate(dt)` (Pre-step)**: сохраняет `prevPosition`/`prevRotation`, прикладывает силы к колесам (`engineForce`/`brake`), вызывает `vehicle.updateVehicle(dt)` и сопротивление среды.
+2. **`world.step()`**: физический движок интегрирует силы и перемещает жесткое тело `body`.
+3. **`postStep(dt)` (Post-step)**: считывает новую позицию `body.translation()`, обновляет `this.position`, `this.forward`, скорость и следы шин.
+4. **`render(alpha)`**: интерполирует визуал `interpPosition.lerpVectors(prevPosition, position, alpha)` и направление `interpForward`.
+5. **Камера**: следует за **`interpPosition`** и **`interpForward`** с экспоненциальным сглаживанием по `dt`, а не за дискретной физической позицией.
+
 ```typescript
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
@@ -84,33 +91,41 @@ export class TruckController {
   readonly position = new THREE.Vector3();
   readonly rotation = new THREE.Quaternion();
   readonly forward = new THREE.Vector3(0, 0, 1);
+
+  // Состояние интерполяции для 60 / 120 / 144+ FPS
+  private readonly prevPosition = new THREE.Vector3();
+  private readonly prevRotation = new THREE.Quaternion();
+  readonly interpPosition = new THREE.Vector3();
+  readonly interpRotation = new THREE.Quaternion();
+  readonly interpForward = new THREE.Vector3(0, 0, 1);
+
   speed = 0; // км/ч
 
   private body: RAPIER.RigidBody | null = null;
   private vehicle: RAPIER.DynamicRayCastVehicleController | null = null;
   private steerAngle = 0;
 
-  // Параметры подвески и шин (ЗиЛ-130 / Урал)
   private config = {
-    wheelRadius: 0.44,
+    wheelRadius: 0.6,
     wheelHalfWidth: 0.22,
     suspension: {
-      connectionY: 0.5,
-      restLength: 0.35,
-      stiffness: 28.0,
-      compression: 2.4,
-      relaxation: 3.2,
-      maxTravel: 0.28,
-      maxForce: 8500.0,
+      connectionY: -0.1,
+      restLength: 0.5,
+      stiffness: 70.0,
+      compression: 3.4,
+      relaxation: 5.2,
+      maxTravel: 0.35,
+      maxForce: 40000.0,
     },
     tire: {
-      frictionSlip: 1.8,
-      sideFrictionStiffness: 14.0,
+      frictionSlip: 2.6,
+      sideFrictionStiffness: 0.8,
     },
     engine: {
-      baseForce: 2400.0,
-      maxSpeed: 30.0, // м/с
-      brakeForce: 3600.0,
+      baseForce: 1950.0,
+      maxSpeed: 16.0, // м/с (~58 км/ч)
+      reverseForce: 950.0,
+      maxReverseSpeed: 6.0,
     }
   };
 
@@ -129,12 +144,11 @@ export class TruckController {
     const direction = { x: 0, y: -1, z: 0 };
     const axle = { x: -1, y: 0, z: 0 };
 
-    // 4 колеса: FL, FR, RL, RR
     const wheelPositions = [
-      { x: -1.05, y: this.config.suspension.connectionY, z: 1.4 },
-      { x: 1.05,  y: this.config.suspension.connectionY, z: 1.4 },
-      { x: -1.05, y: this.config.suspension.connectionY, z: -1.1 },
-      { x: 1.05,  y: this.config.suspension.connectionY, z: -1.1 },
+      { x: -1.08, y: this.config.suspension.connectionY, z: 2.0 },
+      { x: 1.08,  y: this.config.suspension.connectionY, z: 2.0 },
+      { x: -1.08, y: this.config.suspension.connectionY, z: -2.0 },
+      { x: 1.08,  y: this.config.suspension.connectionY, z: -2.0 },
     ];
 
     for (let i = 0; i < 4; i++) {
@@ -148,81 +162,109 @@ export class TruckController {
       this.vehicle.setWheelFrictionSlip(i, this.config.tire.frictionSlip);
       this.vehicle.setWheelSideFrictionStiffness(i, this.config.tire.sideFrictionStiffness);
     }
+
+    this.position.copy(position);
+    this.prevPosition.copy(position);
+    this.interpPosition.copy(position);
   }
 
+  /**
+   * 1. Вызывается ДО world.step()
+   */
   fixedUpdate(dt: number, input: VehicleInput): void {
     if (!this.vehicle || !this.body) return;
 
-    const currentSpeed = this.vehicle.currentVehicleSpeed();
-    this.speed = Math.abs(currentSpeed) * 3.6;
+    // Сохраняем снимок начала шага
+    this.prevPosition.copy(this.position);
+    this.prevRotation.copy(this.rotation);
 
-    // 1. Руление с пружинным возвратом
-    const targetSteer = input.steer * 0.55;
+    // Руление с адаптивной скоростью
+    const targetSteer = input.steer * 0.52;
     this.steerAngle = THREE.MathUtils.lerp(this.steerAngle, targetSteer, 8.0 * dt);
     this.vehicle.setWheelSteering(0, this.steerAngle);
     this.vehicle.setWheelSteering(1, this.steerAngle);
 
-    // 2. Двигатель и тормоза (задний/полный привод)
+    // Двигатель и тормоза (CRITICAL_RULES §60)
     const forwardSpeed = this.vehicle.currentVehicleSpeed();
     for (let i = 0; i < 4; i++) {
+      const isDrive = i >= 2; // задний привод
       if (input.throttle > 0 && forwardSpeed < this.config.engine.maxSpeed) {
-        this.vehicle.setWheelEngineForce(i, input.throttle * this.config.engine.baseForce);
+        if (isDrive) this.vehicle.setWheelEngineForce(i, input.throttle * this.config.engine.baseForce);
         this.vehicle.setWheelBrake(i, 0);
       } else if (input.brake > 0) {
         if (forwardSpeed > 0.5) {
-          this.vehicle.setWheelBrake(i, input.brake * this.config.engine.brakeForce);
+          this.vehicle.setWheelBrake(i, input.brake * 26.0);
           this.vehicle.setWheelEngineForce(i, 0);
         } else {
-          // Задний ход
-          this.vehicle.setWheelEngineForce(i, -input.brake * this.config.engine.baseForce * 0.5);
+          if (isDrive) this.vehicle.setWheelEngineForce(i, -input.brake * this.config.engine.reverseForce);
           this.vehicle.setWheelBrake(i, 0);
         }
+      } else if (input.handbrake) {
+        this.vehicle.setWheelEngineForce(i, 0);
+        this.vehicle.setWheelBrake(i, 90.0);
       } else {
         this.vehicle.setWheelEngineForce(i, 0);
-        this.vehicle.setWheelBrake(i, 15.0); // Легкое торможение двигателем
+        this.vehicle.setWheelBrake(i, 2.6); // сопротивление холостого хода
       }
     }
 
-    // 3. Шаг лучевой системы колес с фильтрацией групп
+    // Лучевая система колес ДО шага мира (CRITICAL_RULES §62)
     this.vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+  }
 
-    // 4. Считывание позиции тела
+  /**
+   * 2. Вызывается ПОСЛЕ world.step()
+   */
+  postStep(dt: number): void {
+    if (!this.vehicle || !this.body) return;
+
+    this.speed = Math.abs(this.vehicle.currentVehicleSpeed()) * 3.6;
     const p = this.body.translation();
     const r = this.body.rotation();
     this.position.set(p.x, p.y, p.z);
     this.rotation.set(r.x, r.y, r.z, r.w);
     this.forward.set(0, 0, 1).applyQuaternion(this.rotation);
-
-    // 5. Интеграция со следами шин (TireTracksManager)
-    for (let i = 0; i < 4; i++) {
-      if (this.vehicle.wheelIsInContact(i)) {
-        const steer = this.vehicle.wheelSteering(i) ?? 0;
-        const cosS = Math.cos(steer);
-        const sinS = Math.sin(steer);
-        const wheelFwdX = this.forward.x * cosS + this.forward.z * sinS;
-        const wheelFwdZ = -this.forward.x * sinS + this.forward.z * cosS;
-        // this.tireTracks.addPoint(i, wheelWorldX, wheelWorldZ, wheelFwdX, wheelFwdZ, ...);
-      } else {
-        // Колесо в воздухе — сбрасываем начальную точку отрезка
-        // this.tireTracks.breakTrack(i);
-      }
-    }
   }
 
+  /**
+   * 3. Кадровая интерполяция визуала (alpha = acc / TICK)
+   */
   render(alpha: number): void {
-    this.chassis.position.copy(this.position);
-    this.chassis.quaternion.copy(this.rotation);
+    this.interpPosition.lerpVectors(this.prevPosition, this.position, alpha);
+    this.interpRotation.slerpQuaternions(this.prevRotation, this.rotation, alpha);
+    this.interpForward.set(0, 0, 1).applyQuaternion(this.interpRotation);
+
+    this.chassis.position.copy(this.interpPosition);
+    this.chassis.quaternion.copy(this.interpRotation);
   }
 }
 ```
 
 ---
 
-## 3. Ключевые преимущества Rapier3D DynamicRayCastVehicleController
+## 3. Настройка сцены и предотвращение бага с черным небом
 
-| Параметр | Почему это важно |
-|---|---|
-| **`WHEEL_RAY_GROUPS`** | Лучи колёс видят *только* землю (`GROUP_GROUND`), игнорируя собственный кузов и груз в кузове. |
-| **`trimesh` коллайдер** | Земля представляет собой честный полигональный меш, по которому колеса едут с натуральными кочками и уклонами. |
-| **`frictionSlip`** | Контролирует проскальзывание шин и управляемый занос без переворачивания. |
-| **`Linear/Angular Damping`** | Защищает машину от бесконечного вращения в воздухе после прыжков с трамплинов. |
+При использовании библиотеки постобработки (`postprocessing` / `EffectComposer` / `RenderPass`) проход `RenderPass` считывает фон из `scene.background`. Если `scene.background` не задан (`null`), рендер-таргет композера очищается в прозрачный/черный цвет, даже если у `renderer` вызван `setClearColor`.
+
+```typescript
+// ❌ Ошибка: setClearColor() без scene.background дает черное небо в EffectComposer
+renderer.setClearColor(0x95ad9e, 1);
+
+// ✅ Правильно: Всегда явно задавать scene.background
+const skyColor = new THREE.Color(0x95ad9e);
+scene.background = skyColor;
+scene.fog = new THREE.Fog(skyColor, 90, 360);
+renderer.setClearColor(skyColor, 1);
+```
+
+---
+
+## 4. Ключевые правила надежной интеграции
+
+| Правило | Реализация | Почему это критично |
+|---|---|---|
+| **`WHEEL_RAY_GROUPS`** | `groups(GROUP_VEHICLE, GROUP_GROUND)` | Лучи колёс видят *только* землю, игнорируя собственный кузов и груз в кузове. Иначе машина «взлетает на собственном грузе». |
+| **Порядок шага** | `updateVehicle` → `step()` → `postStep` | Силы колес применяются к телу до шага физдвижка, а новая позиция фиксируется строго после интеграции. |
+| **Интерполяция** | `lerp(prevPosition, position, alpha)` | Исключает микро-джиттер (stutter) между дискретными физическими шагами (60 Гц) и частотой монитора (120/144+ Гц). |
+| **Слежение камеры** | `camera.position.lerp(interpTarget, 1 - exp(-k * dt))` | Камера следует за интерполированной позицией меша с FPS-независимым сглаживанием по `dt`. |
+| **`scene.background`** | `scene.background = skyColor` | Защищает от черного неба при постобработке через `EffectComposer` / `RenderPass`. |
