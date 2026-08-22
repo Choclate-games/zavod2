@@ -116,3 +116,14 @@ rejection so the platform's own error overlay stays quiet.
 
 A banner requested behind the platform splash is an impression nobody sees, and
 on some portals an ad shown before `game_ready` at all. Arm banners in step 12.
+
+---
+
+## Чек-лист «игра стартует на площадке»
+
+- [ ] `game_ready` отправляется ровно один раз, из одной точки кода
+- [ ] Порядок загрузки соблюдён: `initialize` → прогресс → `game_ready` → баннеры
+- [ ] Прогресс идёт монотонно и доходит до 100, а не прыгает с 0 сразу в конец
+- [ ] Сторожевой таймер снимает заставку, даже если инициализация зависла
+- [ ] Ошибки, дошедшие до верха, залогированы, а не проглочены пустым `catch`
+- [ ] Игра запускается и без площадки (локальный `npm run dev`) — мост не обязателен для проверки

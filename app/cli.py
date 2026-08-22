@@ -310,6 +310,67 @@ def rebuild_catalog():
         console.print(f"  {library.KIND_LABELS.get(kind, kind)}: {count}")
 
 
+@app.command(name="checklists",
+             help="Собрать чек-листы документов базы знаний (knowledge/CHECKLISTS.yaml).")
+def rebuild_checklists(
+    provider: str = typer.Option("default", "--provider", "-p", help="Провайдер для генерации"),
+    all_docs: bool = typer.Option(False, "--all", help="Пересобрать всё, а не только недостающее"),
+    only: str = typer.Option("", "--only", help="Подстрока пути: собрать часть базы (например threejs/)"),
+):
+    """Чек-лист документа — то, что реально доезжает до кодового агента.
+
+    Полный текст документа он читать не станет: разобранный шутер получил
+    документ на 726 строк и не открыл его ни разу. Чек-лист едет рядом с
+    адресом, стоит десяток строк и проверяется взглядом на запущенную игру.
+
+    Писать их руками нельзя: это работа, растущая с каждым новым жанром.
+    Поэтому — один проход по базе, кэш с хешем исходника и пересборка только
+    того, что изменилось или чего ещё нет."""
+    from app import checklists, knowledge
+
+    entries = checklists.load()
+    paths = [p for p in knowledge.list_topics() if not p.endswith(".yaml")]
+    if only:
+        paths = [p for p in paths if only in p]
+
+    todo = []
+    for path in paths:
+        body = knowledge.read(path)
+        if not body.strip():
+            continue
+        # Свой список в документе главнее любого сгенерированного.
+        if any(line.strip().startswith(("- [ ]", "* [ ]")) for line in body.splitlines()):
+            continue
+        if all_docs or path not in entries or checklists.is_stale(path, body, entries):
+            todo.append((path, body))
+
+    if not todo:
+        console.print("[bold green]Чек-листы на месте[/bold green] — пересобирать нечего.")
+        return
+
+    console.print(f"[cyan]Собираю чек-листы: {len(todo)} документов[/cyan]")
+    ai = ProviderFactory.get_ai_provider(provider)
+    done = 0
+    for path, body in todo:
+        try:
+            entry = checklists.draft(ai, path, body)
+        except Exception as exc:  # noqa: BLE001 — один упавший документ не роняет проход
+            log_error(f"{path}: {exc}")
+            continue
+        if len(entry.items) < checklists.MIN_ITEMS:
+            log_error(f"{path}: вернулось {len(entry.items)} пунктов — пропущен")
+            continue
+        entries[path] = entry
+        done += 1
+        console.print(f"  [green]✓[/green] {path} — {len(entry.items)} пунктов")
+
+    path_out = checklists.save(entries)
+    log_success(f"Готово: {done} из {len(todo)} → {path_out}")
+    missing = [p for p in paths if not knowledge.checklist(p)]
+    if missing:
+        console.print(f"[yellow]Без чек-листа осталось: {len(missing)}[/yellow]")
+
+
 @app.command(name="gui", help="УСТАРЕЛО: десктопное окно. Используйте веб (run_web.py).")
 def launch_gui():
     from app.gui.ctk_app import run_gui

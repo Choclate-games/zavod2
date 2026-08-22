@@ -142,3 +142,13 @@ plays. Verify on the running build in a touch context:
 - ❌ Blocking `contextmenu` only while a match is running.
 - ❌ Reporting "fixed" from a clean overflow audit: it proves one of the four
   classes, and usually not the one you were rejected for.
+
+---
+
+## Чек-лист «модерация не вернёт игру»
+
+- [ ] Страница не скроллится и не тянется: свайп по игре не двигает документ
+- [ ] Контекстное меню по долгому нажатию не открывается
+- [ ] Игра работает в открытом окне площадки без внешних переходов
+- [ ] Ни одна ссылка не уводит игрока с площадки без его действия
+- [ ] Требования площадки выполнены так, что игра не сломалась: проверено прохождение первой сессии целиком

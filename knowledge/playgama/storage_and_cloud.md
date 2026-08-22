@@ -142,3 +142,15 @@ wins, and if the cloud is empty the current local state is uploaded on the next
 - truncated save `{"coins":500}` → `normalize` rebuilds the rest;
 - signing in mid-session does not wipe progress;
 - closing the tab right after an action keeps that action.
+
+---
+
+## Чек-лист «прогресс не теряется»
+
+- [ ] Перезагрузка сохраняет прогресс и у гостя, и у авторизованного
+- [ ] Битый JSON в хранилище — игра стартует на значениях по умолчанию, петля жива
+- [ ] Обрезанное сохранение достраивается `normalize`, а не роняет игру
+- [ ] Вход в аккаунт посреди сессии не стирает прогресс
+- [ ] Закрытие вкладки сразу после действия это действие сохраняет (`flush` на `visibilitychange`)
+- [ ] Настройки (звук, чувствительность, язык) лежат в том же сохранении
+- [ ] Обращение к хранилищу — через один сервис, а не `localStorage` вразнобой

@@ -85,3 +85,15 @@ boot().catch((e) => { console.error(e); bridge.sendGameReady(); })
 
 The only case where `game_ready` is deliberately withheld is the renderer itself
 failing to build — there is genuinely no game behind the splash to reveal.
+
+---
+
+## Чек-лист «игра переживает сворачивание и поворот»
+
+- [ ] Пауза и звук берутся из событий площадки, а не из `visibilitychange` в DOM
+- [ ] Скрытая вкладка не копит `dt`: возврат не даёт скачка физики
+- [ ] Размер пересчитывается не одним обработчиком, а окном «оседания» (0/60/180/420/900 мс)
+- [ ] `orientationchange` и `fullscreenchange` обработаны наравне с `resize`
+- [ ] Размеры интерфейса берутся из измеренной высоты (`--vp-h`), а не из голого `100vh`
+- [ ] Для игры только в ландшафте есть экран «поверни устройство», игра за ним на паузе, экран внутри safe area
+- [ ] Сторожевой таймер снимает заставку площадки при любом исходе загрузки

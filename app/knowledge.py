@@ -5,6 +5,7 @@ platforms. Agents pull topics from here instead of restating platform rules in
 their own prompts, so a fix lands in one place and reaches every generated
 package.
 """
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -403,3 +404,40 @@ def resolve(rel_paths: List[str]) -> List[str]:
         seen.add(clean)
         result.append(clean)
     return result
+
+
+_CHECKLIST_RE = re.compile(r"^\s*[-*]\s*\[\s*\]\s*(?P<item>.+?)\s*$", re.M)
+_CHECKLIST_LIMIT = 26
+
+
+def checklist(rel_path: str) -> List[str]:
+    """Пункты `- [ ]` из документа базы знаний.
+
+    Документ доезжает в игру целиком, но кодовый агент читает про него одну
+    строку `describe()` и решает, что этого хватило. Так и вышло с
+    `threejs/fps_controller_and_shooting.md`: 726 строк про гравитацию, прыжок
+    с койот-таймом, две руки на вьюмодели, пружину отдачи и хитмаркер — а в
+    игре не оказалось ни одного из этих пунктов, потому что ярлык документа
+    обещал «контр-стрейф и покачивание вьюмодели».
+
+    Чек-лист — самая плотная часть документа: каждый пункт стоит абзаца текста
+    и проверяется взглядом на игру. Он едет в промпт целиком, рядом с адресом,
+    и работает даже если файл так и не открыли.
+
+    Источников два, и порядок между ними важен. Написанный человеком список
+    внутри документа — главный: он точнее и он же служит правкой, когда
+    сгенерированный вышел мимо. Всё остальное берётся из `CHECKLISTS.yaml`,
+    куда чек-листы попадают одной командой на всю базу: писать их руками —
+    работа, растущая с каждым новым жанром, а разобрать структуру кодом нельзя,
+    её несут 11 документов из 96.
+    """
+    items = [m.group("item").strip() for m in _CHECKLIST_RE.finditer(read(rel_path))]
+    if items:
+        return items[:_CHECKLIST_LIMIT]
+    from app import checklists  # локальный импорт: knowledge грузится раньше
+    return checklists.items_for(rel_path)[:_CHECKLIST_LIMIT]
+
+
+def has_checklist(rel_path: str) -> bool:
+    """Есть ли у документа чек-лист. Дешевле, чем тянуть сам список."""
+    return bool(checklist(rel_path))

@@ -76,7 +76,11 @@ stubs.length ? fail('A3', 'В коде остались TODO / FIXME / загл�
 if (!existsSync(THEME)) {
   fail('B1', 'Нет src/ui/theme.css — единственного места со значениями токенов')
 } else {
-  const colors = scan(uiFiles, /#[0-9a-fA-F]{3,8}\b/, (f) => f === THEME)
+  // rgba() и hsl() ищутся наравне с hex: проверка на один только `#RRGGBB`
+  // пропускала инлайновые стили вида
+  // `style.cssText = 'background: rgba(255,153,0,0.8)'`, а это ровно тот же
+  // цвет мимо темы — просто записанный иначе.
+  const colors = scan(uiFiles, /#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?)\s*\(/, (f) => f === THEME)
   colors.length ? fail('B1', 'Литералы цвета вне theme.css', colors)
                 : pass('B1', 'Все цвета живут в theme.css')
 }
@@ -175,6 +179,155 @@ if (!existsSync(join(ROOT, 'LIBRARY.md'))) {
     : fail('F2', 'В DEVLOG.md нет ни строки о готовом коде фабрики: взял или не взял и почему')
 }
 
+/* ══ G: объявлено — значит подключено ═══════════════════════════════════════
+ *
+ * Разбор готового шутера показал класс дефектов, который проходил всю приёмку
+ * незамеченным: код написан, выглядит законченным и никуда не подключён.
+ * Пустые модули из контракта архитектуры, события шины без слушателя, слой
+ * тач-управления, ни разу не вставленный в DOM, файл балансных чисел, из
+ * которого ничего не читается. Ни одна из проверок ниже не знает жанра — они
+ * ловят разрыв между «объявил» и «включил» в любой игре.
+ */
+
+const codeText = codeFiles.map(read).join('\n')
+const cssFiles = srcFiles.filter((f) => extname(f) === '.css')
+const cssText = cssFiles.map(read).join('\n')
+
+/* ── G1: модуль объявлен и не написан ──────────────────────────────────── */
+// A3 ищет слово TODO, поэтому файл в ноль байт проходил её как «заглушек нет».
+// Модуль из контракта архитектуры, созданный и не заполненный, — это и есть
+// заглушка в самом чистом виде.
+const thin = []
+for (const file of codeFiles) {
+  // Файлы деклараций и чистые реэкспорты короткие по своей природе: в них
+  // нечему быть написанным.
+  if (/\.d\.ts$/.test(file)) continue
+  const meaningful = read(file)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('/*')
+                 && !l.startsWith('///') && !l.startsWith('import ')
+                 && !l.startsWith('export {') && !l.startsWith('export *'))
+  if (meaningful.length < 3) {
+    thin.push(`${relative(ROOT, file)}  ${meaningful.length} содержательных строк`)
+  }
+}
+thin.length ? fail('G1', 'Модуль создан и не написан (файл пуст или почти пуст)', thin)
+            : pass('G1', 'Пустых модулей нет')
+
+/* ── G2: событие объявлено, а половины связи нет ───────────────────────── */
+const emitted = new Set()
+const listened = new Set()
+for (const m of codeText.matchAll(/\.emit\(\s*['"`]([A-Za-z_][\w:.-]*)['"`]/g)) emitted.add(m[1])
+for (const m of codeText.matchAll(/\.(?:on|once|addListener|subscribe)\(\s*['"`]([A-Za-z_][\w:.-]*)['"`]/g)) listened.add(m[1])
+if (!emitted.size && !listened.size) {
+  skip('G2', 'Шины событий в проекте нет — проверять нечего')
+} else {
+  const orphans = [
+    ...[...emitted].filter((e) => !listened.has(e)).map((e) => `${e} — отправляется, никто не слушает`),
+    ...[...listened].filter((e) => !emitted.has(e)).map((e) => `${e} — слушается, никто не отправляет`),
+  ]
+  orphans.length ? fail('G2', 'События шины подключены с одной стороны', orphans)
+                 : pass('G2', 'У каждого события есть и отправитель, и слушатель')
+}
+
+/* ── G3: состояние отправлено и нигде не разобрано ─────────────────────── */
+// `events.emit('GAME_STATE_CHANGED', 'PAUSED')` при обработчике, который знает
+// только 'PLAYING' и 'MENU': пауза площадки уходила в никуда, и игра
+// продолжала крутиться под рекламой.
+const payloads = new Set()
+for (const call of codeText.matchAll(/\.emit\(\s*['"`][^'"`]+['"`]\s*,([^)\n]*)\)/g)) {
+  // Аргумент бывает тернарным (`isPaused ? 'PAUSED' : 'PLAYING'`), поэтому
+  // берём все строки-константы из аргументов, а не только первую.
+  for (const lit of call[1].matchAll(/['"`]([A-Z][A-Z_0-9]{2,})['"`]/g)) payloads.add(lit[1])
+}
+if (!payloads.size) {
+  skip('G3', 'Состояний-строк в событиях нет — проверять нечего')
+} else {
+  // «Разобрано» — это сравнение или ветка, а не упоминание в объявлении типа:
+  // union в описании шины перечисляет все состояния и потому не доказывает
+  // ничего.
+  const unhandled = []
+  for (const state of payloads) {
+    const handled = new RegExp(
+      `[=!]==?\\s*['"\`]${state}['"\`]|case\\s+['"\`]${state}['"\`]|['"\`]${state}['"\`]\\s*:(?!\\s*[A-Za-z])`
+    ).test(codeText)
+    if (!handled) unhandled.push(`${state} — отправляется, но ни одна ветка кода его не проверяет`)
+  }
+  unhandled.length ? fail('G3', 'Состояние уходит в шину и нигде не разбирается', unhandled)
+                   : pass('G3', 'Каждое отправленное состояние где-то разбирается')
+}
+
+/* ── G4: слой тач-управления вставлен в DOM ────────────────────────────── */
+// Слой собирался целиком — стик, зона обзора, четыре кнопки — и оставался
+// висеть без родителя: `show()` ставил `display:block` элементу, которого нет
+// в документе. На телефоне игра оказалась без единой кнопки.
+const touchFiles = codeFiles.filter((f) => /touch/i.test(relative(ROOT, f)))
+if (!touchFiles.length) {
+  skip('G4', 'Отдельного модуля тач-управления нет — проверить вставку в DOM нечем')
+} else {
+  // Слой считается вставленным, если модуль сам цепляет его к чему-то внешнему
+  // (документ, найденный узел, слой интерфейса, переданный родитель) — либо
+  // если это делает кто-то другой.
+  const mountsItself = touchFiles.some((f) =>
+    /(document\.body|getElementById\([^)]*\)|ui\.\w+|\b(controlsLayer|root|parent|container|host|mount|target)\b)\s*\.\s*(appendChild|append|prepend|replaceChildren)\s*\(/.test(read(f)))
+  const mountedElsewhere = codeFiles
+    .filter((f) => !touchFiles.includes(f))
+    .some((f) => /\.(appendChild|append|prepend|replaceChildren)\s*\([^)]*touch/i.test(read(f)))
+  mountsItself || mountedElsewhere
+    ? pass('G4', 'Слой тач-управления вставлен в документ')
+    : fail('G4', 'Слой тач-управления создан, но ни разу не вставлен в DOM — на телефоне играть нечем',
+           touchFiles.map((f) => relative(ROOT, f)))
+}
+
+/* ── G5: числа баланса читаются кодом ──────────────────────────────────── */
+// Имена ключей в balance.yaml транслитерированы дизайнером и в коде не
+// встречаются никогда, поэтому сверяем не имена, а сами числа: значение,
+// продуманное вместе с объяснением «что сломается, если отклониться», обязано
+// доехать до кода. Единицы иногда пересчитывают (units/s → м/с), поэтому порог
+// мягкий: он ловит не расхождение в паре чисел, а игру, где баланс придуман
+// заново на месте.
+const BALANCE = join(ROOT, 'balance.yaml')
+if (!existsSync(BALANCE)) {
+  skip('G5', 'balance.yaml в пакете нет — числа проверять негде')
+} else {
+  const designed = [...new Set(
+    [...read(BALANCE).matchAll(/^\s*value:\s*'?"?\s*(-?\d+(?:\.\d+)?)/gm)].map((m) => m[1])
+  )].filter((n) => n !== '0' && n !== '1')
+  const missing = designed.filter((n) => !new RegExp(`(?<![\\d.])${n.replace('.', '\\.')}(?![\\d])`).test(codeText))
+  const landed = designed.length - missing.length
+  if (designed.length < 4) {
+    skip('G5', 'В balance.yaml почти нет числовых значений — сверять нечего')
+  } else if (landed * 3 < designed.length) {
+    fail('G5', `Баланс придуман заново в коде: из ${designed.length} продуманных чисел доехало ${landed}`,
+         missing.slice(0, 12).map((n) => `${n} — нет в src/`))
+  } else {
+    pass('G5', `Числа баланса доезжают до кода (${landed} из ${designed.length})`)
+  }
+}
+
+/* ── G6: переменная, посчитанная в JS, читается в CSS ──────────────────── */
+// `--ui-scale` считался на каждый resize, писался в :root и не участвовал ни в
+// одном правиле. Вся адаптивность существовала и ничего не делала.
+const written = [...codeText.matchAll(/setProperty\(\s*['"`](--[\w-]+)['"`]/g)].map((m) => m[1])
+if (!written.length) {
+  skip('G6', 'JS не пишет CSS-переменных — проверять нечего')
+} else {
+  const dead = [...new Set(written)].filter((v) => !new RegExp(`var\\(\\s*${v}\\b`).test(cssText))
+  dead.length ? fail('G6', 'JS пишет CSS-переменную, которую не читает ни одно правило', dead)
+              : pass('G6', 'Посчитанные в JS переменные участвуют в вёрстке')
+}
+
+/* ── G7: интерфейс переживает узкий экран ──────────────────────────────── */
+const breakpoints = (cssText.match(/@media/g) || []).length
+if (!cssFiles.length) {
+  skip('G7', 'CSS в проекте нет — брейкпоинты проверять негде')
+} else if (breakpoints) {
+  pass('G7', `Брейкпоинты в вёрстке есть (${breakpoints})`)
+} else {
+  fail('G7', 'Ни одного @media во всём CSS: интерфейс свёрстан под один размер экрана')
+}
+
 /* ── вывод ─────────────────────────────────────────────────────────────── */
 const failed = results.filter((r) => r.ok === false)
 for (const r of results) {
@@ -187,7 +340,7 @@ for (const r of results) {
 }
 
 console.log('\nОстальное из ACCEPTANCE.md статически не проверяется и остаётся человеку:')
-console.log('  A1 сборка · A2 консоль · B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры')
+console.log('  A1 сборка · A2 консоль · B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры · G8–G10 глаголы, вертикаль и мёртвые методы')
 
 if (failed.length) {
   console.error(`\nПровалено проверок: ${failed.length}. Игра не готова.`)

@@ -101,3 +101,13 @@ the only same-value pairs were proper nouns.
 German and Russian run 20–40 % longer than English. Buttons and HUD labels sized
 to fit the English string will clip — which moderation reads as requirement
 1.10.1 (clipped elements), not as a translation issue. Test the longest locale.
+
+---
+
+## Чек-лист «язык не сломает экран»
+
+- [ ] Язык берётся из площадки, а не из меню выбора при первом запуске
+- [ ] Ни одной строки текста в разметке и в коде экранов — только ключи
+- [ ] Ключи покрыты во всех языках: аудит паритета проходит без пропусков
+- [ ] Самая длинная строка каждого экрана проверена на 360 px: текст не обрезан и не выехал
+- [ ] Числа и даты форматируются по локали, а не склеиваются строками
