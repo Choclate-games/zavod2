@@ -59,6 +59,26 @@ class CompletenessValidator:
                 results.append({"item": "UI Visual Contract", "status": "FAIL", "detail": "В мастер-промпте нет визуального контракта интерфейса или сцены за меню"})
                 all_passed = False
 
+        # 3b. Критические документы площадки.
+        # Без Playgama Bridge игра на Яндекс Играх просто не стартует: нет
+        # game_ready — платформа держит свою заставку до таймаута и снимает
+        # игру с модерации. Это единственный набор знаний, отсутствие которого
+        # означает не «хуже качеством», а «не работает».
+        for filename, needles, label in (
+            ("skills/PLAYGAMA_SKILL.md", ("game_ready", "bridge"), "Playgama Bridge"),
+            ("skills/UI_SKILL.md", ("theme.css",), "UI-система"),
+            ("skills/CONTROLS_SKILL.md", ("pointer", "Pointer"), "Тач-управление"),
+        ):
+            path = game_dir / filename
+            body = path.read_text(encoding="utf-8", errors="ignore") if path.exists() else ""
+            if body and any(n in body for n in needles):
+                results.append({"item": label, "status": "PASS",
+                                "detail": f"{filename} на месте ({len(body)} символов)"})
+            else:
+                results.append({"item": label, "status": "FAIL",
+                                "detail": f"Нет {filename} или он пуст — обязательные знания не доехали"})
+                all_passed = False
+
         # 4. Инструкция агенту от фабрики
         agents_file = game_dir / "AGENTS.md"
         if agents_file.exists() and agents_file.stat().st_size > 200:

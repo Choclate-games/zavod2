@@ -16,6 +16,7 @@ from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from app import anticliche, knowledge
 from app.context import GenerationContext
 from app.logging import log_agent
+from app.mechanics_repo import MechanicsRepository
 from app.models import DirectionOption, ProjectDirection
 from app.project_memory import recent_summary
 
@@ -30,6 +31,11 @@ SYSTEM_PROMPT = (
     "Три варианта одной арены с разными декорациями — это один вариант, а не три.\n"
     "2. Выбери одно направление и объясни выбор: чем оно сильнее остальных для браузера и телефона.\n"
     "3. Объясни, почему отвергнуты остальные.\n"
+    "3b. Каждое направление опирается на СВОЮ связку из каталога механик выше: назови в "
+    "why_not_generic, какие механики из каталога оно соединяет и что даёт их сочетание. "
+    "Три направления на одной связке — это одно направление в трёх декорациях. Механики "
+    "каталога отполированы: взять готовую и переложить на этот мир дешевле и надёжнее, чем "
+    "изобрести свою, и результат за один прогон получается лучше.\n"
     "4. Заполни what_it_is_not: конкретные шаблоны, которых в этом проекте не будет. "
     "Это рабочий запрет для остальных агентов, а не украшение.\n"
     "5. Заполни non_negotiables: без чего направление перестаёт существовать (2–5 пунктов).\n"
@@ -80,8 +86,17 @@ class ProjectDirectorAgent:
 
     @staticmethod
     def _brief(ctx: GenerationContext) -> str:
+        # Каталог механик фабрики — здесь он работает на РАЗВЕДЕНИЕ вариантов:
+        # три направления получаются по-настоящему разными, когда каждое стоит
+        # на своей связке отполированных механик, а не на трёх декорациях одной.
+        repo = MechanicsRepository.get_instance()
+        catalog = repo.format_for_mixing(
+            repo.sample_for_mixing(ctx.raw_prompt, near=3, far=5)
+        )
         return (
             f"Идея пользователя (дословно): {ctx.raw_prompt}\n\n"
+            f"Отполированные механики каталога фабрики — материал для направлений:\n"
+            f"{catalog}\n\n"
             f"Недавно выпущенные проекты фабрики — их формулу повторять нельзя:\n"
             f"{recent_summary(ctx.output_base_dir)}\n\n"
             f"Индекс базы знаний фабрики (для knowledge_hints, пути только отсюда):\n"

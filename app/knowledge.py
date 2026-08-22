@@ -72,6 +72,33 @@ def strip_title(markdown: str) -> str:
     return "\n".join(lines).lstrip("\n")
 
 
+def critical_rules_sections(heading_offset: int = 0) -> "Dict[str, str]":
+    """Правила площадок, разложенные по разделам: заголовок → текст раздела.
+
+    Нужно мастер-промпту: часть разделов (стек, рендерер, тач, интерфейс)
+    уезжает в пакет ещё и скиллами, и вклеивать их в промпт третьим экземпляром
+    незачем — место в промпте дороже. Разделы, которых в пакете больше нигде
+    нет, остаются в промпте целиком."""
+    body = critical_rules(heading_offset)
+    if not body:
+        return {}
+    marker = "#" * (2 + heading_offset) + " "
+    sections: Dict[str, str] = {}
+    title = ""
+    buffer: List[str] = []
+    for line in body.splitlines():
+        if line.startswith(marker) and not line.startswith(marker + "#"):
+            if title:
+                sections[title] = "\n".join(buffer).strip()
+            title = line[len(marker):].strip()
+            buffer = [line]
+        else:
+            buffer.append(line)
+    if title:
+        sections[title] = "\n".join(buffer).strip()
+    return sections
+
+
 def critical_rules(heading_offset: int = 0) -> str:
     """The non-negotiable platform rules, injected verbatim into every prompt."""
     body = read(CRITICAL_RULES_FILE)
@@ -151,6 +178,151 @@ MANDATORY_TOPICS: List[str] = list(CORE_TOPICS)
 
 # Папки, из которых куратор набирает документы под конкретный проект.
 CURATED_FOLDERS: List[str] = ["threejs", "mechanics", "patterns", "stack", "ux", "audio", "monetization"]
+
+# ---------------------------------------------------------------------------
+# Оси знаний: набор обязан быть широким, а не глубоким в одной папке.
+#
+# Куратор, предоставленный сам себе, набирает документы вокруг главной механики
+# и вокруг неё же: в тактическом шутере он выбрал пять документов из threejs/
+# и три из mechanics/, и ни одного про производительность, персонажей и звук.
+# Игра при этом собирается на телефоне и с живыми телами в кадре — рэгдолла в
+# ней не хватило именно поэтому, хотя `threejs/melee_combat_and_ragdoll.md` и
+# `mechanics/ragdoll.md` лежат в базе.
+#
+# Ось — это вопрос, на который у любой игры фабрики есть ответ: чем она
+# держит кадр, из чего у неё тела, чем звучит, на чём зарабатывает. Куратор
+# отвечает на них сам; на те, что он пропустил, ответ добирается отсюда —
+# первым существующим и не запрещённым кандидатом.
+#
+# Кандидаты идут по убыванию общности: первый подходит любой игре, дальше —
+# профильные. Запрещённые анти-клише документы через эту дверь не проходят.
+# ---------------------------------------------------------------------------
+
+KNOWLEDGE_AXES: List[Dict[str, object]] = [
+    {
+        "key": "performance",
+        "title": "Производительность и адаптивное качество",
+        "why": "Игра запускается на телефоне: без бюджета кадра и адаптивного качества она греет устройство и теряет игрока на первой минуте.",
+        "candidates": ["threejs/performance_guide.md", "threejs/adaptive_quality.md",
+                       "threejs/mobile_shaders.md"],
+        "required": True,
+    },
+    {
+        "key": "physics",
+        "title": "Физика и её интеграция",
+        "why": "Стек фабрики физический: без интеграции Rapier3D любая реакция мира считается вручную и расходится с рендером.",
+        "candidates": ["threejs/physics_integration.md", "stack/rapier3d.md",
+                       "mechanics/chain_reaction.md", "mechanics/fluid_buoyancy.md"],
+        "required": True,
+    },
+    {
+        "key": "geometry",
+        "title": "Геометрия мира без внешних ассетов",
+        "why": "Внешних моделей у проекта нет: мир собирается процедурно, иначе на сцене остаются серые кубы.",
+        "candidates": ["threejs/procedural_mesh_builder.md",
+                       "threejs/game_map_and_world_design.md"],
+        "required": True,
+    },
+    {
+        "key": "bodies",
+        "title": "Тела в кадре: персонаж, машина, механизм",
+        "why": "То, чем игрок управляет и во что он попадает, должно быть телом с ригом и реакцией на удар, а не кубом с полоской здоровья.",
+        "candidates": ["threejs/procedural_character_rig.md",
+                       "threejs/melee_combat_and_ragdoll.md",
+                       "mechanics/ragdoll.md",
+                       "threejs/vehicle_wheel_rig.md",
+                       "threejs/skinned_character_models.md"],
+        "required": True,
+    },
+    {
+        "key": "juice",
+        "title": "Подача: эффекты, отклик, пост-обработка",
+        "why": "Механика без слоя отклика читается как прототип: попадание, подбор и потеря обязаны быть видны и слышны.",
+        "candidates": ["threejs/juice_and_vfx_pool.md", "stack/postprocessing.md"],
+        "required": True,
+    },
+    {
+        "key": "audio",
+        "title": "Звук",
+        "why": "Звук синтезируется на Web Audio, без загрузки файлов; правила автозапуска и глушения одинаковы для всех площадок.",
+        "candidates": ["audio/procedural_sound_synthesizer.md",
+                       "audio/web_audio_and_muting.md"],
+        "required": True,
+    },
+    {
+        "key": "monetization",
+        "title": "Монетизация",
+        "why": "Rewarded и interstitial — часть контракта площадки, а не необязательное украшение; ошибка здесь стоит выручки и модерации.",
+        "candidates": ["monetization/rewarded_ads_patterns.md",
+                       "monetization/interstitial_best_practices.md",
+                       "monetization/in_app_purchases.md"],
+        "required": True,
+    },
+    {
+        "key": "stack",
+        "title": "Стек библиотек",
+        "why": "Если задачу решает библиотека стека, её берут, а не пишут заново.",
+        "candidates": ["stack/README.md", "stack/three_mesh_bvh.md", "stack/yuka_ai.md"],
+        "required": True,
+    },
+    {
+        "key": "loop",
+        "title": "Архетип петли",
+        "why": "Готовый архетип экономит проектирование, но натягивать чужой нельзя — эта ось закрывается только по решению куратора.",
+        "candidates": [],
+        "required": False,
+    },
+]
+
+
+def axes_summary() -> str:
+    """Оси для промпта куратора: что он обязан закрыть своим выбором."""
+    return "\n".join(
+        f"- **{axis['title']}** — {axis['why']}" for axis in KNOWLEDGE_AXES if axis["required"]
+    )
+
+
+def uncovered_axes(paths: List[str]) -> List[Dict[str, object]]:
+    """Оси, по которым в наборе нет ни одного документа.
+
+    Ось считается закрытой, если выбран любой из её кандидатов ИЛИ любой
+    документ из той же папки: куратор мог взять профильный документ, которого
+    нет в списке кандидатов, и это законный ответ на вопрос оси."""
+    chosen = set(paths)
+    folders = {p.split("/")[0] for p in chosen}
+    missing: List[Dict[str, object]] = []
+    for axis in KNOWLEDGE_AXES:
+        if not axis["required"]:
+            continue
+        candidates = [c for c in axis["candidates"]]
+        if chosen.intersection(candidates):
+            continue
+        # Папка «своя» только у осей, где папка и есть ответ (audio, monetization).
+        own_folder = {c.split("/")[0] for c in candidates}
+        if own_folder <= {"audio", "monetization", "stack"} and own_folder & folders:
+            continue
+        missing.append(axis)
+    return missing
+
+
+def fill_axes(paths: List[str], forbidden: Optional[Dict[str, str]] = None) -> List[Dict[str, str]]:
+    """Чем добрать незакрытые оси: по одному документу на ось.
+
+    Возвращает [{path, axis, why}]. Запрещённые анти-клише документы
+    пропускаются: широта набора не повод протащить чужой жанр."""
+    forbidden = forbidden or {}
+    chosen = set(paths)
+    additions: List[Dict[str, str]] = []
+    for axis in uncovered_axes(paths):
+        for candidate in axis["candidates"]:
+            if candidate in chosen or candidate in forbidden or candidate in MANDATORY_TOPICS:
+                continue
+            if not resolve([candidate]):
+                continue
+            additions.append({"path": candidate, "axis": str(axis["key"]), "why": str(axis["why"])})
+            chosen.add(candidate)
+            break
+    return additions
 
 _SUMMARY_LIMIT = 220
 

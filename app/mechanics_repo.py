@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import threading
 from pathlib import Path
@@ -113,6 +114,78 @@ class MechanicsRepository:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored[:limit]]
 
+    def domains(self) -> List[str]:
+        """Домены каталога — только настоящие, без мусора от обратной записи.
+
+        Доменом считается категория, под которой лежит хотя бы три механики:
+        каталог собирался как 24 домена по 42 штуки, а одиночные категории —
+        это следы записи механик прошлых прогонов, где в поле category уехало
+        предложение из role_in_loop."""
+        counts: Dict[str, int] = {}
+        for value in self._mechanics_dict.values():
+            if isinstance(value, dict):
+                category = (value.get("category") or "").strip()
+                if category:
+                    counts[category] = counts.get(category, 0) + 1
+        return sorted(c for c, n in counts.items() if n >= 3)
+
+    def sample_for_mixing(self, query: str, near: int = 3, far: int = 3) -> List[Dict[str, Any]]:
+        """Кандидаты на смешивание: близкие к идее и заведомо далёкие от неё.
+
+        Каталог из тысячи механик не заменяет модель — она и сама придумает
+        «выстрел» для шутера. Его ценность в другом: это отполированный словарь
+        из 24 доменов, и он позволяет свести в одну игру то, что рядом обычно не
+        оказывается. Поэтому выборка идёт по доменам, а не по релевантности:
+        не больше одной механики из домена, `near` доменов ближайших к идее и
+        `far` — из тех, которых в топе нет вовсе.
+
+        Далёкая механика — предложение, а не требование: она уместна ровно
+        настолько, насколько её удаётся связать с фантазией игрока."""
+        if not self._mechanics_dict:
+            return []
+
+        ranked = self.find_relevant(query, limit=200)
+        picked: List[Dict[str, Any]] = []
+        used_domains: set = set()
+        for item in ranked:
+            domain = (item.get("category") or "").strip()
+            if not domain or domain in used_domains:
+                continue
+            used_domains.add(domain)
+            picked.append({**item, "_distance": "близкая"})
+            if len(picked) >= near:
+                break
+
+        remaining = [d for d in self.domains() if d not in used_domains]
+        random.shuffle(remaining)
+        for domain in remaining[:far]:
+            pool = [v for v in self._mechanics_dict.values()
+                    if isinstance(v, dict) and (v.get("category") or "").strip() == domain]
+            if pool:
+                picked.append({**random.choice(pool), "_distance": "далёкая"})
+        return picked
+
+    def format_for_mixing(self, mechanics: List[Dict[str, Any]]) -> str:
+        """Кандидаты на смешивание с доменом и расстоянием до идеи.
+
+        Механика, чья категория не входит в домены каталога, пришла не из
+        исходной тысячи, а из обратной записи прошлого прогона. Такую честнее
+        пометить: повторять собственную прошлую игру — ровно та однотипность,
+        от которой каталог должен спасать."""
+        if not mechanics:
+            return "- Каталог недоступен: спроектируй механики с нуля под фантазию игры."
+        known = set(self.domains())
+        lines = []
+        for m in mechanics:
+            distance = m.get("_distance", "")
+            domain = (m.get("category") or "").strip()
+            if domain in known:
+                mark = f" · {distance} · домен `{domain}`"
+            else:
+                mark = f" · {distance} · ⚠ механика из прошлого прогона фабрики, повторять её целиком нельзя"
+            lines.append(f"- **{m.get('name', 'Механика')}**{mark}: {m.get('description', '')}")
+        return "\n".join(lines)
+
     def format_for_prompt(self, mechanics: List[Dict[str, Any]]) -> str:
         """Форматирует найденные механики для внедрения в системный промпт ИИ."""
         if not mechanics:
@@ -124,6 +197,20 @@ class MechanicsRepository:
             desc = m.get("description", "")
             lines.append(f"- **{name}** ({cat}): {desc}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _clean_category(raw: Any, genre: str = "") -> str:
+        """Категория — короткий ярлык домена, а не роль механики в петле.
+
+        Раньше сюда падал `role_in_loop` — предложение вида «Главный двигатель
+        темпа, основной инструмент…». Каталог из-за этого оброс полусотней
+        категорий с одной механикой внутри, и выборка по доменам на них
+        разваливалась."""
+        text = " ".join(str(raw or "").split())
+        if text and len(text) <= 40 and "," not in text and " и " not in text:
+            return text
+        fallback = " ".join(str(genre or "").split())
+        return fallback[:40] if fallback else "custom"
 
     def register_and_persist_mechanics(
         self,
@@ -156,7 +243,8 @@ class MechanicsRepository:
                 if name_lower in self._name_index:
                     continue
 
-                cat_slug = _slugify(data.get("category") or data.get("role_in_loop") or genre or "custom")
+                category = self._clean_category(data.get("category"), genre)
+                cat_slug = _slugify(category)
                 name_slug = _slugify(name)
                 key = f"{cat_slug}_{name_slug}"
                 if key in self._mechanics_dict:
@@ -175,7 +263,7 @@ class MechanicsRepository:
 
                 new_entry: Dict[str, Any] = {
                     "name": name,
-                    "category": str(data.get("category") or data.get("role_in_loop") or "core"),
+                    "category": category,
                     "preferred_renderer": renderer,
                     "physics_engine": "rapier3d" if renderer == "threejs" else "matterjs",
                     "description": desc,

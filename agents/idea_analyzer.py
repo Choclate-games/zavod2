@@ -17,8 +17,15 @@ class IdeaAnalyzerAgent:
 
     def run(self, ctx: GenerationContext) -> GameConcept:
         repo = MechanicsRepository.get_instance()
-        relevant_mechanics = repo.find_relevant(ctx.raw_prompt, limit=4)
-        refs_snippet = repo.format_for_prompt(relevant_mechanics)
+        # Каталог из тысячи механик не заменяет модель: «выстрел» для шутера она
+        # придумает и сама. Его ценность в том, что механики в нём отполированы
+        # и разложены по 24 доменам — и он позволяет свести в одну игру то, что
+        # рядом обычно не оказывается. Поэтому запрос строится не из голой
+        # реплики пользователя (в ней два слова, и поиск по ней даёт шум), а из
+        # уже принятого направления: глагол игрока, мир, форма сессии.
+        refs_snippet = repo.format_for_mixing(
+            repo.sample_for_mixing(self._catalog_query(ctx))
+        )
 
         direction_block = ""
         if ctx.direction is not None:
@@ -54,7 +61,18 @@ class IdeaAnalyzerAgent:
             "- Ни одна механика, экран или система не должна противоречить разделу «Без чего "
             "проект перестаёт быть собой» и списку запретов выше. Противоречие здесь дороже "
             "всего: кодовый агент получит одновременно запрет и требование.\n"
-            f"REFERENCE CATALOG INSPIRATION (use or invent even better):\n{refs_snippet}\n"
+            "КАТАЛОГ ОТПОЛИРОВАННЫХ МЕХАНИК ФАБРИКИ:\n"
+            "Это проверенные механики из разных доменов геймдизайна. «Близкая» лежит рядом с "
+            "идеей, «далёкая» — из домена, который к ней обычно не приставляют.\n"
+            f"{refs_snippet}\n"
+            "- Возьми из каталога КАК МИНИМУМ ДВЕ механики и соедини их в связку, объяснив "
+            "синергию в поле synergies. Взятая механика перекладывается на мир этой игры — "
+            "не название копируется, а принцип: «удержание щита под углом атаки» в игре про "
+            "кухню становится «поворот крышки против брызг».\n"
+            "- Хотя бы одна из взятых — «далёкая»: связка из двух соседних механик одного "
+            "домена и есть жанровый шаблон.\n"
+            "- Если далёкая механика к этой игре не пришивается — не пришивай насильно, но "
+            "тогда объясни в unique_value_proposition, чем игра держится вместо неё.\n"
             f"\n{anticliche.ban_block(ctx.raw_prompt)}\n"
             "LANGUAGE REQUIREMENT:\n"
             "- All descriptive texts, title, genre, subgenre, player_fantasy, core hook, unique_value_proposition, "
@@ -87,3 +105,23 @@ class IdeaAnalyzerAgent:
         ctx.concept = concept
         log_agent("IdeaAnalyzer", f"Derived: [highlight]{concept.title}[/highlight] ({concept.genre}) | Slug: {concept.slug}")
         return concept
+
+    @staticmethod
+    def _catalog_query(ctx: GenerationContext) -> str:
+        """Запрос к каталогу механик: направление проекта плюс исходная идея.
+
+        Поиск в каталоге текстовый, и по реплике «создай игру по типу rainbow
+        six» он не находит ничего: русских слов в ней нет, а `rainbow` в
+        описаниях механик не встречается. Направление к этому моменту уже
+        выбрано, и в нём есть то, по чему искать: глагол игрока, мир, форма
+        сессии."""
+        parts = [ctx.raw_prompt or ""]
+        direction = ctx.direction
+        if direction is not None:
+            parts.append(direction.selected_name)
+            parts.append(direction.signature_scene)
+            option = ProjectDirectorAgent.selected_option(direction)
+            if option is not None:
+                parts.extend([option.core_verb, option.world, option.session_shape,
+                              option.pitch, option.genre_family])
+        return " ".join(p for p in parts if p)
