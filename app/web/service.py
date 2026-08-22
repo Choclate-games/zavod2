@@ -34,6 +34,7 @@ from app.context import GenerationContext
 from app.game_runner import DevServer, read_scripts, detect_start_command, open_internal_browser
 from app.logging import register_log_listener
 from app.pipeline import Pipeline
+from app.run_session import RunPaused, RunSession
 from app.web.bus import bus
 
 from providers.agent_usage import AgentUsageTracker, human_tokens
@@ -341,8 +342,47 @@ class FactoryService:
             image_provider=ProviderFactory.get_image_provider(image_provider),
         )
 
+    # Последовательность агентов веба короче, чем у CLI-пайплайна: слой Design OS
+    # здесь не собирается. Таблицей она записана по той же причине, что и там —
+    # чтобы прогон шёл через сессию: чат, снимки и продолжение с места остановки.
+    @staticmethod
+    def _spec_steps():
+        return [
+            ("project_director", 8, "Project Director: Направление проекта...",
+             lambda ctx: ProjectDirectorAgent().run(ctx)),
+            ("idea_analyzer", 14, "Idea Analyzer: Анализ идеи...",
+             lambda ctx: IdeaAnalyzerAgent().run(ctx)),
+            ("game_designer", 22, "Game Designer: Core loop...",
+             lambda ctx: GameDesignerAgent().run(ctx)),
+            ("reference_analyst", 32, "Reference Analyst: Референсы...",
+             lambda ctx: ReferenceAnalystAgent().run(ctx)),
+            ("mechanics_architect", 42, "Mechanics Architect: Механики...",
+             lambda ctx: MechanicsArchitectAgent().run(ctx)),
+            ("knowledge_curator", 48, "Knowledge Curator: Подбор документов базы знаний...",
+             lambda ctx: KnowledgeCuratorAgent().run(ctx)),
+            ("renderer_selector", 54, "Renderer Selector: Выбор движка...",
+             lambda ctx: RendererSelectorAgent().run(ctx)),
+            ("technical_architect", 62, "Technical Architect: Архитектура...",
+             lambda ctx: TechnicalArchitectAgent().run(ctx)),
+            ("playgama_specialist", 70, "Playgama Specialist: Bridge SDK...",
+             lambda ctx: PlaygamaSpecialistAgent().run(ctx)),
+            ("monetization_designer", 78, "Monetization Designer: Экономика...",
+             lambda ctx: MonetizationDesignerAgent().run(ctx)),
+            ("art_director", 84, "Art Director: Визуальный язык...",
+             lambda ctx: ArtDirectorAgent().run(ctx)),
+            ("ux_designer", 86, "UX Designer: Интерфейс и раскладка...",
+             lambda ctx: UXDesignerAgent().run(ctx)),
+            ("preview_designer", 89, "Preview Designer: Концепт-арт...",
+             lambda ctx: PreviewDesignerAgent().run(ctx)),
+            ("skill_generator", 93, "Skill Generator: Скиллы...",
+             lambda ctx: SkillGeneratorAgent().run(ctx)),
+            ("critic", 95, "Self-Critique: Связность и Definition of Done...",
+             lambda ctx: SelfCritiqueAgent().run(ctx)),
+        ]
+
     def run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
-                          mode: str, image_provider: str, label: str = "") -> Path:
+                          mode: str, image_provider: str, label: str = "",
+                          resume_run_id: Optional[str] = None) -> Path:
         """Полный прогон агентов спецификации (синхронно, в рабочем потоке)."""
         tag = f"{label} " if label else ""
         # Метка времени старта: каталог игры появится только в конце пайплайна,
@@ -350,72 +390,77 @@ class FactoryService:
         # переписывается на слаг проекта (reassign_project).
         pipeline_started = time.time()
         self.update_progress(5, f"{tag}Инициализация контекста генерации...")
+
+        if resume_run_id:
+            session = RunSession.load(resume_run_id, config.output_dir)
+            prompt = prompt or session.raw_prompt
+            provider = provider or session.provider_name
+            self.append_log(f"{tag}▶ Продолжаю прогон {session.run_id}: {session.raw_prompt}")
+            session.note("Прогон продолжен из веба")
+        else:
+            session = RunSession.start(prompt, config.output_dir, provider, mode)
+            self.append_log(f"{tag}Прогон {session.run_id} | чат: {session.chat_file}")
+
         self.append_log(
             f"{tag}Запуск пайплайна спецификаций | Провайдер: {provider} | "
             f"Рендерер: {renderer or 'auto'} | Превью: {image_provider} | Режим: {mode}"
         )
 
         ctx = self._make_context(prompt, renderer, provider, mode, image_provider)
+        ctx.session = session
+        if resume_run_id:
+            session.restore(ctx)
+        bus.publish("runs.changed")
 
-        self.update_progress(8, f"{tag}1/15 Project Director: Направление проекта...")
-        ProjectDirectorAgent().run(ctx)
-        if ctx.direction and ctx.direction.selected_name:
-            self.append_log(
-                f"{tag}Направление: {ctx.direction.selected_name} "
-                f"(вариантов рассмотрено: {len(ctx.direction.options)})"
-            )
+        steps = self._spec_steps()
 
-        self.update_progress(14, f"{tag}2/15 Idea Analyzer: Анализ идеи...")
-        IdeaAnalyzerAgent().run(ctx)
-        self.append_log(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
+        def announce(index, total, key, title):
+            percent = next((p for k, p, _t, _a in steps if k == key), 50)
+            self.update_progress(percent, f"{tag}{index}/{total + 2} {title}")
 
-        self.update_progress(22, f"{tag}3/15 Game Designer: Core loop...")
-        GameDesignerAgent().run(ctx)
+        def commented(key, action):
+            """После некоторых шагов в журнал уходит своя строка — она и была
+            главной причиной, по которой веб держал свою копию пайплайна."""
+            def runner(ctx):
+                action(ctx)
+                if key == "project_director" and ctx.direction and ctx.direction.selected_name:
+                    self.append_log(
+                        f"{tag}Направление: {ctx.direction.selected_name} "
+                        f"(вариантов рассмотрено: {len(ctx.direction.options)})"
+                    )
+                elif key == "idea_analyzer" and ctx.concept:
+                    self.append_log(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
+                elif key == "knowledge_curator" and ctx.concept:
+                    plan = ctx.concept.knowledge_plan
+                    self.append_log(
+                        f"{tag}База знаний: выбрано {len(plan.selections)} документов"
+                        + (f" | архетип петли: {plan.loop_pattern}" if plan.loop_pattern else "")
+                    )
+                elif key == "ux_designer" and ctx.concept:
+                    ui = ctx.concept.ui_ux
+                    self.append_log(
+                        f"{tag}Интерфейс: {len(ui.screens)} экранов, "
+                        f"{len(ui.components)} компонентов, материал задан "
+                        f"{'да' if ui.visual_language else 'нет'}"
+                    )
+                bus.publish("runs.changed")
+            return runner
 
-        self.update_progress(32, f"{tag}4/15 Reference Analyst: Референсы...")
-        ReferenceAnalystAgent().run(ctx)
-
-        self.update_progress(42, f"{tag}5/15 Mechanics Architect: Механики...")
-        MechanicsArchitectAgent().run(ctx)
-
-        self.update_progress(48, f"{tag}6/15 Knowledge Curator: Подбор документов базы знаний...")
-        KnowledgeCuratorAgent().run(ctx)
-        plan = ctx.concept.knowledge_plan
-        self.append_log(
-            f"{tag}База знаний: выбрано {len(plan.selections)} документов"
-            + (f" | архетип петли: {plan.loop_pattern}" if plan.loop_pattern else "")
+        Pipeline.run_step_table(
+            ctx, session,
+            [(key, title, commented(key, action)) for key, _percent, title, action in steps],
+            on_step=announce,
         )
 
-        self.update_progress(54, f"{tag}7/15 Renderer Selector: Выбор движка...")
-        RendererSelectorAgent().run(ctx)
-
-        self.update_progress(62, f"{tag}8/15 Technical Architect: Архитектура...")
-        TechnicalArchitectAgent().run(ctx)
-
-        self.update_progress(70, f"{tag}9/15 Playgama Specialist: Bridge SDK...")
-        PlaygamaSpecialistAgent().run(ctx)
-
-        self.update_progress(78, f"{tag}10/15 Monetization Designer: Экономика...")
-        MonetizationDesignerAgent().run(ctx)
-
-        self.update_progress(84, f"{tag}11/15 Art & UX: Визуал и интерфейс...")
-        ArtDirectorAgent().run(ctx)
-        UXDesignerAgent().run(ctx)
-
-        self.update_progress(89, f"{tag}12/15 Preview Designer: Концепт-арт...")
-        PreviewDesignerAgent().run(ctx)
-
-        self.update_progress(93, f"{tag}13/15 Skill Generator: Скиллы...")
-        SkillGeneratorAgent().run(ctx)
-        SelfCritiqueAgent().run(ctx)
-
-        self.update_progress(97, f"{tag}14/15 Output Generator: Запись файлов...")
+        self.update_progress(97, f"{tag}Output Generator: Запись файлов...")
         game_dir = OutputGenerator().generate_package(ctx)
 
-        self.update_progress(99, f"{tag}15/15 Validator: Валидация...")
+        self.update_progress(99, f"{tag}Validator: Валидация...")
         OutputValidator().run_all(game_dir)
 
         sandbox.ensure_project_docs(game_dir, ctx.concept.title)
+        session.finish(game_dir)
+        bus.publish("runs.changed")
 
         moved = self.agent_usage_tracker.reassign_project(pipeline_started, game_dir.name)
         spent = self.agent_usage_tracker.project_status(game_dir.name)
@@ -426,6 +471,74 @@ class FactoryService:
         )
         bus.publish("quota.changed")
         return game_dir
+
+    # ------------------------------------------------------------------ прогоны
+
+    def list_runs(self, limit: int = 30) -> List[Dict[str, Any]]:
+        """Прогоны для панели «Прогоны»: что собрано, что можно продолжить."""
+        rows = RunSession.list_runs(config.output_dir)
+        for row in rows:
+            row["can_continue"] = bool(row["failed"]) and not row["finished"]
+        return rows[:limit]
+
+    def run_chat(self, run_id: str) -> Dict[str, Any]:
+        """Транскрипт прогона — то, что фабрика на самом деле спрашивала у модели."""
+        try:
+            session = RunSession.load(run_id, config.output_dir)
+        except FileNotFoundError as exc:
+            return {"status": "error", "message": str(exc)}
+        chat = session.chat_file.read_text(encoding="utf-8") if session.chat_file.exists() else ""
+        return {
+            "status": "ok",
+            "run_id": session.run_id,
+            "raw_prompt": session.raw_prompt,
+            "steps": session.steps,
+            "chat": chat,
+        }
+
+    def continue_run(self, run_id: str, opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Продолжить приостановленный прогон прямо из веба."""
+        if self.generation_running:
+            return {"status": "busy", "message": "Генерация уже идёт."}
+        opts = opts or {}
+        try:
+            session = RunSession.load(run_id, config.output_dir)
+        except FileNotFoundError as exc:
+            return {"status": "error", "message": str(exc)}
+
+        provider = opts.get("provider") or session.provider_name or self.default_agent()
+        image_provider = opts.get("image_provider") or "qwen"
+        self._begin_generation(f"Продолжаю прогон {session.run_id}...")
+
+        def run() -> None:
+            try:
+                game_dir = self.run_spec_pipeline(
+                    session.raw_prompt, None, provider, session.mode, image_provider,
+                    resume_run_id=session.run_id,
+                )
+                self.update_progress(100, "✅ Спецификация готова!")
+                self.append_log(f"УСПЕХ! Прогон {session.run_id} доведён до конца: workspace/{game_dir.name}")
+                bus.publish("studio.done", slug=game_dir.name)
+            except RunPaused as paused:
+                self._report_pause(paused)
+            except Exception as exc:
+                self.update_progress(0, "Ошибка генерации")
+                self.append_log(f"❌ ОШИБКА: {exc}")
+            finally:
+                self._end_generation()
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"status": "started", "run_id": session.run_id}
+
+    def _report_pause(self, paused: RunPaused) -> None:
+        """Пауза — это не ошибка: всё сделанное лежит в сессии."""
+        self.update_progress(0, "⏸ Прогон приостановлен")
+        self.append_log(
+            f"\n⏸ ПРОГОН ПРИОСТАНОВЛЕН: {paused}\n"
+            f"Всё сделанное сохранено. Вкладка «Прогоны» → «Продолжить», "
+            f"и работа пойдёт со следующего шага."
+        )
+        bus.publish("runs.changed")
 
     def start_spec_generation(self, opts: Dict[str, Any]) -> Dict[str, Any]:
         """Только документация: 25+ файлов спецификации."""
@@ -448,6 +561,8 @@ class FactoryService:
                 self.update_progress(100, "✅ Спецификация готова!")
                 self.append_log(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
                 bus.publish("studio.done", slug=game_dir.name)
+            except RunPaused as paused:
+                self._report_pause(paused)
             except Exception as exc:
                 self.update_progress(0, "Ошибка генерации")
                 self.append_log(f"❌ ОШИБКА: {exc}")
@@ -533,6 +648,8 @@ class FactoryService:
                 else:
                     self.update_progress(100, f"Завершено с кодом {code}")
                 bus.publish("studio.done", slug=game_dir.name)
+            except RunPaused as paused:
+                self._report_pause(paused)
             except Exception as exc:
                 self.update_progress(0, "Ошибка генерации")
                 self.append_log(f"\n❌ ОШИБКА: {exc}\n")
@@ -582,6 +699,12 @@ class FactoryService:
                         done.append(game_dir.name)
                         self.append_log(f"{label} ✅ Готово: workspace/{game_dir.name}")
                         bus.publish("projects.changed")
+                    except RunPaused as paused:
+                        # Пакетная генерация не должна вставать целиком из-за
+                        # одной идеи: этот прогон приостановлен и продолжается
+                        # с вкладки «Прогоны», остальные идут дальше.
+                        failed.append(title)
+                        self._report_pause(paused)
                     except Exception as exc:
                         failed.append(title)
                         self.append_log(f"{label} ❌ ОШИБКА: {exc}")

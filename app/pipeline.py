@@ -100,6 +100,40 @@ class Pipeline:
              lambda ctx: SelfCritiqueAgent().run(ctx), False),
         ]
 
+    @staticmethod
+    def run_step_table(ctx, session, steps, on_step=None) -> None:
+        """Прогоняет таблицу шагов через сессию: пропуск готовых, снимки, пауза.
+
+        Вынесено из run(), потому что у веба своя, более короткая
+        последовательность агентов и свой прогресс-бар. Раньше это означало, что
+        всё, что появлялось в пайплайне, обходило веб стороной; теперь расходятся
+        только сами таблицы шагов, а живучесть прогона общая.
+
+        steps: (ключ, заголовок, действие) — заголовок нужен для чата сессии.
+        on_step: вызывается перед шагом, (индекс, всего, ключ, заголовок)."""
+        total = len(steps)
+        for index, (key, title, action) in enumerate(steps, start=1):
+            if session is not None and session.is_done(key):
+                continue
+            if on_step:
+                on_step(index, total, key, title)
+            if session is not None:
+                session.begin_step(key, title)
+            try:
+                action(ctx)
+            except RunPaused:
+                if session is not None:
+                    session.fail_step(key, "провайдер не ответил после всех повторов")
+                raise
+            except Exception as exc:
+                # Не связанная с провайдером ошибка — тоже не теряем прогон:
+                # шаг помечен, снимок предыдущего шага на диске.
+                if session is not None:
+                    session.fail_step(key, f"{type(exc).__name__}: {exc}")
+                raise
+            if session is not None:
+                session.complete_step(key, ctx)
+
     def run(
         self,
         raw_prompt: str,
@@ -142,29 +176,33 @@ class Pipeline:
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            for key, title, action, needs_design_os in self._steps():
-                # Слой Design OS отключается флагом config.DESIGN_OS_ENABLED.
-                if needs_design_os and not DESIGN_OS_ENABLED:
-                    continue
+            # Слой Design OS отключается флагом config.DESIGN_OS_ENABLED.
+            steps = [
+                (key, title, action) for key, title, action, needs_design_os in self._steps()
+                if DESIGN_OS_ENABLED or not needs_design_os
+            ]
+            for key, title, _action, _flag in self._steps():
                 if session.is_done(key):
-                    # Шаг уже отвечен в прошлый раз — модель об этом не переспрашиваем.
+                    # Шаг отвечен в прошлый раз — модель о нём не переспрашиваем.
                     progress.update(progress.add_task(f"[dim]{title} (готово ранее)", total=1), completed=1)
-                    continue
 
-                task = progress.add_task(title, total=1)
-                session.begin_step(key, title)
-                try:
+            tasks = {}
+
+            def announce(index, total, key, title):
+                tasks[key] = progress.add_task(title, total=1)
+
+            def with_progress(action, key):
+                def runner(ctx):
                     action(ctx)
-                except RunPaused as paused:
-                    session.fail_step(key, str(paused))
-                    raise
-                except Exception as exc:
-                    # Не связанная с провайдером ошибка — тоже не теряем прогон:
-                    # шаг помечен, снимок предыдущего шага на диске.
-                    session.fail_step(key, f"{type(exc).__name__}: {exc}")
-                    raise
-                session.complete_step(key, ctx)
-                progress.update(task, completed=1)
+                    if key in tasks:
+                        progress.update(tasks[key], completed=1)
+                return runner
+
+            self.run_step_table(
+                ctx, session,
+                [(key, title, with_progress(action, key)) for key, title, action in steps],
+                on_step=announce,
+            )
 
             t_out = progress.add_task("[cyan]Output Generator: Writing specification package and preview...", total=1)
             game_dir = self.output_gen.generate_package(ctx)

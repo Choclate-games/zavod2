@@ -95,6 +95,7 @@ function showView(name) {
   if (name === "studio") loadGallery();
   if (name === "chats") { fillChatProjects(); loadChats(); }
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
+  if (name === "runs") loadRuns();
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
   if (name === "settings") renderSettings();
 }
@@ -1936,6 +1937,91 @@ function quotaCard(card) {
   return node;
 }
 
+/* ── Прогоны: чат фабрики с моделью и продолжение с места остановки ───── */
+
+function runRow(run) {
+  const row = el("div", "panel tight");
+  const head = el("div", "row spread");
+
+  const left = el("div");
+  // el() кладёт третий аргумент в innerHTML, а идея прогона — текст от человека:
+  // без esc() угловая скобка в идее ломает вёрстку строки.
+  const title = el("div", "", esc(run.raw_prompt || "(без идеи)"));
+  title.style.fontWeight = "600";
+  const meta = el("div", "small dim",
+    esc(`${run.run_id} · шагов пройдено: ${run.done}` +
+        (run.provider_name ? ` · провайдер: ${run.provider_name}` : "")));
+  left.appendChild(title);
+  left.appendChild(meta);
+
+  const right = el("div", "row no-wrap");
+  const status = el("span", "small");
+  if (run.finished) {
+    status.textContent = "✅ пакет собран";
+    status.style.color = "var(--ok)";
+  } else if (run.failed.length) {
+    status.textContent = `⏸ пауза на шаге «${run.failed[0]}»`;
+    status.style.color = "var(--warn)";
+  } else {
+    status.textContent = "… не завершён";
+    status.classList.add("dim");
+  }
+  right.appendChild(status);
+
+  const chatBtn = el("button", "btn small", "💬 Чат");
+  chatBtn.onclick = () => openRunChat(run.run_id);
+  right.appendChild(chatBtn);
+
+  if (run.can_continue) {
+    const contBtn = el("button", "btn small primary", "▶ Продолжить");
+    contBtn.onclick = async () => {
+      contBtn.disabled = true;
+      const res = await api(`/api/runs/${encodeURIComponent(run.run_id)}/continue`, { body: {} });
+      if (res.status === "started") {
+        toast("Прогон", "Продолжаю со следующего шага — журнал в Студии", "ok",
+          [["Открыть студию", () => showView("studio")]]);
+      } else {
+        toast("Прогон", res.message || "Не удалось продолжить", "err");
+        contBtn.disabled = false;
+      }
+    };
+    right.appendChild(contBtn);
+  }
+
+  head.appendChild(left);
+  head.appendChild(right);
+  row.appendChild(head);
+  row.style.marginBottom = "8px";
+  return row;
+}
+
+async function loadRuns() {
+  const data = await api("/api/runs");
+  const box = $("runs-list");
+  box.innerHTML = "";
+  const runs = data.runs || [];
+  if (!runs.length) {
+    box.appendChild(el("p", "dim", "Прогонов пока нет — запустите генерацию в Студии."));
+  } else {
+    runs.forEach((run) => box.appendChild(runRow(run)));
+  }
+  // Значок в навигации: сколько прогонов ждут продолжения.
+  const paused = runs.filter((r) => r.can_continue).length;
+  const badge = $("nav-runs-badge");
+  if (badge) {
+    badge.textContent = paused ? String(paused) : "";
+    badge.classList.toggle("hidden", !paused);
+  }
+}
+
+async function openRunChat(runId) {
+  const data = await api(`/api/runs/${encodeURIComponent(runId)}`);
+  if (data.status === "error") { toast("Прогон", data.message, "err"); return; }
+  $("runs-chat-title").textContent = `Чат прогона ${data.run_id}`;
+  $("runs-chat-body").innerHTML = renderMarkdown(data.chat || "_Чат пуст._");
+  $("runs-chat-panel").classList.remove("hidden");
+}
+
 async function loadQuota() {
   const data = await api("/api/quota");
   $("quota-source").textContent = data.source;
@@ -2243,6 +2329,10 @@ function handleEvent(topic, data) {
       break;
     case "quota.changed":
       if (state.view === "quota") loadQuota();
+      break;
+    case "runs.changed":
+      // Значок «ждут продолжения» нужен и когда открыта другая вкладка.
+      loadRuns();
       break;
     default:
       break;
@@ -2561,6 +2651,8 @@ function bindCommon() {
   if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
+  $("btn-refresh-runs").onclick = loadRuns;
+  $("btn-close-run-chat").onclick = () => $("runs-chat-panel").classList.add("hidden");
   $("btn-save-settings").onclick = saveSettings;
   $("btn-activity-clear").onclick = clearActivity;
   $("btn-fish-test").onclick = async () => {

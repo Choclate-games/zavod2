@@ -159,6 +159,31 @@ async def brainstorm(request: Request) -> Dict[str, Any]:
         return {"status": "error", "message": str(exc), "ideas": []}
 
 
+# ── Прогоны ─────────────────────────────────────────────────────────────────
+#
+# Прогон — это один запуск пайплайна спецификаций: его чат с моделью, снимок
+# концепции и статусы шагов. Приостановленный прогон продолжается отсюда же.
+
+@app.get("/api/runs")
+def list_runs() -> Dict[str, Any]:
+    return {"runs": service.list_runs()}
+
+
+@app.get("/api/runs/{run_id}")
+def run_chat(run_id: str) -> Dict[str, Any]:
+    return service.run_chat(run_id)
+
+
+@app.post("/api/runs/{run_id}/continue")
+async def run_continue(run_id: str, request: Request) -> Dict[str, Any]:
+    opts = {}
+    try:
+        opts = await request.json()
+    except Exception:
+        pass
+    return service.continue_run(run_id, opts or {})
+
+
 # ── Проекты ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/projects")

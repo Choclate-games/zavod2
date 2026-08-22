@@ -184,3 +184,40 @@ def test_interrupted_run_continues_without_redoing_answered_steps(tmp_path, monk
     # снимка, а не сгенерирована заново.
     assert "GameConcept" not in healthy.seen
     assert "UXLayout" in healthy.seen
+
+
+# --------------------------------------------------------------------------- веб
+
+def test_web_pipeline_writes_the_same_session(tmp_path, monkeypatch):
+    """У веба своя, более короткая последовательность агентов, но живучесть общая.
+
+    До этого веб держал полную копию пайплайна и не видел ни сессии, ни чата, ни
+    продолжения: всё, что появлялось в Pipeline.run, обходило его стороной."""
+    from app.config import config as app_config
+    from app.web import service as web_service
+
+    monkeypatch.setattr(app_config, "output_dir", tmp_path, raising=False)
+    monkeypatch.setattr(ProviderFactory, "get_ai_provider",
+                        staticmethod(lambda *a, **k: LocalAIProvider()))
+    monkeypatch.setattr(ProviderFactory, "get_image_provider",
+                        staticmethod(lambda *a, **k: _NoImages()))
+
+    game_dir = web_service.service.run_spec_pipeline(
+        "Смотритель маяка чинит линзу в шторм", None, "test-provider", "standard", "none",
+    )
+
+    assert (game_dir / "AI_DEVELOPER_PROMPT.md").exists()
+    rows = web_service.service.list_runs()
+    assert rows, "прогон веба должен попасть в список прогонов"
+    assert rows[0]["finished"] is True
+    assert rows[0]["can_continue"] is False
+
+    chat = web_service.service.run_chat(rows[0]["run_id"])
+    assert chat["status"] == "ok"
+    assert "UXDesigner" in chat["chat"], "в чате должно быть видно, о чём спрашивали модель"
+    assert chat["steps"]["ux_designer"] == STATUS_DONE
+
+
+class _NoImages:
+    def generate_image(self, *args, **kwargs):
+        return True
