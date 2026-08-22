@@ -139,6 +139,7 @@ def list_runs(
     table = Table(title="Прогоны фабрики")
     table.add_column("Прогон", style="cyan", no_wrap=True)
     table.add_column("Проект", style="magenta")
+    table.add_column("Игра")
     table.add_column("Идея")
     table.add_column("Шагов", justify="right")
     table.add_column("Статус")
@@ -150,6 +151,7 @@ def list_runs(
         else:
             status = "[dim]не завершён[/dim]"
         table.add_row(row["run_id"], row.get("slug", ""),
+                      row.get("title", "") or "[dim]—[/dim]",
                       (row["raw_prompt"] or "")[:50], str(row["done"]), status)
     console.print(table)
     console.print("[dim]Продолжить: python -m app.cli continue <прогон>[/dim]")

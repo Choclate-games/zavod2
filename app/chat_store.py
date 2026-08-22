@@ -40,6 +40,10 @@ class ChatSession:
     conversation_id: Optional[str] = None      # ID беседы на стороне CLI агента
     agent: Optional[str] = None                # какой CLI ведёт беседу: agy | claude | codex | kimi
     model: Optional[str] = None                # модель, выбранная для этой беседы
+    # Чат, в котором фабрика собирала спецификацию, отличается от обычного не
+    # содержимым, а происхождением: по `run_id` из него продолжают прогон.
+    kind: str = "chat"                         # "chat" | "run"
+    run_id: Optional[str] = None               # прогон, который ведётся в этом чате
     messages: List[ChatMessage] = field(default_factory=list)
 
     @property
@@ -62,6 +66,8 @@ class ChatSession:
             conversation_id=data.get("conversation_id"),
             agent=data.get("agent"),
             model=data.get("model"),
+            kind=data.get("kind") or "chat",
+            run_id=data.get("run_id"),
             messages=messages,
         )
 
@@ -98,13 +104,16 @@ def list_sessions(slug: str) -> List[ChatSession]:
     return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
 
 
-def create_session(slug: str, title: str = "") -> ChatSession:
+def create_session(slug: str, title: str = "", kind: str = "chat",
+                   run_id: str = "") -> ChatSession:
     now = datetime.now().isoformat(timespec="seconds")
     session = ChatSession(
         id=uuid.uuid4().hex[:12],
         title=title or f"Чат от {datetime.now().strftime('%d.%m %H:%M')}",
         created_at=now,
         updated_at=now,
+        kind=kind or "chat",
+        run_id=run_id or None,
     )
     save_session(slug, session)
     return session
@@ -154,6 +163,23 @@ def truncate_from(slug: str, session: ChatSession, index: int) -> None:
     if 0 <= index < len(session.messages):
         del session.messages[index:]
         save_session(slug, session)
+
+
+def rename_session(slug: str, session_id: str, title: str) -> Optional[ChatSession]:
+    """Переименовать беседу.
+
+    Нужно прогону: пока у игры нет названия, чат зовётся «Прогон N», а как
+    только концепция получает заголовок — беседа переезжает под него. Искать
+    прогон в списке по слагу каталога человек не обязан."""
+    session = load_session(slug, session_id)
+    if session is None:
+        return None
+    clean = " ".join((title or "").split())
+    if not clean or clean == session.title:
+        return session
+    session.title = clean
+    save_session(slug, session)
+    return session
 
 
 def delete_session(slug: str, session_id: str) -> None:

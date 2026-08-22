@@ -272,3 +272,75 @@ def test_web_pipeline_writes_the_same_session(tmp_path, monkeypatch):
 class _NoImages:
     def generate_image(self, *args, **kwargs):
         return True
+
+
+# --------------------------------------------------------------------------- прогон в чате разработки
+
+def test_run_chat_is_numbered_until_the_game_has_a_name(tmp_path):
+    """Отдельного окна «Прогоны» нет: прогон виден в списке чатов проекта.
+
+    До IdeaAnalyzer названия игры не существует, поэтому чат стартует порядковым
+    номером — искать прогон по слагу собственной реплики человек не обязан."""
+    first = RunSession.start("создай игру по типу rainbow six", tmp_path, "test-provider")
+    second = RunSession.start("игра про смотрителя маяка", tmp_path, "test-provider")
+
+    assert chat_store.load_session(first.slug, first.chat_session_id).title == "Прогон 1"
+    assert chat_store.load_session(second.slug, second.chat_session_id).title == "Прогон 2"
+
+
+def test_run_chat_is_marked_as_a_run(tmp_path):
+    session = RunSession.start("игра про смотрителя маяка", tmp_path, "test-provider")
+    chat = chat_store.load_session(session.slug, session.chat_session_id)
+
+    assert chat.kind == "run"
+    assert chat.run_id == session.run_id
+
+
+def test_run_renames_its_chat_and_project_to_the_game_title(tmp_path):
+    from app import project_meta
+
+    session = RunSession.start("создай игру по типу rainbow six", tmp_path, "test-provider")
+    session.adopt_title("Тактика Прорыва: CQB Штурм")
+
+    assert chat_store.load_session(session.slug, session.chat_session_id).title \
+        == "Тактика Прорыва: CQB Штурм"
+    assert project_meta.get(session.slug).get("title") == "Тактика Прорыва: CQB Штурм"
+    # Переименование переживает перечитывание прогона с диска.
+    assert RunSession.load(session.run_id, tmp_path).title == "Тактика Прорыва: CQB Штурм"
+
+
+def test_pipeline_renames_the_chat_once_the_concept_has_a_title(tmp_path):
+    session = RunSession.start("создай игру по типу rainbow six", tmp_path, "test-provider")
+    ctx = make_ctx(FlakyProvider(failures=0), session, tmp_path)
+    ctx.concept = GameConcept(title="Тактика Прорыва: CQB Штурм")
+
+    Pipeline.run_step_table(ctx, session, [("idea_analyzer", "Идея", lambda c: None)])
+
+    assert chat_store.load_session(session.slug, session.chat_session_id).title \
+        == "Тактика Прорыва: CQB Штурм"
+
+
+def test_run_chat_is_listed_among_the_project_chats(tmp_path):
+    """Чат прогона — обычный чат проекта, а не отдельная сущность."""
+    session = RunSession.start("игра про смотрителя маяка", tmp_path, "test-provider")
+    ids = [chat.id for chat in chat_store.list_sessions(session.slug)]
+    assert session.chat_session_id in ids
+
+
+def test_web_chat_offers_to_continue_a_paused_run(tmp_path, monkeypatch):
+    """Продолжение живёт в самом чате: отдельной панели прогонов больше нет."""
+    from app.config import config
+    from app.web.service import FactoryService
+
+    monkeypatch.setattr(config, "output_dir", tmp_path)
+    monkeypatch.setattr(config, "workspace_dir", tmp_path)
+
+    session = RunSession.start("игра про смотрителя маяка", tmp_path, "test-provider")
+    session.fail_step("art_director", "провайдер не ответил")
+
+    opened = FactoryService().open_chat(session.slug, session.chat_session_id)
+
+    assert opened["status"] == "success"
+    assert opened["session"]["kind"] == "run"
+    assert opened["run"]["can_continue"] is True
+    assert opened["run"]["failed"] == ["art_director"]

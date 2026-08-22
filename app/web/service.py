@@ -471,7 +471,10 @@ class FactoryService:
     # ------------------------------------------------------------------ прогоны
 
     def list_runs(self, limit: int = 30) -> List[Dict[str, Any]]:
-        """Прогоны для панели «Прогоны»: что собрано, что можно продолжить."""
+        """Прогоны фабрики: что собрано, что можно продолжить.
+
+        Отдельной панели у них больше нет — каждый прогон продолжают в его же
+        чате разработки. Список остался API для CLI и для служебных проверок."""
         rows = RunSession.list_runs(config.output_dir)
         for row in rows:
             row["can_continue"] = bool(row["failed"]) and not row["finished"]
@@ -539,7 +542,7 @@ class FactoryService:
         self.update_progress(0, "⏸ Прогон приостановлен")
         self.append_log(
             f"\n⏸ ПРОГОН ПРИОСТАНОВЛЕН: {paused}\n"
-            f"Всё сделанное сохранено. Вкладка «Прогоны» → «Продолжить», "
+            f"Всё сделанное сохранено. Чат проекта → «▶ Продолжить прогон», "
             f"и работа пойдёт со следующего шага."
         )
         bus.publish("runs.changed")
@@ -706,7 +709,7 @@ class FactoryService:
                     except RunPaused as paused:
                         # Пакетная генерация не должна вставать целиком из-за
                         # одной идеи: этот прогон приостановлен и продолжается
-                        # с вкладки «Прогоны», остальные идут дальше.
+                        # из чата своего проекта, остальные идут дальше.
                         failed.append(title)
                         self._report_pause(paused)
                     except Exception as exc:
@@ -1120,6 +1123,35 @@ class FactoryService:
             "duration": job.duration_str if job else "",
             "can_undo": undo_index is not None and not self.chat_jobs.is_running(session.id),
             "undo_prompt": session.messages[undo_index].text if undo_index is not None else "",
+            # Чат, в котором фабрика собирала спецификацию, помечен: в списке он
+            # отличается значком, а внутри — полосой продолжения прогона.
+            "kind": session.kind or "chat",
+            "run_id": session.run_id or "",
+        }
+
+    def run_state(self, run_id: str) -> Dict[str, Any]:
+        """Состояние прогона для полосы в чате: сколько шагов, где встал.
+
+        Отдельной вкладки «Прогоны» больше нет — прогон продолжают там же, где
+        его видно: в чате разработки, внутри его же проекта."""
+        if not run_id:
+            return {}
+        try:
+            session = RunSession.load(run_id, config.output_dir)
+        except FileNotFoundError:
+            return {}
+        failed = [k for k, status in session.steps.items() if status == "failed"]
+        done = sum(1 for status in session.steps.values() if status == "done")
+        return {
+            "run_id": session.run_id,
+            "slug": session.slug,
+            "title": session.title,
+            "raw_prompt": session.raw_prompt,
+            "done": done,
+            "failed": failed,
+            "finished": bool(session.game_dir),
+            "can_continue": bool(failed) and not session.game_dir,
+            "running": self.generation_running,
         }
 
     def create_chat(self, slug: str) -> Dict[str, Any]:
@@ -1159,6 +1191,7 @@ class FactoryService:
         return {
             "status": "success",
             "session": self._session_summary(session),
+            "run": self.run_state(session.run_id or ""),
             "events": events,
             "live_events": live_events,
             "running": running,

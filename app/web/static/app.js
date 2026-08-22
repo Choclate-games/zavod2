@@ -95,7 +95,6 @@ function showView(name) {
   if (name === "studio") loadGallery();
   if (name === "chats") { fillChatProjects(); loadChats(); }
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
-  if (name === "runs") loadRuns();
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
   if (name === "settings") renderSettings();
 }
@@ -540,7 +539,9 @@ async function selectProject(slug) {
   state.detail = detail;
   renderProjectBanner();
   document.querySelectorAll("#projects-list .list-item").forEach((n) => n.classList.remove("active"));
-  loadProjects();
+  // Список ждём: без него свежесозданный проект прогона не попадёт в
+  // выпадающие списки, и следующий переход на вкладку чатов его не найдёт.
+  await loadProjects();
   loadChats();
   openDoc(state.doc);
 }
@@ -834,12 +835,25 @@ function projectName(slug) {
 }
 
 function fillChatProjects() {
+  /* Выбранный проект НИКОГДА не подменяется содержимым выпадающего списка.
+     Раньше подменялся: проект прогона заводится в начале прогона, а
+     state.projects перечитывается позже, и на этом промежутке выбранного слага
+     в списке ещё нет. Список молча переключался на соседнюю игру, а запрос за
+     чатом уходил в неё — отсюда и бралось «Чат не найден» при открытии чата
+     только что начатого прогона. */
   const select = $("chat-project");
   const projects = activeProjects();
   select.innerHTML = "";
   projects.forEach((p) => select.appendChild(new Option(p.title || p.slug, p.slug)));
-  if (state.project && projects.some((p) => p.slug === state.project)) select.value = state.project;
-  else if (projects.length) { state.project = select.value; localStorage.setItem("project", state.project); }
+  if (!state.project) {
+    if (projects.length) { state.project = select.value; localStorage.setItem("project", state.project); }
+    return;
+  }
+  if (!projects.some((p) => p.slug === state.project)) {
+    // Проект есть, а в списке его ещё нет — добавляем строкой, а не теряем выбор.
+    select.appendChild(new Option(projectName(state.project), state.project));
+  }
+  select.value = state.project;
 }
 
 async function loadChats() {
@@ -858,15 +872,20 @@ async function loadChats() {
       const row = el("div", `chat-row ${s.id === state.session ? "active" : ""} ${s.running ? "running" : ""}`);
       const when = (s.updated_at || "").slice(5, 16).replace("T", " ");
       const info = s.running ? `⏳ работает ${s.duration}` : `сообщений: ${s.messages}`;
+      const mark = s.kind === "run" ? "🏭 " : "";
       const open = el("button", "chat-open",
-        `<strong>${esc(s.title)}</strong><br /><span class="dim">${s.resumable ? "🔗" : "•"} ${esc(when)} · ${esc(info)}${s.model ? " · " + esc(s.model) : ""}</span>`);
+        `<strong>${mark}${esc(s.title)}</strong><br /><span class="dim">${s.resumable ? "🔗" : "•"} ${esc(when)} · ${esc(info)}${s.model ? " · " + esc(s.model) : ""}</span>`);
       open.onclick = () => openChat(s.id);
       const del = el("button", "chat-del", "🗑");
       del.onclick = async (e) => {
         e.stopPropagation();
         const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${s.id}`, { method: "DELETE" });
         if (res.status === "error") toast("Чат", res.message, "err");
-        if (state.session === s.id) { state.session = null; $("chat-feed").innerHTML = ""; }
+        if (state.session === s.id) {
+          state.session = null;
+          $("chat-feed").innerHTML = "";
+          renderRunBar(null);
+        }
         loadChats();
       };
       row.append(open, del);
@@ -874,6 +893,14 @@ async function loadChats() {
     });
   });
   updateChatButtons();
+}
+
+async function refreshRunBar() {
+  /* Прогон продолжается в фоне: полосу обновляем по событию шины, не
+     перерисовывая ленту — иначе чат прыгает под руками. */
+  if (!state.project || !state.session) return;
+  const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${state.session}`);
+  if (res.status === "success") renderRunBar(res.run);
 }
 
 async function newChat() {
@@ -892,6 +919,7 @@ async function openChat(sessionId) {
   state.session = sessionId;
   state.sessionRunning = res.running;
   const session = res.session;
+  renderRunBar(res.run);
   $("chat-session-name").textContent = `💬 ${session.title}${session.resumable ? " 🔗" : ""}`;
   if (session.agent) $("chat-agent").value = session.agent;
   if (session.model) ensureModelOption(session.model);
@@ -1793,98 +1821,41 @@ function quotaCard(card) {
   return node;
 }
 
-/* ── Прогоны: чат фабрики с моделью и продолжение с места остановки ───── */
+/* ── Прогон фабрики внутри чата разработки ───────────────────────────── */
 
-function runRow(run) {
-  const row = el("div", "panel tight");
-  const head = el("div", "row spread");
+/* Отдельного окна «Прогоны» нет: прогон — это обычный чат проекта, и
+   продолжают его оттуда же, где видно, что фабрика спрашивала у модели. */
+function renderRunBar(run) {
+  const bar = $("chat-run-bar");
+  const status = $("chat-run-status");
+  const btn = $("btn-continue-run");
+  if (!run || !run.run_id) { bar.classList.add("hidden"); return; }
 
-  const left = el("div");
-  // el() кладёт третий аргумент в innerHTML, а идея прогона — текст от человека:
-  // без esc() угловая скобка в идее ломает вёрстку строки.
-  const title = el("div", "", esc(run.raw_prompt || "(без идеи)"));
-  title.style.fontWeight = "600";
-  const meta = el("div", "small dim",
-    esc(`проект: ${run.slug || "—"} · шагов пройдено: ${run.done}` +
-        (run.provider_name ? ` · провайдер: ${run.provider_name}` : "")));
-  left.appendChild(title);
-  left.appendChild(meta);
-
-  const right = el("div", "row no-wrap");
-  const status = el("span", "small");
+  bar.classList.remove("hidden");
+  const steps = `шагов пройдено: ${run.done}`;
   if (run.finished) {
-    status.textContent = "✅ пакет собран";
+    status.textContent = `🏭 Прогон завершён · ${steps} · пакет спецификаций собран`;
     status.style.color = "var(--ok)";
-  } else if (run.failed.length) {
-    status.textContent = `⏸ пауза на шаге «${run.failed[0]}»`;
+  } else if (run.failed && run.failed.length) {
+    status.textContent = `⏸ Прогон приостановлен на шаге «${run.failed[0]}» · ${steps}`;
     status.style.color = "var(--warn)";
   } else {
-    status.textContent = "… не завершён";
-    status.classList.add("dim");
+    status.textContent = `🏭 Прогон фабрики · ${steps}`;
+    status.style.color = "var(--text-muted)";
   }
-  right.appendChild(status);
 
-  // Чат прогона — обычный чат проекта, поэтому ведём прямо в него: там же
-  // разговор продолжается с кодовым агентом, когда спецификация собрана.
-  const chatBtn = el("button", "btn small", "💬 Чат прогона");
-  chatBtn.onclick = async () => {
-    if (run.slug && run.chat_session_id) {
-      await selectProject(run.slug);
-      openChat(run.chat_session_id);
+  btn.classList.toggle("hidden", !run.can_continue);
+  btn.disabled = !!run.running;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const res = await api(`/api/runs/${encodeURIComponent(run.run_id)}/continue`, { body: {} });
+    if (res.status === "started") {
+      toast("Прогон", "Продолжаю со следующего шага — ход виден в этом чате", "ok");
     } else {
-      openRunChat(run.run_id);
+      toast("Прогон", res.message || "Не удалось продолжить", "err");
+      btn.disabled = false;
     }
   };
-  right.appendChild(chatBtn);
-
-  if (run.can_continue) {
-    const contBtn = el("button", "btn small primary", "▶ Продолжить");
-    contBtn.onclick = async () => {
-      contBtn.disabled = true;
-      const res = await api(`/api/runs/${encodeURIComponent(run.run_id)}/continue`, { body: {} });
-      if (res.status === "started") {
-        toast("Прогон", "Продолжаю со следующего шага — журнал в Студии", "ok",
-          [["Открыть студию", () => showView("studio")]]);
-      } else {
-        toast("Прогон", res.message || "Не удалось продолжить", "err");
-        contBtn.disabled = false;
-      }
-    };
-    right.appendChild(contBtn);
-  }
-
-  head.appendChild(left);
-  head.appendChild(right);
-  row.appendChild(head);
-  row.style.marginBottom = "8px";
-  return row;
-}
-
-async function loadRuns() {
-  const data = await api("/api/runs");
-  const box = $("runs-list");
-  box.innerHTML = "";
-  const runs = data.runs || [];
-  if (!runs.length) {
-    box.appendChild(el("p", "dim", "Прогонов пока нет — запустите генерацию в Студии."));
-  } else {
-    runs.forEach((run) => box.appendChild(runRow(run)));
-  }
-  // Значок в навигации: сколько прогонов ждут продолжения.
-  const paused = runs.filter((r) => r.can_continue).length;
-  const badge = $("nav-runs-badge");
-  if (badge) {
-    badge.textContent = paused ? String(paused) : "";
-    badge.classList.toggle("hidden", !paused);
-  }
-}
-
-async function openRunChat(runId) {
-  const data = await api(`/api/runs/${encodeURIComponent(runId)}`);
-  if (data.status === "error") { toast("Прогон", data.message, "err"); return; }
-  $("runs-chat-title").textContent = `Чат прогона ${data.run_id}`;
-  $("runs-chat-body").innerHTML = renderMarkdown(data.chat || "_Чат пуст._");
-  $("runs-chat-panel").classList.remove("hidden");
 }
 
 async function loadQuota() {
@@ -2196,8 +2167,9 @@ function handleEvent(topic, data) {
       if (state.view === "quota") loadQuota();
       break;
     case "runs.changed":
-      // Значок «ждут продолжения» нужен и когда открыта другая вкладка.
-      loadRuns();
+      // Прогон живёт в чате проекта: обновляем список бесед и полосу прогона.
+      loadChats();
+      if (state.session) refreshRunBar();
       break;
     default:
       break;
@@ -2360,6 +2332,7 @@ function bindChats() {
     localStorage.setItem("project", state.project);
     state.session = null;
     clearFeed();
+    renderRunBar(null);
     // Вложения лежат в папке прежней игры — в новый проект они не переезжают.
     clearAttachments();
     loadChats();
@@ -2516,8 +2489,6 @@ function bindCommon() {
   if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
-  $("btn-refresh-runs").onclick = loadRuns;
-  $("btn-close-run-chat").onclick = () => $("runs-chat-panel").classList.add("hidden");
   $("btn-save-settings").onclick = saveSettings;
   $("btn-activity-clear").onclick = clearActivity;
   $("btn-fish-test").onclick = async () => {

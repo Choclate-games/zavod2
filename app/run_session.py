@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app import chat_store
+from app import chat_store, project_meta
 from app.mechanics_repo import _slugify
 from app.models import GameConcept, ProjectDirection
 
@@ -69,6 +69,7 @@ class RunSession:
     steps: Dict[str, str] = field(default_factory=dict)
     created_at: str = ""
     game_dir: Optional[str] = None
+    title: str = ""
 
     # ------------------------------------------------------------------ создание
 
@@ -112,7 +113,9 @@ class RunSession:
         root = project / RUN_DIRNAME
         root.mkdir(parents=True, exist_ok=True)
 
-        chat = chat_store.create_session(slug, title=_chat_title(raw_prompt))
+        chat = chat_store.create_session(
+            slug, title=_chat_title(output_base), kind="run", run_id=run_id,
+        )
         chat_store.append_message(slug, chat, "user", raw_prompt)
 
         session = cls(
@@ -160,6 +163,7 @@ class RunSession:
             steps=data.get("steps", {}),
             created_at=data.get("created_at", ""),
             game_dir=data.get("game_dir"),
+            title=data.get("title", ""),
         )
 
     @classmethod
@@ -179,6 +183,7 @@ class RunSession:
                 "raw_prompt": data.get("raw_prompt", ""),
                 "created_at": data.get("created_at", ""),
                 "provider_name": data.get("provider_name", ""),
+                "title": data.get("title", ""),
                 "done": sum(1 for s in statuses.values() if s == STATUS_DONE),
                 "failed": [k for k, s in statuses.items() if s == STATUS_FAILED],
                 "finished": bool(data.get("game_dir")),
@@ -219,6 +224,7 @@ class RunSession:
             "updated_at": datetime.now().isoformat(timespec="seconds"),
             "steps": self.steps,
             "game_dir": self.game_dir,
+            "title": self.title,
         }
         self.state_file.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -242,6 +248,27 @@ class RunSession:
         self.steps[step_key] = STATUS_FAILED
         self.save()
         self._append_chat(f"⏸ Шаг **{step_key}** остановлен: {error}")
+
+    def adopt_title(self, title: str) -> None:
+        """Перевесить название игры на чат и на проект.
+
+        Каталог проекта заводится по идее пользователя — «созданную игру про
+        Rainbow Six» иначе пришлось бы искать в списке под именем
+        `sozday_igru_po_tipu_rainbow_six`. Название появляется только после
+        IdeaAnalyzer, поэтому чат стартует как «Прогон N» и переименовывается
+        здесь — один раз, при первом же появлении заголовка."""
+        clean = " ".join((title or "").split())
+        if not clean or clean == self.title:
+            return
+        self.title = clean
+        self.save()
+        if self.slug and self.chat_session_id:
+            chat_store.rename_session(self.slug, self.chat_session_id, clean)
+        if self.slug:
+            try:
+                project_meta.set_title(self.slug, clean)
+            except OSError:
+                pass  # реестр проектов — удобство, а не условие прогона
 
     def finish(self, game_dir: Path) -> None:
         self.game_dir = str(game_dir)
@@ -322,9 +349,13 @@ class RunSession:
         chat_store.append_message(self.slug, session, "assistant", text)
 
 
-def _chat_title(raw_prompt: str) -> str:
-    title = " ".join((raw_prompt or "").split())
-    return f"🏭 Прогон: {title[:40]}" if title else "🏭 Прогон фабрики"
+def _chat_title(output_base: Path) -> str:
+    """Имя чата до того, как у игры появилось название.
+
+    Порядковый номер, а не обрезанная идея: идея целиком лежит первым
+    сообщением чата, а в списке нужен короткий ярлык, который через минуту
+    сменится названием игры."""
+    return f"Прогон {len(RunSession._state_files(output_base)) + 1}"
 
 
 def _quote(text: str) -> str:

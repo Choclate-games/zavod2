@@ -118,6 +118,12 @@ class Pipeline:
                 raise
             if session is not None:
                 session.complete_step(key, ctx)
+                # Название игры появляется в середине прогона (IdeaAnalyzer).
+                # Как только оно есть — чат и проект переезжают под него, чтобы
+                # человек искал «Тактику Прорыва», а не слаг своей же реплики.
+                concept = getattr(ctx, "concept", None)
+                if concept is not None and getattr(concept, "title", ""):
+                    session.adopt_title(concept.title)
 
     def run(
         self,

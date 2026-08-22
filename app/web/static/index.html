@@ -24,7 +24,6 @@
     <button class="nav-btn" data-view="projects"><span class="nav-icon">📁</span> Проекты и ТЗ</button>
     <button class="nav-btn" data-view="chats"><span class="nav-icon">💬</span> Чаты разработки</button>
     <button class="nav-btn" data-view="play"><span class="nav-icon">🌐</span> Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
-    <button class="nav-btn" data-view="runs"><span class="nav-icon">🧾</span> Прогоны<span class="nav-badge hidden" id="nav-runs-badge"></span></button>
     <button class="nav-btn" data-view="quota"><span class="nav-icon">📊</span> Квоты агентов</button>
     <button class="nav-btn" data-view="settings"><span class="nav-icon">⚙️</span> Настройки</button>
 
@@ -216,6 +215,14 @@
             <span class="dim" id="chat-sandbox"></span>
           </div>
 
+          <!-- Прогон фабрики виден в своём же чате: отдельного окна «Прогоны»
+               нет, продолжают его отсюда. -->
+          <div class="row spread hidden" id="chat-run-bar"
+               style="margin:6px 0;padding:8px 10px;border-radius:8px;background:var(--bg-panel-2);border:1px solid var(--border-subtle)">
+            <span class="small" id="chat-run-status"></span>
+            <button class="btn small primary hidden" id="btn-continue-run">▶ Продолжить прогон</button>
+          </div>
+
           <div class="row" style="margin:8px 0;gap:8px">
             <label class="field" style="flex:0 0 200px">Агент<select id="chat-agent"></select></label>
             <label class="field" style="flex:0 0 220px">Модель<select id="chat-model"></select></label>
@@ -306,28 +313,6 @@
     </section>
 
     <!-- ── Квоты ────────────────────────────────────────────────────── -->
-    <section class="view" id="view-runs">
-      <div class="panel grow scroll">
-        <div class="row spread">
-          <h2>🧾 Прогоны фабрики</h2>
-          <button class="btn small" id="btn-refresh-runs" title="Обновить список">🔄 Обновить</button>
-        </div>
-        <p class="small muted" style="margin:6px 0 12px">
-          Один прогон — один запуск пайплайна спецификаций. Здесь видно, о чём фабрика
-          спрашивала модель, на каком шаге она встала и что можно продолжить: прерванный
-          прогон подхватывается со следующего шага, уже отвеченное заново не спрашивается.
-        </p>
-        <div id="runs-list"></div>
-      </div>
-      <div class="panel grow scroll hidden" id="runs-chat-panel">
-        <div class="row spread">
-          <h3 id="runs-chat-title">Чат прогона</h3>
-          <button class="btn small" id="btn-close-run-chat">✕ Закрыть</button>
-        </div>
-        <div class="doc-view grow" id="runs-chat-body"></div>
-      </div>
-    </section>
-
     <section class="view" id="view-quota">
       <div class="panel grow scroll">
         <div class="row spread">
