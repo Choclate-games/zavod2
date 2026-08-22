@@ -434,7 +434,7 @@ not invented separately.
 - [ ] No feature button rendered for a capability the platform lacks.
 - [ ] No `alert`/`confirm`, no emoji icons, no `z-index` outside the tokens.
 - [ ] Screen transitions use one shared pattern and finish under 400 ms.
-- [ ] `prefers-reduced-motion` drops transforms.
+- [ ] With `prefers-reduced-motion: reduce`, transforms are dropped and only opacity changes remain.
 - [ ] UI text is readable over the brightest scene in the game.
 - [ ] With the canvas hidden, the menu still identifies this specific game.
 - [ ] Ни одно значение токена не совпадает с примером из этого файла и из другой

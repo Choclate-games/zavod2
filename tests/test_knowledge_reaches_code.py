@@ -61,10 +61,14 @@ def test_core_document_travels_with_its_checklist():
 
 
 def test_document_without_a_checklist_says_so():
-    """Молчание читается как «тут нечего проверять»."""
+    """Молчание читается как «тут нечего проверять».
+
+    Сейчас чек-лист есть у каждого документа базы, поэтому случай моделируется
+    только что добавленным документом — тем, для которого команду `checklists`
+    ещё не запускали. Он обязан честно сказать, что короткого пути нет."""
     concept = _concept("Головоломка", "Проверка")
     concept.knowledge_plan = KnowledgePlan(selections=[
-        KnowledgeSelection(path="threejs/juice_and_vfx_pool.md", role="core", reason="эффекты"),
+        KnowledgeSelection(path="threejs/just_added_document.md", role="core", reason="эффекты"),
     ])
     block = PromptCompilerAgent._knowledge_block(concept)
     assert "открывается целиком" in block
@@ -259,3 +263,40 @@ def test_check_spec_blocks_release_on_unmarked_items():
     assert "H1" in CHECK_SPEC
     assert "не отработаны" in CHECK_SPEC
     assert r"\[~\]" in CHECK_SPEC, "осознанный отказ должен засчитываться"
+
+
+def test_every_document_in_the_base_carries_a_checklist():
+    """Механизм доставки универсален, а топлива для него было на 5 документов из 96.
+
+    Пока чек-лист есть только у части базы, гарантия действует только на эту
+    часть: гонка тянула четыре документа, и чек-лист был у одного."""
+    paths = [p for p in knowledge.list_topics() if not p.endswith(".yaml")]
+    missing = [p for p in paths if not knowledge.checklist(p)]
+    assert not missing, f"без чек-листа: {missing}"
+
+
+def test_checklist_items_are_statements_not_topics():
+    """Пункт «Прыжок» непроверяем. Проверяем «Прыжок с гравитацией и койот-таймом»."""
+    paths = [p for p in knowledge.list_topics() if not p.endswith(".yaml")]
+    too_short = []
+    for path in paths:
+        for item in knowledge.checklist(path):
+            if len(item.split()) < 4:
+                too_short.append(f"{path}: {item}")
+    assert not too_short, f"пункты-заголовки: {too_short[:5]}"
+
+
+def test_platform_checklists_do_not_bloat_every_prompt():
+    """Семьдесят одинаковых пунктов в каждом промпте — это возврат дупликации.
+
+    Платформенные чек-листы живут в приёмке, где их проверяет скрипт; промпт
+    несёт только то, что отобрано под эту игру."""
+    concept = _concept("Гонка", "Проверка")
+    concept.knowledge_plan = KnowledgePlan(selections=[
+        KnowledgeSelection(path="threejs/rapier_vehicle_controller.md", role="core", reason="—"),
+    ])
+    block = PromptCompilerAgent._knowledge_block(concept)
+    items = [l for l in block.splitlines() if l.strip().startswith("- [ ]")]
+    assert items, "чек-лист ядра обязан ехать в промпт"
+    assert len(items) < 40, f"в промпт уехало {len(items)} пунктов — это уже платформенные"
+    assert "ACCEPTANCE.md`, раздел H" in block, "нет адреса, где лежит полный список"
