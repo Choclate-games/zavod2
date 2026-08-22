@@ -22,6 +22,12 @@ import { FpsDemo } from '../src/demos/FpsDemo';
 import { MeleeDemo } from '../src/demos/MeleeDemo';
 import { SurvivorDemo } from '../src/demos/SurvivorDemo';
 import { StealthDemo } from '../src/demos/StealthDemo';
+import { BuildingDemo } from '../src/demos/BuildingDemo';
+import { BuoyancyDemo } from '../src/demos/BuoyancyDemo';
+import { Procedural3dDemo } from '../src/demos/Procedural3dDemo';
+import { Ortho2dDemo } from '../src/demos/Ortho2dDemo';
+import { VfxPoolDemo } from '../src/demos/VfxPoolDemo';
+import { AudioRhythmDemo } from '../src/demos/AudioRhythmDemo';
 
 let failed = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -45,10 +51,6 @@ let tick = 0;
 
 /**
  * Заглушка контекста: звук и HUD — пустышки, ввод задаётся сценарием.
- *
- * Без ввода демо не доходит до интересных веток: в слэшере никто не атакует,
- * значит не срабатывают ни смерть врага, ни рэгдолл, ни смена волны — и
- * прогон «зелёный» ровно потому, что ничего не произошло.
  */
 function stubContext(script: Script): DemoContext {
   const noop = (): void => {};
@@ -73,7 +75,7 @@ function stubContext(script: Script): DemoContext {
       requestPointerLock: noop,
       isPointerLocked: false,
       primary: script.pointerDown
-        ? { id: 1, ndc: new THREE.Vector2(), delta: new THREE.Vector2(), down: true }
+        ? { id: 1, ndc: new THREE.Vector2(Math.sin(tick / 60) * 0.5, Math.cos(tick / 60) * 0.5), delta: new THREE.Vector2(), down: true }
         : null,
       activePointers: [],
       vehicleSnapshot: () => ({ throttle: 0, brake: 0, steer: 0, handbrake: false, pause: false }),
@@ -132,20 +134,19 @@ await run('гонка', new RacingDemo(), 600);          // 10 секунд за
 await run('файтинг', new FightingDemo(), 600);      // 10 секунд боя
 await run('tower defense', new TowerDefenseDemo(), 1800);  // 30 секунд: волна успевает пойти
 await run('yuka', new YukaDemo(), 600);
-// Recast тянет WASM и строит навмеш — самый вероятный кандидат на падение при старте.
 await run('recast', new RecastDemo(), 600);
 await run('fps', new FpsDemo(), 900);
-// Слэшер: зажатая атака + периодический захват цели. Без захвата игрок машет
-// в пустоту, никто не умирает и ветки «смерть → рэгдолл → новая волна»
-// остаются непроверенными — прогон зелёный просто потому, что ничего не было.
-// Со сценарием за 1800 тиков набирается ~17 убийств и 5-я волна.
 await run('слэшер', new MeleeDemo(), 1800, { pointerDown: true, key: { code: 'Tab', every: 30 } });
-// Рой: 3600 тиков = минута забега. Карточки выбираются нажатием «1», иначе
-// забег встанет на первом же уровне и орда никогда не дорастёт до сотен.
 await run('рой', new SurvivorDemo(), 3600, { key: { code: 'Digit1', every: 20 }, move: true });
-// Стелс: игрок ходит по кругу и попадает в конусы — иначе охранники патрулируют
-// пустую карту и ни один переход состояния не проверяется.
 await run('стелс', new StealthDemo(), 1800, { move: true });
+
+// Шесть новых вкладок
+await run('сетка и база', new BuildingDemo(), 1200, { pointerDown: true, key: { code: 'Space', every: 120 } });
+await run('вода и разрушения', new BuoyancyDemo(), 1200, { move: true, pointerDown: true });
+await run('процедурная 3d', new Procedural3dDemo(), 600, { move: true, key: { code: 'Digit2', every: 60 } });
+await run('2d ортокамера', new Ortho2dDemo(), 600, { pointerDown: true, key: { code: 'Tab', every: 120 } });
+await run('vfx пул', new VfxPoolDemo(), 600, { pointerDown: true, key: { code: 'Digit2', every: 60 } });
+await run('синтез звука и ритм', new AudioRhythmDemo(), 600, { pointerDown: true, key: { code: 'Space', every: 30 } });
 
 console.log(failed === 0 ? '\nВсе проверки пройдены.' : `\nПровалено проверок: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

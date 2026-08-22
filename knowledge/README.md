@@ -45,7 +45,8 @@ and the tasks each one owns instead of hand-written code, are in `stack/README.m
 | `stack/bitecs.md` | ECS 0.4 API, mass entities, instanced rendering, system order |
 | `stack/postprocessing.md` | `EffectComposer`, effect budget per device tier, sRGB/AA traps |
 | `threejs/orthographic_2d_and_pointer_input.md` | 2D as an orthographic Three.js scene: pointer→world, splines, drag |
-| `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, hit-stop, pushback, 2.5D camera |
+| `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, reach & advance, stamina/guard break, the physics boundary, live-match check |
+| `threejs/procedural_character_rig.md` | Humanoid built from boxes: hierarchy, seeded faces, wear decals, pose-target animation, ragdoll from the real meshes |
 | `threejs/racing_track_and_opponents.md` | Track from one curve, checkpoints and laps, racing line, fair rubber-banding |
 | `threejs/game_map_and_world_design.md` | Procedural game maps, terrain recessed corridors, anti-z-fighting, prop grounding |
 | `threejs/tower_defense_core.md` | Fixed path vs. maze, target priority, projectiles, wave contract |

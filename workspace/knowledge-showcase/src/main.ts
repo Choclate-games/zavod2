@@ -14,6 +14,12 @@ import { FpsDemo } from './demos/FpsDemo';
 import { MeleeDemo } from './demos/MeleeDemo';
 import { SurvivorDemo } from './demos/SurvivorDemo';
 import { StealthDemo } from './demos/StealthDemo';
+import { BuildingDemo } from './demos/BuildingDemo';
+import { BuoyancyDemo } from './demos/BuoyancyDemo';
+import { Procedural3dDemo } from './demos/Procedural3dDemo';
+import { Ortho2dDemo } from './demos/Ortho2dDemo';
+import { VfxPoolDemo } from './demos/VfxPoolDemo';
+import { AudioRhythmDemo } from './demos/AudioRhythmDemo';
 
 type Lang = 'ru' | 'en';
 let lang: Lang = 'ru';
@@ -37,6 +43,12 @@ const REGISTRY: Array<() => Demo> = [
   () => new MeleeDemo(),
   () => new SurvivorDemo(),
   () => new StealthDemo(),
+  () => new BuildingDemo(),
+  () => new BuoyancyDemo(),
+  () => new Procedural3dDemo(),
+  () => new Ortho2dDemo(),
+  () => new VfxPoolDemo(),
+  () => new AudioRhythmDemo(),
   () => new BvhDemo(),
   () => new YukaDemo(),
   () => new PostFxDemo(),

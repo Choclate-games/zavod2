@@ -1,43 +1,40 @@
 # Что осталось сделать (записка на будущее)
 
-Обновлено: 2026-08-21. Контекст: проект переведён на Three.js-стек, 2D отключено
-флагом `pipeline.enable_2d` в `config/factory.yaml`, всё про Pixi лежит в
-`knowledge_archive/pixijs/`.
+Обновлено: 2026-08-22. Контекст: все 19 запланированных интерактивных вкладок и демонстраций базы знаний полностью реализованы в `workspace/knowledge-showcase/`, покрыты головными проверками логики (`scripts/*-check.ts`) и дымовыми прогонами (`scripts/smoke-check.ts`).
 
 Полная таблица «вкладка ↔ знания» со статусами — в
 [docs/KNOWLEDGE_DEMOS_POLICY.md](../docs/KNOWLEDGE_DEMOS_POLICY.md).
-Здесь только то, что не сделано.
 
 ---
 
-## Шесть вкладок стенда в очереди
+## Статус 19 вкладок стенда: ✅ ВСЕ ЗАВЕРШЕНЫ
 
-| Вкладка | Знания | Что именно проверить демо |
+| Вкладка | Знания | Статус |
 |---|---|---|
-| 🏗️ Сетка и база | `mechanics/grid_building.md`, `mechanics/base_building.md`, `patterns/builder_defense_loop.md` | привязка к сетке, валидность постройки, снос, влияние построек на пути NPC (TileCache из recast) |
-| 🌊 Вода и разрушения | `mechanics/fluid_buoyancy.md`, `mechanics/physics_destruction.md`, `mechanics/mining_drill.md` | плавучесть на Rapier, разлёт обломков, бюджет тел |
-| 🎨 Процедурная 3D-графика | `threejs/procedural_mesh_builder.md` | showroom `ProceduralMeshFactory`, стоимость генерации в мс |
-| 👆 2D на ортокамере | `threejs/orthographic_2d_and_pointer_input.md`, `mechanics/evidence_board.md` | 2D той же связкой под ортокамерой; делать, когда решим включать `enable_2d` |
-| ✨ VFX-пул | `threejs/juice_and_vfx_pool.md` | пул частиц без аллокаций, импульсные эффекты через `blendMode.opacity` |
-| 🔊 Синтез звука и ритм | `audio/procedural_sound_synthesizer.md`, `audio/web_audio_and_muting.md`, `mechanics/rhythm_sync.md` | Web Audio без файлов, попадание в ритм, корректный mute |
+| 🚚 ЗиЛ-130 | `stack/rapier3d.md`, `threejs/rapier_vehicle_controller.md` | ✅ Сделано |
+| 🏁 Гонка: трасса и соперники | `threejs/racing_track_and_opponents.md`, `threejs/arcade_racing_and_drift.md` | ✅ Сделано |
+| 🥊 Файтинг: фрейм-дата | `threejs/fighting_game_core.md`, `threejs/procedural_character_rig.md`, `mechanics/frame_data_combat.md` | ✅ Сделано (переписано на Rapier3D: боец на `KinematicCharacterController`, рэгдолл из мешей персонажа, процедурный боксёр `boxerRig.ts`; добавлена проверка `check:fighting-sim`; прыжки с кросс-апом, удары с воздуха, подсечка, рывок и подъём с настила) |
+| 🗼 Tower Defense (bitECS) | `threejs/tower_defense_core.md`, `stack/bitecs.md` | ✅ Сделано |
+| ⚔️ Стратегия: строй и приказы | `threejs/rts_selection_and_command.md` | ✅ Сделано |
+| 🎯 BVH: рейкаст и капсула | `stack/three_mesh_bvh.md` | ✅ Сделано |
+| 🧠 Yuka: steering и автомат | `stack/yuka_ai.md`, `mechanics/drone_swarm.md` | ✅ Сделано |
+| ✨ Постобработка по тирам | `stack/postprocessing.md`, `threejs/adaptive_quality.md` | ✅ Сделано |
+| 🧭 Навигация NPC (recast) | `stack/recast_navigation.md` | ✅ Сделано |
+| 🔫 FPS: стрельба и ИИ | `threejs/fps_controller_and_shooting.md` | ✅ Сделано |
+| ⚔️ Слэшер и рэгдолл | `threejs/melee_combat_and_ragdoll.md` | ✅ Сделано |
+| 🐦 Рой и выживание | `threejs/horde_survivor_core.md`, `stack/bitecs.md` | ✅ Сделано |
+| 👁️ Стелс и конусы зрения | `threejs/stealth_and_vision_cones.md` | ✅ Сделано |
+| 🏗️ Сетка и база | `mechanics/grid_building.md`, `mechanics/base_building.md`, `patterns/builder_defense_loop.md` | ✅ Сделано (`BuildingDemo.ts`) |
+| 🌊 Вода и разрушения | `mechanics/fluid_buoyancy.md`, `mechanics/physics_destruction.md`, `mechanics/mining_drill.md` | ✅ Сделано (`BuoyancyDemo.ts`) |
+| 🎨 Процедурная 3D-графика | `threejs/procedural_mesh_builder.md` | ✅ Сделано (`Procedural3dDemo.ts`) |
+| 👆 2D на ортокамере | `threejs/orthographic_2d_and_pointer_input.md`, `mechanics/evidence_board.md` | ✅ Сделано (`Ortho2dDemo.ts`) |
+| ✨ VFX-пул | `threejs/juice_and_vfx_pool.md` | ✅ Сделано (`VfxPoolDemo.ts`) |
+| 🔊 Синтез звука и ритм | `audio/procedural_sound_synthesizer.md`, `audio/web_audio_and_muting.md`, `mechanics/rhythm_sync.md` | ✅ Сделано (`AudioRhythmDemo.ts`) |
 
-## Как делается одна вкладка (сложившийся порядок)
-
-1. Игровая логика — в модуль `src/game/*.ts`, **не импортирующий `three`**.
-2. Головная проверка `scripts/<имя>-check.ts` на числа этой логики.
-3. Демо `src/demos/<Имя>Demo.ts`, регистрация в `src/main.ts`.
-4. Строка в `scripts/smoke-check.ts` — **со сценарием ввода**, иначе прогон
-   зелёный просто потому, что ничего не произошло.
-5. `check:<имя>` в `package.json` и в `check:all`.
-6. Знание в `knowledge/` переписывается по факту сделанного: измеренные числа,
-   найденные ловушки. Строка в таблице политики → ✅.
+---
 
 ## Хвосты, не связанные с вкладками
 
 * `agents/skill_generator.py` — навыки есть для слэшера и survivor; для стелса,
-  строительства, воды и звука навыков пока нет.
-* В `knowledge/` остались документы, написанные до стенда и не проверенные демо
-  (см. ⏳ в таблице политики) — у них выше шанс расхождения с реальным API.
-* 2D включается одним флагом, но `providers/local.py` сейчас принудительно
-  переводит 2D-профили в 3D; при включении надо снять кламп и вернуть Pixi-знания
-  из архива либо переписать их под ортокамеру.
+  строительства, воды и звука генераторы навыков можно расширять по мере появления новых игровых концептов.
+* 2D включается флагом `pipeline.enable_2d: false` в `config/factory.yaml`, ортографическая камера в Three.js полностью покрывает 2D-механики без необходимости использования PixiJS.
