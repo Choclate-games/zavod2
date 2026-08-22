@@ -93,6 +93,11 @@ class PromptCompilerAgent:
         и строил управление, которого никто не проектировал. Раскладку решает
         UX-дизайнер; шаблон профиля остаётся запасным вариантом для случая,
         когда её не задали."""
+        # Запасной шаблон профиля не должен спорить с рамкой проекта: в
+        # тактическом штурме, где джойстик запрещён прямым текстом, шаблон по
+        # умолчанию требовал именно джойстик. Проверяем это до того, как
+        # промпт попадёт к агенту.
+        bans = " ".join(concept.direction.what_it_is_not).lower()
         designed = (concept.ui_ux.mobile_controls_layout or "").strip()
         if designed:
             return (
@@ -103,44 +108,142 @@ class PromptCompilerAgent:
                 "точечное (тап по цели, свайп, удержание), джойстик — лишний элемент, "
                 "который занимает половину экрана и ничего не делает."
             )
-        return cls._TOUCH_LAYOUTS[profile]
+        template = cls._TOUCH_LAYOUTS[profile]
+        conflicts = [word for word in ("джойстик", "стик") if word in bans and word in template.lower()]
+        if conflicts:
+            return (
+                "- **Раскладку этой игры спроектируй сам**: MOBILE_CONTROLS.md её не задал, а "
+                f"шаблон жанра предлагает то, что рамка проекта запрещает ({', '.join(conflicts)}).\n"
+                "- Отталкивайся от главного действия игрока: чем он его дозирует, тем и "
+                "управляет. Точечное действие — тап или удержание по цели; непрерывное "
+                "ведение — стик; траектория — палец по экрану.\n"
+                "- Решение запиши в `DEVLOG.md`: раскладка, которой нет в спецификации, "
+                "должна быть хотя бы объяснена."
+            )
+        return template
 
     # ------------------------------------------------------------------
     # Блоки слоя Design OS для мастер-промпта.
     # ------------------------------------------------------------------
 
+    # Разделы правил площадки, которые пакет везёт ещё и скиллом. Ключ —
+    # заголовок раздела в CRITICAL_RULES.md, значение — файл скилла, где тот же
+    # текст лежит целиком. Раздел выкидывается из промпта ТОЛЬКО если этот файл
+    # в пакете действительно есть: правило, которого нет нигде, потерять нельзя.
+    _RULES_HOSTED_BY_SKILL = {
+        "Stack": "STACK_SKILL.md",
+        "Renderer": "RENDERER_SKILL.md",
+        "Touch controls": "CONTROLS_SKILL.md",
+        "Physics vehicles": "VEHICLE_SKILL.md",
+        "Interface": "UI_SKILL.md",
+    }
+
+    @classmethod
+    def _platform_rules_block(cls, concept) -> str:
+        """Правила площадки для промпта — без третьей копии одного и того же.
+
+        Полный дамп CRITICAL_RULES.md занимал пятую часть мастер-промпта, и при
+        этом ровно тот же текст лежал в пакете ещё дважды: в `skills/*.md` и
+        (раздел Interface) в шестой секции этого же промпта. Повторённое трижды
+        правило не становится втрое важнее — оно вытесняет то, что уникально
+        для этой игры.
+
+        Платформенные разделы — загрузка, авторизация, сохранения, реклама,
+        покупки, модерация, звук, ориентация — остаются целиком: без них игра на
+        Яндекс Играх не запускается, и это не вопрос качества."""
+        sections = knowledge.critical_rules_sections(heading_offset=1)
+        if not sections:
+            return ""
+        available = {skill.filename for skill in concept.skills}
+
+        kept, pointers = [], []
+        for title, body in sections.items():
+            host = cls._RULES_HOSTED_BY_SKILL.get(title)
+            if host and host in available:
+                pointers.append(f"- **{title}** → `skills/{host}` (полный текст с примерами кода)")
+                continue
+            kept.append(body)
+
+        block = "\n\n".join(kept)
+        if pointers:
+            block += (
+                "\n\n### Правила, вынесенные в скиллы проекта\n"
+                "Эти разделы не продублированы здесь: их текст целиком лежит в скиллах "
+                "пакета, вместе с рабочим кодом. Обязательность от этого не меняется — "
+                "прочитать перед реализацией соответствующей области.\n"
+                + "\n".join(pointers)
+            )
+        return block
+
     @staticmethod
-    def _knowledge_block(concept) -> str:
-        """Документы базы знаний, отобранные под этот проект, с обоснованием."""
+    def _skill_index(concept) -> dict:
+        """Обратная карта: документ базы знаний → файл скилла, где он лежит.
+
+        Каталог `knowledge/` внутрь проекта не копируется, и кодовый агент
+        заперт в каталоге игры. Промпт при этом писал «прочитай
+        `knowledge/threejs/fps_controller_and_shooting.md`» — адрес, которого в
+        песочнице нет. Сам текст доезжает: генератор скиллов вклеивает
+        выбранные документы дословно в `skills/*.md`. Значит и адресовать надо
+        туда."""
+        index = {}
+        for skill in concept.skills:
+            for ref in skill.knowledge_refs:
+                index.setdefault(ref, skill.filename)
+        return index
+
+    @classmethod
+    def _knowledge_block(cls, concept) -> str:
+        """Знания проекта — по адресам, которые в пакете действительно есть."""
         plan = concept.knowledge_plan
-        mandatory = "\n".join(f"- `knowledge/{rel}`" for rel in knowledge.MANDATORY_TOPICS)
+        skills = cls._skill_index(concept)
+
+        def row(path: str, reason: str = "") -> str:
+            host = skills.get(path)
+            where = f"`skills/{host}`" if host else "текст ниже по этому же документу"
+            tail = f" — {reason}" if reason else ""
+            return f"- **{path}** → {where}{tail}"
+
         if not plan.selections:
             return (
-                "Куратор знаний не отработал на этом прогоне — доступна вся база:\n\n"
-                + "\n".join(f"- `knowledge/{rel}`" for rel in knowledge.list_topics())
+                "Куратор знаний не отработал на этом прогоне. Читай скиллы проекта целиком: "
+                "они в каталоге `skills/` и содержат тот же текст."
             )
 
-        core = "\n".join(
-            f"- `knowledge/{s.path}` — {s.reason}" for s in plan.selections if s.role == "core"
-        ) or "- (ядро не выделено)"
-        supporting = "\n".join(
-            f"- `knowledge/{s.path}` — {s.reason}" for s in plan.selections if s.role != "core"
-        )
+        core = "\n".join(row(s.path, s.reason) for s in plan.selections if s.role == "core") \
+            or "- (ядро не выделено)"
+        supporting = "\n".join(row(s.path, s.reason) for s in plan.selections if s.role != "core")
+        mandatory = "\n".join(row(rel) for rel in knowledge.MANDATORY_TOPICS)
+
         parts = [
-            f"Набор отобран под этот проект: {plan.summary or 'см. PROJECT_KNOWLEDGE_SKILL.md'}",
+            "Документы базы знаний не копируются в проект: их текст вклеен в файлы "
+            "`skills/*.md` дословно. Ниже — что откуда брать. Путь вида "
+            "`knowledge/...` в каталоге игры не существует, открывать надо скилл.",
+            f"Набор отобран под этот проект: {plan.summary or 'см. skills/PROJECT_KNOWLEDGE_SKILL.md'}",
             f"**Ядро — прочитать до начала реализации:**\n{core}",
         ]
         if supporting:
             parts.append(f"**Вспомогательные:**\n{supporting}")
         if plan.loop_pattern:
-            parts.append(f"**Архетип петли проекта**: `knowledge/{plan.loop_pattern}`")
-        parts.append(f"**Платформенные требования (обязательны всегда):**\n{mandatory}")
+            parts.append(f"**Архетип петли проекта**: {row(plan.loop_pattern)[2:]}")
+        parts.append(
+            "**Платформенные требования — обязательны всегда, независимо от жанра.** "
+            "Без Playgama Bridge игра на площадке не стартует: платформа держит свою "
+            "заставку до таймаута и снимает игру с модерации.\n" + mandatory
+        )
         if plan.rejected:
             rejected = ", ".join(f"`{r}`" for r in plan.rejected)
             parts.append(
                 f"**Осознанно НЕ включены**: {rejected}. {plan.rejection_reason}\n"
                 "Не подтягивай решения из этих документов — они про другую игру."
             )
+        parts.append(
+            "**Документы проекта** (лежат рядом, в корне игры): `ACCEPTANCE.md` — приёмка, "
+            "`AGENTS.md` — правила работы, `PROJECT_DIRECTION.md` — рамка проекта, "
+            "`GAME_DESIGN_DOCUMENT.md`, `MECHANICS.md`, `CORE_LOOP.md`, "
+            "`UI_UX_SPECIFICATION.md`, `ART_DIRECTION.md`, `MOBILE_CONTROLS.md`, "
+            "`PLAYGAMA_INTEGRATION.md`, `MONETIZATION.md`, `QA_PLAN.md`, "
+            "`DEVLOG.md` и `CHANGELOG.md` — их ведёшь ты."
+        )
         return "\n\n".join(parts)
 
     @staticmethod
@@ -336,7 +439,10 @@ class PromptCompilerAgent:
         if states:
             lines.append(f"- **Состояния**: {states}")
         if params:
-            lines.append(f"- **Числовые параметры (реализуй именно эти значения)**:\n{params}")
+            lines.append(
+                "- **Числовые параметры** — лежат в `balance.yaml`, читай оттуда и не "
+                f"переписывай литералами в код:\n{params}"
+            )
         if feedback:
             lines.append(f"- **Слои отклика**:\n{feedback}")
         if deep.failure_mode:
@@ -466,13 +572,19 @@ class PromptCompilerAgent:
             for layer in concept.tech_spec.layers
         ]) if concept.tech_spec.layers else "- **Core Systems Layer**: Complete game loop and state management"
         deep_by_name = {d.name.strip().lower(): d for d in concept.core_design.mechanics if d.name}
+        # Отклик печатался дважды: коротким полем `feedback` и подробным
+        # `feedback_layers` из глубокой спецификации — один и тот же текст, два
+        # заголовка, и так на каждой механике. Короткое поле остаётся только
+        # там, где подробного нет.
         mechanics_items = "\n".join([
             f"### {m.name} ({m.priority.upper()})\n"
             f"- **Category**: {m.category}\n"
             f"- **Description**: {m.description}\n"
             f"- **Player Input**: {m.player_interaction}\n"
-            f"- **Hit & Sensory Feedback**: {m.feedback}\n"
-            f"- **Technical Complexity**: {m.technical_complexity}\n"
+            + (f"- **Hit & Sensory Feedback**: {m.feedback}\n"
+               if m.feedback and not getattr(
+                   deep_by_name.get(m.name.strip().lower()), "feedback_layers", None) else "")
+            + f"- **Technical Complexity**: {m.technical_complexity}\n"
             + self._mechanic_depth_block(deep_by_name.get(m.name.strip().lower()))
             for m in concept.mechanics
         ])
@@ -493,7 +605,7 @@ class PromptCompilerAgent:
 
         direction_section = self._direction_section(concept)
 
-        critical_rules = knowledge.critical_rules(heading_offset=1)
+        critical_rules = self._platform_rules_block(concept)
         if not critical_rules:
             log_agent("PromptCompiler", "WARNING: knowledge/CRITICAL_RULES.md missing — prompt will omit platform rules")
         # Индекс знаний в промпте — это не библиотека «на всякий случай», а список
@@ -511,10 +623,34 @@ class PromptCompilerAgent:
 
         prompt_content = f"""# FINAL AI DEVELOPER PROMPT: {concept.title.upper()} 🎮⚡
 
-> **INSTRUCTION FOR AI CODING AGENT**:
-> You are the **Lead Game Developer & Systems Architect**. Your task is to build and deliver the complete, production-ready, fully playable HTML5/WebGL game described in this specification from start to finish.
-> Follow the technical architecture, physics specifications, Playgama Bridge integration, and mobile ergonomics strictly.
-> Do NOT omit systems, use fake placeholder stubs, or leave TODOs. The end result must satisfy every single item in the **Definition of Done**.
+> **ИНСТРУКЦИЯ КОДОВОМУ АГЕНТУ**
+> Ты ведущий разработчик этой игры. Задача — довести её до состояния, в котором
+> она проходит приёмку из `ACCEPTANCE.md`: работающая, играбельная, принятая
+> площадкой. Заглушки, TODO и «пока так» результатом не считаются.
+
+### Как читать этот документ
+
+Требования размечены по обязательности. Когда обязательно всё, не обязательно ничего.
+
+| Уровень | Что значит | Что делать при сомнении |
+|---|---|---|
+| **MUST** | Без этого игра не работает или не проходит модерацию площадки. | Не обсуждается. Проверяется в `ACCEPTANCE.md`, разделы A–C. |
+| **SHOULD** | Проектное решение фабрики: так игра задумана. | Отступать можно, но с записью в `DEVLOG.md` — что и почему. |
+| **MAY** | На твоё усмотрение. | Решай сам, спрашивать не нужно. |
+
+Неразмеченное считается **SHOULD**. Всё, что помечено «ЗАПРЕЩЕНО» в секции 1b, —
+это **MUST**, даже если спецификация где-то умалчивает.
+
+### Порядок работы
+
+Читать документ целиком до первой строчки кода не нужно. Порядок такой:
+
+0. `ACCEPTANCE.md` — чем закончится работа. Прочитать первым: дальше всё делается под него.
+1. Секция 1b — чем эта игра является и чем она не является. Рамка всего остального.
+2. Каркас: `package.json`, Vite, TypeScript strict, пустая сцена Three.js, цикл с фиксированным шагом. Playgama Bridge и `game_ready` — сразу, а не в конце (проверки **C1–C4**).
+3. Главная механика из секции 3 — одна, до играбельного состояния. Не все сразу.
+4. Дальше по фазам роадмапа (секция 8), каждая фаза закрывает свои номера проверок.
+5. `node scripts/check-spec.mjs` — после каждой фазы, а не один раз в конце.
 
 ---
 
@@ -580,6 +716,28 @@ The game must be built with a clean, decoupled layer architecture:
 ```text
 {self._generate_module_map(concept)}
 ```
+
+### Контракт модулей — MUST
+
+Карта выше говорит, какие файлы завести. Ниже — чего им нельзя, потому что
+именно на этом ломаются сгенерированные проекты:
+
+- **DOM создаётся только в `src/ui/`.** Ни один файл вне `src/ui/components/` и
+  `src/ui/screens/` не вызывает `document.createElement` и не присваивает
+  `element.style.*`. Экран, собранный инлайновыми стилями в обход `theme.css`, —
+  это второй экран, который перестанет совпадать с первым.
+- **Значения — только в `src/ui/theme.css`.** Проверяется **B1**.
+- **`src/core/` не знает про площадку.** Playgama Bridge живёт в
+  `src/platform/`; всё остальное общается с ним через свой интерфейс. Иначе
+  игру нельзя запустить локально без SDK.
+- **`src/ui/` не знает про физику и рендер.** Интерфейс читает состояние
+  через `EventBus` и не держит ссылок на `THREE.*` и на мир Rapier.
+- **Числа игры — из `balance.yaml`.** Литерал скорости, урона, тайминга или
+  радиуса в коде — баг: правка баланса не должна быть правкой кода.
+- **Цикл обновления не аллоцирует.** Ни `new`, ни литерала объекта, ни
+  `array.map` в кадре: пулы заводятся заранее. Проверяется **E4**.
+- **Каждый модуль экспортирует один публичный класс или функцию** и не тянет
+  импорт из соседнего слоя мимо своего интерфейса.
 
 ---
 
@@ -709,46 +867,58 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 
 ---
 
-## 8. STEP-BY-STEP DEVELOPMENT ROADMAP
+## 8. РОАДМАП
+
+Фаза закончена не тогда, когда код написан, а когда закрыты её проверки из
+`ACCEPTANCE.md`. Прогоняй `node scripts/check-spec.mjs` в конце каждой фазы.
+
+| Фаза | Чем закрывается |
+|---|---|
+| Каркас и площадка | **A1**, **A3**, **C1–C4** — игра собирается и стартует на площадке |
+| Главная механика | **D1**, **B6** — в неё можно играть, ввод доходит до игры |
+| Остальные механики и петля | **D2–D5**, **B9–B11** — петля проходится целиком |
+| Интерфейс и подача | **B1–B5**, **B7–B8**, **B12** — интерфейс собран из токенов, меню стоит на живой сцене |
+| Полировка и релиз | **C5–C11**, **E1–E5**, **A2**, **A4** — сохранения, реклама, кадры, сборка |
+
 {roadmap_items}
 
 ---
 
-## 9. NON-NEGOTIABLE PLATFORM RULES
-Every rule below corresponds to a bug that reached production or a moderation rejection in a shipped game. They override any conflicting habit, tutorial or example — including snippets found in the Playgama/Yandex docs, many of which describe the deprecated Bridge v1 contract.
+## 9. ПРАВИЛА ПЛОЩАДКИ — УРОВЕНЬ MUST
+Каждое правило ниже — след бага, дошедшего до продакшена, или отказа модерации.
+Они перекрывают любую привычку, туториал и пример — включая куски из документации
+Playgama и Яндекса, многие из которых описывают устаревший контракт Bridge v1.
 
 {critical_rules}
 
 ---
 
-## 10. DEFINITION OF DONE (MANDATORY VERIFICATION CHECKLIST)
-To mark this game as complete, every single requirement below must be verified and working:
+## 10. ПРИЁМКА — MUST
+
+Полный список проверок с номерами лежит в `ACCEPTANCE.md`, рядом с этим файлом.
+Он и есть определение готовности: пока хотя бы один пункт разделов **A–C**
+красный, игра не готова — это не качество, это работоспособность.
+
+Статическая часть проверяется командой (скрипт уже лежит в проекте, зависимостей
+не требует — пропиши его в `package.json` как `check:spec`):
+
+```bash
+node scripts/check-spec.mjs
+```
+
+Прогонять после каждой фазы роадмапа, а не один раз в конце. Результат
+записывать строкой в `DEVLOG.md`. Пункт, который не проходит, честнее оставить
+красным с объяснением, чем отметить зелёным: следующий, кто откроет проект,
+будет считать его проверенным.
+
+Критерии, которые относятся именно к этой игре:
 
 {dod_items}
 
 ---
 
-## 11. FACTORY KNOWLEDGE BASE
-Deep, worked-out detail behind the rules in section 9 — read the relevant file before implementing that area:
+## 11. ГДЕ ЛЕЖИТ ОСТАЛЬНОЕ
 
 {knowledge_index}
-
----
-
-## 12. DETAILED REFERENCE DOCUMENTS
-For extended deep specifications, refer to the accompanying project documentation files:
-- [Инструкция агенту (AGENTS.md)](./AGENTS.md)
-- [Журнал разработки (DEVLOG.md)](./DEVLOG.md)
-- [Changelog](./CHANGELOG.md)
-- [Game Design Document](./GAME_DESIGN_DOCUMENT.md)
-- [Gameplay Specification](./GAMEPLAY_SPECIFICATION.md)
-- [Technical Specification](./TECHNICAL_SPECIFICATION.md)
-- [Architecture Document](./ARCHITECTURE_DOCUMENT.md)
-- [Playgama Integration](./PLAYGAMA_INTEGRATION.md)
-- [Monetization Specification](./MONETIZATION.md)
-- [Mobile Controls](./MOBILE_CONTROLS.md)
-- [QA Plan](./QA_PLAN.md)
-- [Game Skill Guidelines](./skills/GAME_SKILL.md)
-- [Renderer Skill](./skills/RENDERER_SKILL.md)
 """
         return prompt_content.strip()

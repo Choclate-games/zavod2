@@ -3,6 +3,7 @@ from typing import Dict, Callable
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
+from agents.ux_designer import normalize_screens as _normalize_screens
 
 class DocumentGenerator:
     """Generates the full suite of specialized Game Development Documents in Markdown."""
@@ -13,6 +14,7 @@ class DocumentGenerator:
             "README.md": self._gen_readme,
             "PROJECT_DIRECTION.md": self._gen_direction,
             "GAME_DESIGN_DOCUMENT.md": self._gen_gdd,
+            "ACCEPTANCE.md": self._gen_acceptance,
             "GAMEPLAY_SPECIFICATION.md": self._gen_gameplay,
             "CORE_LOOP.md": self._gen_core_loop,
             "MECHANICS.md": self._gen_mechanics,
@@ -151,7 +153,10 @@ class DocumentGenerator:
 ```text
 workspace/{c.slug}/
 ├── AGENTS.md                        # Инструкция для ИИ-агента (пишет фабрика)
+├── ACCEPTANCE.md                    # Приёмка: пронумерованные проверки готовности
 ├── AI_DEVELOPER_PROMPT.md           # Definitive master prompt for coding agent
+├── balance.yaml                     # Числа игры: код читает их отсюда
+├── scripts/check-spec.mjs           # Статическая часть приёмки, без зависимостей
 ├── DEVLOG.md                        # Журнал разработки, ведёт кодовый агент
 ├── CHANGELOG.md                     # Changelog проекта, ведёт кодовый агент
 ├── GAME_DATA.yaml                   # Machine-readable game metadata
@@ -180,6 +185,121 @@ workspace/{c.slug}/
 4. Run `npm install && npm run dev` and check the game in the factory's built-in browser.
 5. Keep `DEVLOG.md` and `CHANGELOG.md` updated after every work session.
 6. Verify every deliverable against the **Definition of Done**.
+"""
+
+    def _gen_acceptance(self, ctx: GenerationContext) -> str:
+        """Приёмка проекта — проверками, а не обещаниями.
+
+        Definition of Done в мастер-промпте занимал меньше процента объёма и
+        состоял из фраз вида «Playgama Bridge полностью интегрирован». Проверить
+        такое нельзя, а значит кодовый агент не может узнать, закончил он или
+        нет, и отчитывается о готовности по ощущению. Здесь каждый пункт — либо
+        команда с ожидаемым результатом, либо наблюдаемый факт, и у каждого есть
+        номер, на который ссылаются фазы роадмапа."""
+        c = ctx.concept
+        ui = c.ui_ux
+
+        gameplay = []
+        for index, mechanic in enumerate(c.mechanics[:8], start=1):
+            check = mechanic.player_interaction or mechanic.description or mechanic.name
+            gameplay.append(f"- [ ] **G{index}** · {mechanic.name}: {check}")
+        if c.win_conditions:
+            gameplay.append(f"- [ ] **G{len(gameplay) + 1}** · Условие успеха срабатывает: {c.win_conditions}")
+        if c.lose_conditions:
+            gameplay.append(f"- [ ] **G{len(gameplay) + 1}** · Условие проигрыша срабатывает: {c.lose_conditions}")
+        gameplay_md = "\\n".join(gameplay) or "- [ ] **G1** · Петля игры проходится целиком (см. CORE_LOOP.md)."
+
+        screens = ", ".join(
+            (s.get("id") or "").strip() for s in _normalize_screens(ui.screens) if s.get("id")
+        ) or "main_menu, gameplay, session_end"
+
+        boards = c.playgama.leaderboards[0] if c.playgama.leaderboards else "таблица лидеров не используется"
+        save_key = c.playgama.cloud_save_keys[0] if c.playgama.cloud_save_keys else f"{c.slug}_save_v1"
+        rewarded = c.monetization.rewarded_placements[0].name if c.monetization.rewarded_placements else "rewarded-награда"
+
+        return f"""# Приёмка: {c.title}
+
+Готовность игры определяется этим файлом, а не ощущением. Каждый пункт — либо
+команда с ожидаемым результатом, либо факт, который видно на экране. Пока хотя
+бы один пункт раздела **A–C** красный, игра не готова: это не качество, это
+работоспособность.
+
+Автоматическая часть запускается одной командой:
+
+```bash
+node scripts/check-spec.mjs        # или npm run check:spec
+```
+
+Скрипт лежит в проекте и проверяет то, что проверяется статически. Остальное —
+руками, по этому же списку. Результат прогона записывается в `DEVLOG.md`.
+
+---
+
+## A. Сборка и типы
+
+- [ ] **A1** · `npm run build` завершается с кодом 0 и без единой ошибки TypeScript.
+- [ ] **A2** · `npm run dev` открывает игру без ошибок в консоли браузера (проверяется вручную, консоль пустая).
+- [ ] **A3** · В `src/` нет `TODO`, `FIXME` и заглушек вида `throw new Error('not implemented')`.
+- [ ] **A4** · `dist/` собран из текущего `src/`: сборка выполнена после последней правки.
+
+## B. Интерфейс
+
+- [ ] **B1** · Ни одного литерала цвета вне темы: `grep -rE '#[0-9a-fA-F]{{3,8}}' src/ui --exclude=theme.css` — пусто.
+- [ ] **B2** · Ни одного эмодзи в интерфейсе: иконки — инлайновый SVG с `currentColor`.
+- [ ] **B3** · Ни `alert`, ни `confirm`, ни `prompt` в `src/`.
+- [ ] **B4** · Ни одного `z-index` мимо токенов `--z-*`.
+- [ ] **B5** · За меню видна живая игровая сцена: у корня экрана меню нет непрозрачного фона, канвас не перекрыт.
+- [ ] **B6** · Перетаскивание по центру канваса управляет игрой: ни один слой не съел указатель (контейнеры `pointer-events: none`).
+- [ ] **B7** · Страница не скроллится: после свайпа `document.scrollingElement.scrollTop === 0`.
+- [ ] **B8** · Каждая видимая кнопка ≥ 64 px по короткой стороне, основная ≥ 96 px.
+- [ ] **B9** · Экраны проекта существуют и переключаются по одному: {screens}.
+- [ ] **B10** · Скрытый экран — `display: none`: после перехода ни один его элемент не ловит нажатие.
+- [ ] **B11** · Числа HUD не дёргают строку: `tabular-nums` в слоте фиксированной ширины.
+- [ ] **B12** · На 360×640 и 1280×720 нет обрезанного текста и нет полосы прокрутки.
+
+## C. Платформа Playgama
+
+Без этого раздела игра не запускается на площадке — не «работает хуже», а не
+стартует и снимается с модерации.
+
+- [ ] **C1** · `game_ready` отправляется РОВНО ОДИН РАЗ и только после загрузки, когда меню уже интерактивно.
+- [ ] **C2** · `bridge.initialize()` обёрнут таймаутом (~10 с), сторожевой таймер (~15 с) отправляет `game_ready` в любом случае.
+- [ ] **C3** · Прогресс загрузки идёт от реальных вех, заставка доходит до 100% до `game_ready`.
+- [ ] **C4** · Ни один шаг загрузки не ждёт решения игрока: `authorize()` в загрузке отсутствует.
+- [ ] **C5** · Сохранение — один ключ (`{save_key}`), один JSON, нормализация при чтении; битый сейв поднимается на умолчаниях.
+- [ ] **C6** · Награда за rewarded выдаётся только по `state === 'rewarded'` ({rewarded}), слушатель снимается через `off()`, повторный клик не платит дважды.
+- [ ] **C7** · Interstitial не показывается при старте, в середине геймплея и сразу после покупки; пауза между показами соблюдена.
+- [ ] **C8** · Пауза и звук приходят из событий моста (`PAUSE_STATE_CHANGED` / `AUDIO_STATE_CHANGED`), дельта времени сбрасывается при возврате.
+- [ ] **C9** · Возможность, которой на площадке нет, не нарисована вовсе — не серой кнопкой и не ошибкой по нажатию. Проверяется подменой флага ({boards}).
+- [ ] **C10** · Покупки: `getPurchases()` при каждом запуске, сначала выдача, потом `consumePurchase(productId)`.
+- [ ] **C11** · Игра проверена в фрейме площадки и гостем, и авторизованным.
+
+## D. Геймплей
+
+Это игра, а не движок: пункты ниже проверяются игрой руками.
+
+{gameplay_md}
+
+## E. Производительность
+
+- [ ] **E1** · 60 FPS на десктопе и не ниже 50 FPS на телефоне среднего класса.
+- [ ] **E2** · Вызовов отрисовки не больше {c.tech_spec.max_draw_calls}, треугольников не больше {c.tech_spec.max_triangles_or_sprites}.
+- [ ] **E3** · Размер сборки не больше {c.tech_spec.bundle_size_budget_mb} МБ.
+- [ ] **E4** · В кадре нет аллокаций: пулы вместо создания объектов, никакого `new` в цикле обновления.
+- [ ] **E5** · Адаптивное качество сходится: на слабом устройстве качество падает и потом поднимается, а не скачет.
+
+---
+
+## Как отчитываться
+
+Прогон приёмки записывается в `DEVLOG.md` строкой вида:
+
+```text
+2026-01-01 приёмка: A1–A4 ✅, B1–B12 ✅, C1–C11 ✅, D1–D5 ✅, E1–E5 частично (E1 на телефоне 48 FPS)
+```
+
+Пункт, который не проходит, честнее оставить красным с объяснением, чем
+отметить зелёным: следующий, кто откроет проект, будет считать его проверенным.
 """
 
     def _gen_gdd(self, ctx: GenerationContext) -> str:

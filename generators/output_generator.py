@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 from datetime import datetime
+from typing import Any, Dict
 import yaml
 
 from app import sandbox
+from app.mechanics_repo import _slugify
 from app.context import GenerationContext
 from app.logging import log_agent, log_success, log_info
+from generators.check_spec_script import CHECK_SPEC_MJS
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator
 from generators.preview_generator import PreviewGenerator
@@ -53,6 +56,17 @@ class OutputGenerator:
         # 2. Render all core markdown documents
         self.doc_gen.generate_all(ctx)
 
+        # 2b. Скрипт статической приёмки.
+        # Приёмка обязана быть исполняемой, иначе она не приёмка: часть пунктов
+        # ACCEPTANCE.md проверяется чтением исходников, и этим занимается
+        # scripts/check-spec.mjs. Он уезжает в пакет готовым — кодовому агенту
+        # остаётся прописать `check:spec` в package.json.
+        scripts_dir = game_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        check_script = scripts_dir / "check-spec.mjs"
+        check_script.write_text(CHECK_SPEC_MJS, encoding="utf-8")
+        ctx.generated_files.append(check_script)
+
         # 3. Generate game skills
         self.skill_gen.generate(ctx)
 
@@ -67,6 +81,9 @@ class OutputGenerator:
             f.write(prompt_content)
         ctx.generated_files.append(prompt_file)
         log_success(f"Master AI Developer Prompt compiled: [highlight]{prompt_file.name}[/highlight]")
+
+        # 5b. balance.yaml — числа игры как данные, а не как проза.
+        self._write_balance(ctx, game_dir)
 
         # 6. Serialize GAME_DATA.yaml
         yaml_file = game_dir / "GAME_DATA.yaml"
@@ -105,3 +122,66 @@ class OutputGenerator:
         log_success(f"Agent instructions & devlog prepared: [highlight]{sandbox.AGENTS_NAME}[/highlight]")
 
         return game_dir
+
+    @staticmethod
+    def _write_balance(ctx: GenerationContext, game_dir: Path) -> None:
+        """Числа механик — в файл, который игра импортирует.
+
+        Механики фабрики приходят с выверенными значениями: радиус подрыва
+        2.2 м, окно замедления 2.0 с, 32 осколка. До сих пор они существовали
+        только прозой в мастер-промпте — кодовый агент перепечатывал их в код
+        руками, и правка баланса становилась правкой кода. Здесь они
+        превращаются в данные: один файл, который игра читает на старте.
+
+        Значение хранится строкой ровно так, как его задал дизайнер («2.2 м»,
+        «0.65 с»): единица измерения — часть смысла, а разбор строки в число
+        дешевле, чем потерянная размерность."""
+        concept = ctx.concept
+        mechanics: Dict[str, Any] = {}
+        for deep in concept.core_design.mechanics:
+            if not deep.name or not deep.parameters:
+                continue
+            key = _slugify(deep.name)
+            mechanics[key] = {
+                "name": deep.name,
+                "parameters": {
+                    _slugify(param.name): {
+                        "value": param.value,
+                        "note": param.tuning_note,
+                    }
+                    for param in deep.parameters if param.name
+                },
+            }
+
+        payload = {
+            "_readme": (
+                "Числа этой игры. Код читает их отсюда и не содержит литералов: "
+                "правка баланса не должна быть правкой кода. Поле value хранит "
+                "значение с единицей измерения так, как его задал дизайнер; "
+                "note объясняет, что ломается при отклонении."
+            ),
+            "slug": concept.slug,
+            "performance": {
+                "target_fps": concept.tech_spec.target_fps,
+                "max_draw_calls": concept.tech_spec.max_draw_calls,
+                "max_triangles": concept.tech_spec.max_triangles_or_sprites,
+                "bundle_size_budget_mb": concept.tech_spec.bundle_size_budget_mb,
+            },
+            "session": {
+                "model": concept.session_model,
+                "win": concept.win_conditions,
+                "lose": concept.lose_conditions,
+                "difficulty_curve": concept.difficulty_curve,
+            },
+            "mechanics": mechanics,
+        }
+
+        balance_file = game_dir / "balance.yaml"
+        with open(balance_file, "w", encoding="utf-8") as handle:
+            yaml.dump(payload, handle, allow_unicode=True, sort_keys=False,
+                      default_flow_style=False)
+        ctx.generated_files.append(balance_file)
+        log_success(
+            f"Числа механик вынесены в данные: [highlight]balance.yaml[/highlight] "
+            f"({len(mechanics)} механик)"
+        )

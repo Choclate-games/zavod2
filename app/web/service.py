@@ -452,7 +452,7 @@ class FactoryService:
         game_dir = OutputGenerator().generate_package(ctx)
 
         self.update_progress(99, f"{tag}Validator: Валидация...")
-        OutputValidator().run_all(game_dir)
+        OutputValidator().run_all(game_dir, ctx.concept)
 
         sandbox.ensure_project_docs(game_dir, ctx.concept.title)
         session.finish(game_dir)

@@ -33,11 +33,31 @@ class SelfCritiqueAgent:
             concept.playgama.cloud_save_keys = [f"{concept.slug}_save_v1"]
             corrections.append("Injected missing Playgama cloud save key.")
 
-        # 3. Check Definition of Done
-        if not concept.definition_of_done or len(concept.definition_of_done) < 5:
-            issues_found.append("Definition of Done was incomplete.")
-            concept.definition_of_done = self._definition_of_done(concept)
-            corrections.append("Synthesized Definition of Done from this game's own loop and mechanics.")
+        # 3. Definition of Done.
+        #
+        # Раньше свой список фабрика подставляла только в пустое поле: стоило
+        # модели вернуть шесть строк вида «Playgama Bridge полностью
+        # интегрирован» — и все платформенные и интерфейсные критерии молча
+        # выпадали из пакета. Проверено на «Тактике Прорыва»: до мастер-промпта
+        # доехали ровно те шесть строк, ни одной проверяемой.
+        #
+        # Теперь пункты фабрики добавляются ВСЕГДА. Пункты модели — про эту
+        # игру, пункты фабрики — про площадку и интерфейс; они не заменяют друг
+        # друга и не конкурируют.
+        own = [item for item in concept.definition_of_done if str(item).strip()]
+        mandatory = self._definition_of_done(concept)
+        if not own:
+            issues_found.append("Definition of Done was empty.")
+        merged = list(own)
+        for item in mandatory:
+            if item not in merged:
+                merged.append(item)
+        if len(merged) != len(own):
+            corrections.append(
+                f"Дописано обязательных критериев приёмки: {len(merged) - len(own)} "
+                f"(платформа, интерфейс, производительность)."
+            )
+        concept.definition_of_done = merged
 
         # 4. Check Mobile ergonomics
         if not concept.mobile.safe_area_handling:

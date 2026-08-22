@@ -202,7 +202,7 @@ class Pipeline:
 
         # Run Validator Suite
         console.print("\n[step]▶ Running Package Validation Suite...[/step]")
-        self.validator.run_all(game_dir)
+        self.validator.run_all(game_dir, ctx.concept)
 
         log_success(f"\n🎉 Game specification package generated successfully at:\n[bold cyan]{game_dir.resolve()}[/bold cyan]")
         return game_dir
