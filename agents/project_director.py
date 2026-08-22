@@ -16,7 +16,6 @@ from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from app import anticliche, knowledge
 from app.context import GenerationContext
 from app.logging import log_agent
-from app.mechanics_repo import MechanicsRepository
 from app.models import DirectionOption, ProjectDirection
 from app.project_memory import recent_summary
 
@@ -86,17 +85,13 @@ class ProjectDirectorAgent:
 
     @staticmethod
     def _brief(ctx: GenerationContext) -> str:
-        # Каталог механик фабрики — здесь он работает на РАЗВЕДЕНИЕ вариантов:
-        # три направления получаются по-настоящему разными, когда каждое стоит
-        # на своей связке отполированных механик, а не на трёх декорациях одной.
-        repo = MechanicsRepository.get_instance()
-        catalog = repo.format_for_mixing(
-            repo.sample_for_mixing(ctx.raw_prompt, near=3, far=5)
-        )
+        # Каталога механик здесь нет намеренно. Список готовых связок сужает
+        # мышление до выбора из меню: модель перестаёт придумывать и начинает
+        # перебирать. Механики она сочиняет сама, а готовый код фабрики
+        # подставляется позже — на этапе реализации, когда уже известно, ЧТО
+        # реализуем (см. app/library.py).
         return (
             f"Идея пользователя (дословно): {ctx.raw_prompt}\n\n"
-            f"Отполированные механики каталога фабрики — материал для направлений:\n"
-            f"{catalog}\n\n"
             f"Недавно выпущенные проекты фабрики — их формулу повторять нельзя:\n"
             f"{recent_summary(ctx.output_base_dir)}\n\n"
             f"Индекс базы знаний фабрики (для knowledge_hints, пути только отсюда):\n"

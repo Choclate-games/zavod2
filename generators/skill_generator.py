@@ -38,23 +38,32 @@ class SkillGenerator:
             architecture = getattr(skill, "architecture", "Decoupled modular architecture.")
             guidance = getattr(skill, "implementation_guidance", "Follow standard project practices.")
 
-            # Embed the referenced knowledge verbatim. A skill that only summarises
-            # the knowledge base drifts from it; the coding agent needs the worked-out
-            # detail (and the traps) in the file it is actually reading.
+            # Раньше сюда вшивался полный текст каждого документа. От этого
+            # пакет распухал до трёхсот килобайт, причём девяносто из них были
+            # буквальными дублями: `ui_design_system.md` лежал и в UI_SKILL, и
+            # в PLAYGAMA_SKILL, `fps_controller_and_shooting.md` — в FPS_SKILL и
+            # в RENDERER_SKILL. Агент такой объём не читает, а пролистывает.
+            #
+            # Теперь скилл держит правила и адреса. Сам текст приезжает один
+            # раз в docs/ref/ по команде из шапки файла.
             refs = getattr(skill, "knowledge_refs", None) or []
             reference_md = ""
             if refs:
-                body = knowledge.bundle(refs, heading_level=2)
-                if body:
-                    sources = "\n".join(f"- `knowledge/{r}`" for r in refs)
-                    reference_md = (
-                        "\n\n## Reference Knowledge (verbatim, authoritative)\n"
-                        "Sourced from the factory knowledge base — these rules override any "
-                        "conflicting example, including snippets from the platform docs that "
-                        "describe the deprecated Bridge v1 contract.\n\n"
-                        f"{sources}\n\n{body}\n"
-                    )
-                    log_agent("SkillGenerator", f"Embedded {len(refs)} knowledge file(s) into {safe_filename}")
+                lines = []
+                for ref in refs:
+                    summary = knowledge.describe(ref)
+                    tail = f" — {summary}" if summary else ""
+                    lines.append(f"- `docs/ref/knowledge/{ref}`{tail}")
+                reference_md = (
+                    "\n\n## Справочник\n"
+                    "Полные тексты лежат не здесь, а в базе знаний фабрики. Один раз\n"
+                    "выполните `node scripts/fetch-knowledge.mjs` — файлы появятся по\n"
+                    "адресам ниже, и дальше работа идёт офлайн. Эти документы старше\n"
+                    "любого примера из интернета: где они расходятся с найденным\n"
+                    "сниппетом, правы они.\n\n"
+                    + "\n".join(lines) + "\n"
+                )
+                log_agent("SkillGenerator", f"{safe_filename}: {len(refs)} ссылок на базу")
 
             content = f"""# Skill: {name}
 

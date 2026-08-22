@@ -137,6 +137,44 @@ storage.length > 4
   ? fail('C5', 'localStorage используется вразнобой: сохранение должно идти через один сервис', storage)
   : pass('C5', 'Обращений к localStorage напрямую немного')
 
+/* ── F1: DESIGN.md написан ─────────────────────────────────────────────── */
+const DESIGN = join(ROOT, 'DESIGN.md')
+if (!existsSync(DESIGN)) {
+  fail('F1', 'Нет DESIGN.md — дизайн игры не описан (секция 7 мастер-промпта)')
+} else {
+  const design = readFileSync(DESIGN, 'utf8')
+  // Пять обязательных тем. Ищем по смыслу, а не по точным заголовкам: агент
+  // вправе назвать разделы по-своему, но пропустить их не вправе.
+  const topics = [
+    ['палитра', /палитр|palette|#[0-9a-fA-F]{6}/i],
+    ['камера', /камер|camera|FOV/i],
+    ['экраны', /экран|screen|меню|menu/i],
+    ['сцена за меню', /сцена за меню|фон меню|живая сцена|menu scene/i],
+  ]
+  const missing = topics.filter(([, re]) => !re.test(design)).map(([name]) => name)
+  if (design.trim().length < 400) {
+    fail('F1', `DESIGN.md слишком короткий (${design.trim().length} символов): это заготовка, а не дизайн`)
+  } else if (missing.length) {
+    fail('F1', `В DESIGN.md не раскрыты темы: ${missing.join(', ')}`)
+  } else {
+    pass('F1', 'DESIGN.md на месте и покрывает обязательные темы')
+  }
+}
+
+/* ── F2: решение по готовому коду записано ─────────────────────────────── */
+const DEVLOG = join(ROOT, 'DEVLOG.md')
+if (!existsSync(join(ROOT, 'LIBRARY.md'))) {
+  skip('F2', 'LIBRARY.md отсутствует — каталог готового кода не проверяется')
+} else if (!existsSync(DEVLOG)) {
+  fail('F2', 'Нет DEVLOG.md — решение по готовому коду фабрики нигде не записано')
+} else {
+  const devlog = readFileSync(DEVLOG, 'utf8')
+  const mentionsLibrary = /docs\/ref\/|knowledge-showcase|LIBRARY\.md|fetch-knowledge/.test(devlog)
+  mentionsLibrary
+    ? pass('F2', 'В DEVLOG.md записано, что взято из готового кода и что писалось с нуля')
+    : fail('F2', 'В DEVLOG.md нет ни строки о готовом коде фабрики: взял или не взял и почему')
+}
+
 /* ── вывод ─────────────────────────────────────────────────────────────── */
 const failed = results.filter((r) => r.ok === false)
 for (const r of results) {

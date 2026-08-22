@@ -49,6 +49,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from app.config import config
+
 from app.logging import log_warning
 from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
 from providers.base import AIProvider, T
@@ -214,6 +216,14 @@ class CodingCLIAgent(AIProvider):
 
     def prepare_env(self, env: Dict[str, str]) -> Dict[str, str]:
         """Окружение дочернего процесса — наследники могут его подчистить."""
+        # Токен доступа к базе знаний передаётся именно так — переменной
+        # окружения. В папке игры его быть не должно: она уезжает в git, и
+        # ключ уехал бы вместе с ней.
+        token = getattr(config, "knowledge_token", "")
+        if token:
+            env["ZAVOD_KNOWLEDGE_TOKEN"] = token
+        env.setdefault("KNOWLEDGE_REPO", getattr(config, "knowledge_repo", ""))
+        env.setdefault("KNOWLEDGE_REF", getattr(config, "knowledge_ref", "main"))
         return env
 
     def effort_args(self) -> List[str]:

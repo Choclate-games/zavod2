@@ -18,7 +18,7 @@ from agents.prompt_compiler import PromptCompilerAgent
 from agents.ux_designer import UXDesignerAgent
 from app import knowledge
 from app.context import GenerationContext
-from app.mechanics_repo import MechanicsRepository
+from app import library
 from app.models import (
     ArtSpec, GameConcept, KnowledgePlan, KnowledgeSelection, MechanicDeepSpec,
     MechanicParameter, MechanicSpec, SkillDoc,
@@ -122,36 +122,38 @@ def test_curator_prompt_names_the_axes():
     assert "ШИРОКИМ" in knowledge_curator.SYSTEM_PROMPT
 
 
-# --------------------------------------------------------------------------- каталог механик
+# --------------------------------------------------------------------------- каталог готового кода
 
-def test_catalog_offers_distant_domains_for_mixing():
-    """Ценность каталога не в том, что модель не придумает «выстрел» для шутера,
-    а в том, что он сводит в одну игру то, что рядом обычно не оказывается."""
-    repo = MechanicsRepository.get_instance()
-    picked = repo.sample_for_mixing("тактический штурм, разрушение стен, щит", near=3, far=3)
+def test_library_catalog_is_not_empty_and_marks_drop_in_modules():
+    """Каталог существует и отделяет то, что копируется, от того, что читается.
 
-    assert len(picked) >= 4
-    assert any(m.get("_distance") == "далёкая" for m in picked), "нужны механики из чужих доменов"
-    domains = [m.get("category") for m in picked]
-    assert len(set(domains)) == len(domains), "по одной механике из домена, иначе это один домен"
-
-
-def test_catalog_marks_mechanics_from_previous_runs():
-    repo = MechanicsRepository.get_instance()
-    text = repo.format_for_mixing([
-        {"name": "Своя механика", "category": "Главный двигатель темпа", "description": "—",
-         "_distance": "близкая"},
-    ])
-    assert "прошлого прогона" in text
+    Разница между «взял файл» и «разобрал чужой проект» — это часы работы, и
+    если каталог её не показывает, агент игнорирует обе категории одинаково."""
+    entries = library.load()
+    assert entries, "каталог готового кода пуст"
+    assert any(e.kind == library.KIND_DROP_IN for e in entries), "нет ни одного модуля без импортов"
+    assert all(e.title for e in entries), "модуль без описания в каталоге бесполезен"
 
 
-def test_category_never_becomes_a_sentence():
-    """Из-за роли механики в поле category каталог оброс категориями по одной
-    механике внутри, и выборка по доменам на них разваливалась."""
-    clean = MechanicsRepository._clean_category(
-        "Главный двигатель темпа, основной инструмент контроля пространства", genre="шутер")
-    assert clean == "шутер"
-    assert MechanicsRepository._clean_category("combat_melee") == "combat_melee"
+def test_library_finds_ragdoll_for_a_shooter():
+    """Именно этого не хватило в CQB: рэгдолл лежал написанным, а игра писала свой."""
+    found = library.match("шутер от первого лица, враги падают после попадания", limit=6)
+    ids = [e.id for e in found]
+    assert any("agdoll" in i for i in ids), f"рэгдолл не найден, нашлось: {ids}"
+
+
+def test_library_paths_are_repo_relative():
+    """Путь из каталога уходит прямо в адрес GitHub — абсолютный путь его сломает."""
+    for entry in library.load():
+        assert not entry.path.startswith("/"), entry.path
+        assert entry.path.startswith("workspace/"), entry.path
+
+
+def test_prompt_offers_ready_code_before_writing_from_scratch():
+    prompt = PromptCompilerAgent().compile(make_ctx(shooter_concept()))
+    assert "ГОТОВОЕ" in prompt
+    assert "fetch-knowledge.mjs" in prompt
+    assert "LIBRARY.md" in prompt, "полный каталог должен быть адресуем"
 
 
 # --------------------------------------------------------------------------- адреса и дубли
@@ -167,14 +169,18 @@ def test_knowledge_addresses_point_at_files_that_exist_in_the_package():
                                knowledge_refs=["ux/ui_design_system.md"])]
     block = PromptCompilerAgent._knowledge_block(concept)
 
-    assert "`skills/UI_SKILL.md`" in block
-    assert "`knowledge/ux/ui_design_system.md`" not in block
-    assert "не копируются в проект" in block
+    # Адрес должен быть тем, который в проекте открывается: путь `knowledge/...`
+    # существует только после загрузки и только под `docs/ref/`.
+    assert "`docs/ref/knowledge/ux/ui_design_system.md`" in block
+    assert "skills/UI_SKILL.md" in block, "скилл рядом даёт выжимку и чек-лист"
+    assert "fetch-knowledge.mjs" in block, "без команды загрузки адреса никуда не ведут"
 
 
-def test_platform_rules_are_not_a_third_copy():
-    """Раздел правил вклеивался целиком, хотя тот же текст лежал в скиллах
-    пакета, а раздел про интерфейс — ещё и в шестой секции этого же промпта."""
+def test_platform_rules_are_the_offline_minimum():
+    """Раздел правил — то, что работает даже если загрузка базы не удалась.
+
+    Скиллы держат ссылку, а не текст, поэтому выбрасывать отсюда «потому что
+    это есть в скилле» больше нельзя: там этого нет."""
     concept = shooter_concept()
     concept.skills = [
         SkillDoc(skill_id="ui", filename="UI_SKILL.md"),
@@ -182,20 +188,21 @@ def test_platform_rules_are_not_a_third_copy():
     ]
     block = PromptCompilerAgent._platform_rules_block(concept)
 
-    assert "Правила, вынесенные в скиллы проекта" in block
-    assert "`skills/UI_SKILL.md`" in block
-    # Playgama остаётся целиком: без него игра на площадке не стартует.
+    # Playgama и модерация — целиком: без них игра на площадке не стартует.
     assert "game_ready" in block
     assert "Boot & lifecycle" in block
-
-
-def test_rules_without_a_skill_stay_in_the_prompt():
-    """Правило, которого в пакете больше нигде нет, потерять нельзя."""
-    concept = shooter_concept()
-    concept.skills = []
-    block = PromptCompilerAgent._platform_rules_block(concept)
-    assert "Правила, вынесенные в скиллы проекта" not in block
+    # Интерфейс и тач тоже целиком: именно на них фабрика уже обжигалась.
     assert "Interface" in block
+    assert "Touch controls" in block
+
+
+def test_deferred_rules_keep_a_working_address():
+    """Инженерные разделы вынесены по адресу — но адрес обязан существовать."""
+    block = PromptCompilerAgent._platform_rules_block(shooter_concept())
+    assert "Разделы, которые открываются по месту" in block
+    assert "docs/ref/knowledge/CRITICAL_RULES.md" in block
+    for title in PromptCompilerAgent._RULES_BY_ADDRESS:
+        assert title in block, f"раздел {title} потерялся совсем"
 
 
 def test_mechanic_feedback_is_printed_once():

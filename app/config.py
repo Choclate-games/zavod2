@@ -44,7 +44,8 @@ class AppConfig:
         self.factory_cfg = load_yaml(CONFIG_DIR / "factory.yaml")
         self.models_cfg = load_yaml(CONFIG_DIR / "models.yaml")
         self.genres_cfg = load_yaml(CONFIG_DIR / "genres.yaml")
-        self.mechanics_cfg = load_yaml(CONFIG_DIR / "mechanics.yaml")
+        # mechanics_cfg убран вместе с каталогом на 1024 механики: механики
+        # придумывает модель, а готовый КОД подбирается по app/library.py.
         self.references_cfg = load_yaml(CONFIG_DIR / "references.yaml")
         self.playgama_cfg = load_yaml(CONFIG_DIR / "playgama.yaml")
         
@@ -96,6 +97,17 @@ class AppConfig:
         # providers/fish_audio.py.
         self.fish_audio_api_key = os.getenv("FISH_AUDIO_API_KEY", "")
         self.fish_audio_model = os.getenv("FISH_AUDIO_MODEL", "s2.1-pro-free")
+
+        # Доступ к базе знаний из готовой игры. Пакет игры носит манифест и
+        # скрипт загрузки, а не двести килобайт копий; токен нужен, только если
+        # репозиторий базы приватный.
+        #
+        # Ключ НИКОГДА не пишется в папку игры: она уезжает в git вместе со
+        # всем содержимым. Он живёт здесь и попадает к кодовому агенту через
+        # переменные окружения дочернего процесса.
+        self.knowledge_repo = os.getenv("KNOWLEDGE_REPO", "EdikN/zavod2")
+        self.knowledge_ref = os.getenv("KNOWLEDGE_REF", "main")
+        self.knowledge_token = os.getenv("ZAVOD_KNOWLEDGE_TOKEN", "")
 
         # Каждый запуск игры начинается «с чистого листа»: кеш сборщика сносится,
         # dev-сервер поднимается на новом порту (а значит, с пустым localStorage —

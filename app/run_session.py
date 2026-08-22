@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app import chat_store, project_meta
-from app.mechanics_repo import _slugify
+from app.slugs import _slugify
 from app.models import GameConcept, ProjectDirection
 
 RUN_DIRNAME = Path(".factory") / "run"

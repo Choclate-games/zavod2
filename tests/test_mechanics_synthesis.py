@@ -11,28 +11,6 @@ from agents.mechanics_architect import MechanicsArchitectAgent
 from agents.skill_generator import SkillGeneratorAgent
 from providers.local import LocalAIProvider
 
-def test_mechanics_catalog_contains_1000_entries():
-    """Проверяет, что каталог config/mechanics.yaml содержит более 1000 проработанных механик."""
-    mechanics_yaml_path = Path("config/mechanics.yaml")
-    assert mechanics_yaml_path.exists(), "config/mechanics.yaml must exist"
-    
-    data = yaml.safe_load(mechanics_yaml_path.read_text(encoding="utf-8"))
-    mechanics = data.get("mechanics", {})
-    
-    assert isinstance(mechanics, dict), "mechanics should be a dict of slug -> spec"
-    assert len(mechanics) >= 1000, f"Expected at least 1000 mechanics, got {len(mechanics)}"
-    
-    # Проверка обязательных полей для каждой механики
-    categories = set()
-    for slug, m in mechanics.items():
-        assert "name" in m and len(m["name"]) > 0, f"Mechanic {slug} missing name: {m}"
-        assert "category" in m, f"Mechanic {slug} missing category"
-        assert "description" in m, f"Mechanic {slug} missing description"
-        assert "strengths" in m and len(m["strengths"]) > 0, f"Mechanic {slug} missing strengths"
-        categories.add(m["category"])
-    
-    assert len(categories) >= 20, f"Expected at least 20 mechanic categories, found {len(categories)}"
-
 def test_mechanics_architect_autonomous_synthesis(tmp_path):
     """Проверяет автономный синтез уникальных механик архитектором под кулинарную тему."""
     ctx = GenerationContext(

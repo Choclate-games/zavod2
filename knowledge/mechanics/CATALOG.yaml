@@ -1,0 +1,1095 @@
+_readme: 'Готовый код стенда, доступный игре. Файл генерируется: python -m app.cli catalog. Правки вносите
+  в сами модули стенда, здесь они затрутся.'
+repo: EdikN/zavod2
+ref: main
+entries:
+- id: arcadeCar
+  path: workspace/knowledge-showcase/src/game/arcadeCar.ts
+  title: Аркадная модель машины — общая для игрока и соперников.
+  summary: 'knowledge/threejs/racing_track_and_opponents.md §3: бот управляется тем же `CarInput`, что
+    и игрок. Бот, которому пишут position напрямую, невозможно догнать, столкнуть или обогнать — гонка
+    исчезает.'
+  lines: 201
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/racing_track_and_opponents.md
+  exports:
+  - ArcadeCar
+  - CarInput
+  - CarTuning
+  - DEFAULT_TUNING
+  - DriftScorer
+  - SURFACES
+  - SurfaceId
+  - cornerSpeed
+- id: botDriver
+  path: workspace/knowledge-showcase/src/game/botDriver.ts
+  title: 'Водитель-бот: выдаёт ТОЛЬКО `CarInput` — тот же интерфейс, что у игрока.'
+  summary: 'knowledge/threejs/racing_track_and_opponents.md §3. Живёт отдельно от демо, чтобы прогоняться
+    головно (`npm run check:racing`): «бот проезжает 3 круга без вылетов» — это обычный тест, а не 10
+    минут смотрения в экран.'
+  lines: 49
+  kind: adapt
+  deps:
+  - ./arcadeCar
+  - ./raceTrack
+  - three
+  knowledge:
+  - knowledge/threejs/racing_track_and_opponents.md
+  exports:
+  - BotState
+  - driveBot
+- id: fightAnimStates
+  path: workspace/knowledge-showcase/src/game/fightAnimStates.ts
+  title: 'Список анимаций бойца в одном месте: чем вызывается и сколько длится.'
+  summary: 'Отсюда его берут двое, и это главное свойство файла: **витрина** (`animViewer.ts`, снимается
+    Playwright) и **генератор библиотеки** (`scripts/make-proc-anim.ts`, пишет клипы в `assets/proc_anim/`).
+    Если бы список был у каждого свой, картинка «всё нормально» относилась бы к одному набору поз, а в
+    игру и в библиотеку уезжал бы другой.'
+  lines: 131
+  kind: drop-in
+  deps: []
+  knowledge: []
+  exports:
+  - AnimDriver
+  - AnimFighter
+  - AnimState
+  - FIGHT_ANIM_STATES
+  - ForceHook
+- id: fightingMoves
+  path: workspace/knowledge-showcase/src/game/fightingMoves.ts
+  title: 'Фрейм-дата: единственный источник баланса файтинга.'
+  summary: 'knowledge/threejs/fighting_game_core.md §1. Модуль намеренно НЕ импортирует three: он проверяется
+    головно (`npx tsx scripts/fighting-check.ts`) без рендерера — так же, как спецификация транспорта
+    (CRITICAL_RULES §66).'
+  lines: 412
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/fighting_game_core.md
+  exports:
+  - BoxSpec
+  - Defense
+  - Hand
+  - Height
+  - Limb
+  - MOVES
+  - Move
+  - MoveId
+- id: flowField
+  path: workspace/knowledge-showcase/src/game/flowField.ts
+  title: Флоу-филд и строй для RTS.
+  summary: 'knowledge/threejs/rts_selection_and_command.md §4-5. Это ровно тот случай, где своя реализация
+    уместна: recast `Crowd` не рассчитан на сотни агентов с ОДНОЙ целью, а флоу-филд для этой задачи —
+    один проход BFS и 60 строк. Индивидуальный A* на каждого юнита не пишем никогда.'
+  lines: 283
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/rts_selection_and_command.md
+  exports:
+  - FlowField
+  - UnitClass
+  - Vec2
+  - assignSlots
+  - damageMultiplier
+  - formationSlots
+- id: fluidPhysics
+  path: workspace/knowledge-showcase/src/game/fluidPhysics.ts
+  title: Fluid Buoyancy, Mining Drill & Physics Destruction logic module.
+  summary: Pure TS, independent of Three.js. Implements mechanics from knowledge/mechanics/fluid_buoyancy.md,
+    knowledge/mechanics/physics_destruction.md, and knowledge/mechanics/mining_drill.md.
+  lines: 244
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/fluid_buoyancy.md
+  - knowledge/mechanics/mining_drill.md
+  - knowledge/mechanics/physics_destruction.md
+  exports:
+  - DEFAULT_WAVE_PARAMS
+  - DebrisParticle
+  - DebrisPool
+  - GRAVITY
+  - MiningDrill
+  - ROCK_DEFS
+  - RockDef
+  - RockType
+- id: gridBuilding
+  path: workspace/knowledge-showcase/src/game/gridBuilding.ts
+  title: Grid & Base Building logic module (pure TS, independent of Three.js)
+  summary: Implements mechanics from knowledge/mechanics/grid_building.md, knowledge/mechanics/base_building.md,
+    and knowledge/patterns/builder_defense_loop.md.
+  lines: 383
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/base_building.md
+  - knowledge/mechanics/grid_building.md
+  - knowledge/patterns/builder_defense_loop.md
+  exports:
+  - BaseBuildingSystem
+  - CELL_SIZE
+  - EnemyUnit
+  - PYLON_LINK_RADIUS
+  - PlacedStructure
+  - STRUCTURE_DEFS
+  - StructureDef
+  - StructureType
+- id: meleeCombat
+  path: workspace/knowledge-showcase/src/game/meleeCombat.ts
+  title: 'Ближний бой: комбо-цепочка, окна отмены, парирование, hit-stop.'
+  summary: Модуль не знает ни про Three.js, ни про Rapier — только кадры и числа. Поэтому вся боёвка проверяется
+    головно (`npm run check:melee`), а не «на глаз в браузере», где рассинхрон на два кадра не видно.
+  lines: 330
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/frame_data_combat.md
+  exports:
+  - BLOCK_CHIP
+  - COMBO
+  - COMBO_LINGER
+  - ENEMY_SWING
+  - INPUT_BUFFER
+  - MeleeFighter
+  - MeleeState
+  - PARRY
+- id: ortho2dEvidence
+  path: workspace/knowledge-showcase/src/game/ortho2dEvidence.ts
+  title: Orthographic 2D, Swipe Slicer & Evidence Board Deduction Graph logic.
+  summary: Pure TS, independent of Three.js. Implements knowledge/threejs/orthographic_2d_and_pointer_input.md
+    and knowledge/mechanics/evidence_board.md.
+  lines: 184
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/evidence_board.md
+  - knowledge/threejs/orthographic_2d_and_pointer_input.md
+  exports:
+  - ClueNode
+  - EvidenceGraphSystem
+  - EvidenceLink
+  - OrthoBounds
+  - Vec2D
+  - WORLD_HEIGHT
+  - computeOrthoBounds
+  - evaluateQuadraticBezier
+- id: proceduralMesh
+  path: workspace/knowledge-showcase/src/game/proceduralMesh.ts
+  title: Procedural 3D Mesh generator specifications, animator math & benchmark calculations.
+  summary: Pure TS module (independent of Three.js). Implements knowledge/threejs/procedural_mesh_builder.md.
+  lines: 118
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/procedural_mesh_builder.md
+  exports:
+  - LimbRotations
+  - PROCEDURAL_CATALOG
+  - ProceduralAssetDef
+  - benchmarkGeneration
+  - computeWalkAngles
+  - generateBoxData
+- id: raceTrack
+  path: workspace/knowledge-showcase/src/game/raceTrack.ts
+  title: 'Трасса: одна кривая — один источник истины.'
+  summary: knowledge/threejs/racing_track_and_opponents.md §1-2. Из кривой выводятся полотно, отбойники,
+    чекпойнты, гоночная линия, стартовая решётка, респавн и миникарта. Трасса из отдельных повёрнутых
+    сегментов даёт уступ на каждом стыке (CRITICAL_RULES §64), а восстановление после вылета становится
+    нерешаемой задачей.
+  lines: 208
+  kind: three
+  deps:
+  - three
+  knowledge:
+  - knowledge/threejs/racing_track_and_opponents.md
+  exports:
+  - CHECKPOINTS
+  - RaceTrack
+  - TrackSample
+  - defaultTrackPoints
+- id: rhythmAudio
+  path: workspace/knowledge-showcase/src/game/rhythmAudio.ts
+  title: Web Audio Timing, Rhythm Beat Sync & Muting Logic.
+  summary: Pure TS, independent of Three.js. Implements knowledge/audio/procedural_sound_synthesizer.md,
+    knowledge/audio/web_audio_and_muting.md, and knowledge/mechanics/rhythm_sync.md.
+  lines: 80
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/audio/procedural_sound_synthesizer.md
+  - knowledge/audio/web_audio_and_muting.md
+  - knowledge/mechanics/rhythm_sync.md
+  exports:
+  - GOOD_WINDOW
+  - HitRating
+  - HitResult
+  - MuteState
+  - PERFECT_WINDOW
+  - computeBeat
+  - computeEffectiveVolume
+  - evaluateRhythmHit
+- id: stealthSensing
+  path: workspace/knowledge-showcase/src/game/stealthSensing.ts
+  title: 'Стелс: конус зрения, шкала подозрения, шум.'
+  summary: 'Модуль не знает про Three.js — только математика и состояния, поэтому вся механика обнаружения
+    проверяется головно (`npm run check:stealth`). Именно здесь живут числа, из-за которых стелс ощущается
+    честным или нечестным: сколько секунд до тревоги, насколько помогает тень, слышно ли бег.'
+  lines: 145
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/stealth_detection.md
+  - knowledge/threejs/stealth_and_vision_cones.md
+  exports:
+  - GuardState
+  - NOISE
+  - SHADOW_FACTOR
+  - SuspicionGauge
+  - VISION
+  - inVisionCone
+  - isAudible
+  - raycastBudget
+- id: survivorRun
+  path: workspace/knowledge-showcase/src/game/survivorRun.ts
+  title: 'Забег в survivor-игре: кривая опыта, карточки апгрейдов, эскалация орды.'
+  summary: 'Модуль не знает про Three.js и про bitECS — это чистые числа, поэтому весь баланс проверяется
+    головно (`npm run check:survivor`). Именно здесь живут решения, которые «на глаз» не проверяются вообще:
+    успевает ли игрок убивать орду на пятой минуте и не ломается ли пул карточек, когда всё выкачано.'
+  lines: 279
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/mechanics/upgrade_choices.md
+  - knowledge/mechanics/wave_survival.md
+  - knowledge/patterns/survivor_loop.md
+  exports:
+  - BASE_STATS
+  - HordeBudget
+  - Rarity
+  - RunState
+  - RunStats
+  - UPGRADES
+  - UpgradeCard
+  - hordeAt
+- id: towerDefense
+  path: workspace/knowledge-showcase/src/game/towerDefense.ts
+  title: 'Tower defense: контракт волн, приоритет целей, экономика.'
+  summary: 'knowledge/threejs/tower_defense_core.md §2, §4, §5. Модуль renderer-free и проверяется головно
+    (`npm run check:td`): «волна 12 непроходима» ловится за секунды вместо получаса ручной игры.'
+  lines: 225
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/tower_defense_core.md
+  exports:
+  - ENEMIES
+  - EnemyKind
+  - EnemySpec
+  - PRIORITIES
+  - Priority
+  - SELL_RATIO
+  - START_GOLD
+  - START_LIVES
+- id: vfxJuice
+  path: workspace/knowledge-showcase/src/game/vfxJuice.ts
+  title: Instanced Particle VFX Pool & Camera Trauma Juice logic.
+  summary: Pure TS, independent of Three.js. Implements knowledge/threejs/juice_and_vfx_pool.md.
+  lines: 254
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/threejs/juice_and_vfx_pool.md
+  exports:
+  - CameraTraumaSystem
+  - ParticlePoolSystem
+  - ParticlePreset
+  - ParticleState
+- id: RacingTrack3D
+  path: workspace/knowledge-showcase/src/world/RacingTrack3D.ts
+  title: RacingTrack3D (world) — экспортирует CHECKPOINTS, RacingTrack3D, TrackSample3D, defaultProTrackPoints
+  summary: ''
+  lines: 865
+  kind: adapt
+  deps:
+  - ../physics/PhysicsWorld
+  - three
+  knowledge: []
+  exports:
+  - CHECKPOINTS
+  - RacingTrack3D
+  - TrackSample3D
+  - defaultProTrackPoints
+  - defaultTrack3DPoints
+- id: RoadGenerator
+  path: workspace/knowledge-showcase/src/world/RoadGenerator.ts
+  title: RoadGenerator (world) — экспортирует RoadGenerator
+  summary: ''
+  lines: 610
+  kind: adapt
+  deps:
+  - ../physics/PhysicsWorld
+  - ../rendering/SceneManager
+  - ./levels
+  - ./terrain
+  - three
+  knowledge: []
+  exports:
+  - RoadGenerator
+- id: assetBytes
+  path: workspace/knowledge-showcase/src/world/assetBytes.ts
+  title: Чтение файла из `public/` одинаково в браузере и в головной проверке.
+  summary: '`scripts/*-check.ts` гоняют демо без DOM и без WebGL (`CRITICAL_RULES` §66), но модель и клипы
+    им нужны настоящие: подсунь заглушку — и проверка начнёт мерить риг, которого в игре нет.'
+  lines: 20
+  kind: drop-in
+  deps: []
+  knowledge: []
+  exports: []
+- id: boxerRagdoll
+  path: workspace/knowledge-showcase/src/world/boxerRagdoll.ts
+  title: Рэгдолл ИЗ САМОГО ПЕРСОНАЖА, а не из капсул-заменителей.
+  summary: '`world/ragdoll.ts` (слэшер) строит труп из семи капсул и прячет живую модель — для толпы врагов
+    это правильно и дёшево. В файтинге бойцов ровно двое и камера смотрит им в лицо: подмена на капсулы
+    в момент нокдауна — самый заметный обман в кадре. Поэтому здесь физике отдаются настоящие подграфы
+    рига: голова с лицом, грудь с рёбрами, руки в перчатках.'
+  lines: 408
+  kind: adapt
+  deps:
+  - ./boxerRig
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - BoxerRagdoll
+  - BoxerRagdollOptions
+- id: boxerRig
+  path: workspace/knowledge-showcase/src/world/boxerRig.ts
+  title: 'Процедурный боксёр: сегментированный позвоночник, лицо, перчатки, износ.'
+  summary: 'Референс подхода — проект PunchBox (`src/entities/Boxer.js`): персонаж собирается из боксов
+    кодом, без .gltf, но читается как человек, а не как стопка кубиков. Четыре вещи, которые дают это
+    ощущение:'
+  lines: 543
+  kind: three
+  deps:
+  - three
+  knowledge: []
+  exports:
+  - BOXER_BODY_Y
+  - BOXER_HEAD_Y
+  - BOXER_HEIGHT
+  - BoxerOptions
+  - BoxerRig
+  - ELBOW
+  - KNEE
+  - PoseDefaults
+- id: bvhLevel
+  path: workspace/knowledge-showcase/src/world/bvhLevel.ts
+  title: Процедурный «каньон» — намеренно тяжёлая статичная геометрия для BVH-демо.
+  summary: 'knowledge/stack/three_mesh_bvh.md §1: вся статика сливается в ОДИН меш, и BVH строится по
+    нему. Отдельный BVH на каждый камень смысла не имеет — рейкаст всё равно перебирает объекты.'
+  lines: 90
+  kind: adapt
+  deps:
+  - three
+  - three/examples/jsm/utils/BufferGeometryUtils.js
+  knowledge:
+  - knowledge/stack/three_mesh_bvh.md
+  exports:
+  - buildCanyon
+  - mulberry32
+- id: carRig
+  path: workspace/knowledge-showcase/src/world/carRig.ts
+  title: 'Процедурный low-poly болид. Никаких .gltf: вся геометрия — код.'
+  summary: Колёса — дети кузова (CRITICAL_RULES §61). Здесь машина кинематическая, так что вращение колёс
+    декоративное; у физической машины углы читаются из контроллера — см. knowledge/threejs/vehicle_wheel_rig.md
+    §3.
+  lines: 72
+  kind: three
+  deps:
+  - three
+  knowledge:
+  - knowledge/threejs/vehicle_wheel_rig.md
+  exports:
+  - buildCarMesh
+- id: fightClips
+  path: workspace/knowledge-showcase/src/world/fightClips.ts
+  title: 'Мокап поверх позы-цели: клипы из `assets/fight_anim/`, запечённые в'
+  summary: повороты драйверов рига (`scripts/bake-fight-anim.ts`).
+  lines: 222
+  kind: adapt
+  deps:
+  - ./assetBytes
+  - ./boxerRig
+  - three
+  knowledge: []
+  exports:
+  - ClipUse
+  - FightClip
+  - FightClips
+  - HIT_CLIPS
+  - MOVE_CLIPS
+  - STATE_CLIPS
+  - applyFightClip
+- id: fighterRig
+  path: workspace/knowledge-showcase/src/world/fighterRig.ts
+  title: fighterRig (world) — экспортирует FighterRig, buildFighter
+  summary: ''
+  lines: 95
+  kind: three
+  deps:
+  - three
+  knowledge: []
+  exports:
+  - FighterRig
+  - buildFighter
+- id: levels
+  path: workspace/knowledge-showcase/src/world/levels.ts
+  title: levels (world) — экспортирует ForkConfig, LEVELS, LevelConfig, MudZoneConfig
+  summary: ''
+  lines: 2030
+  kind: adapt
+  deps:
+  - ../core/types
+  knowledge: []
+  exports:
+  - ForkConfig
+  - LEVELS
+  - LevelConfig
+  - MudZoneConfig
+  - WaterZoneConfig
+  - getLevelConfig
+- id: mixamoRig
+  path: workspace/knowledge-showcase/src/world/mixamoRig.ts
+  title: mixamoRig (world) — экспортирует BONES, BOXER_MODELS, MixamoBoxerOptions, buildMixamoBoxer
+  summary: ''
+  lines: 493
+  kind: adapt
+  deps:
+  - ./assetBytes
+  - ./boxerRig
+  - three
+  - three/examples/jsm/loaders/FBXLoader.js
+  - three/examples/jsm/utils/SkeletonUtils.js
+  knowledge: []
+  exports:
+  - BONES
+  - BOXER_MODELS
+  - MixamoBoxerOptions
+  - buildMixamoBoxer
+  - insertJoint
+  - loadBoxerModel
+- id: ragdoll
+  path: workspace/knowledge-showcase/src/world/ragdoll.ts
+  title: 'Рэгдолл на Rapier: семь тел, шесть сферических суставов.'
+  summary: 'knowledge/mechanics/ragdoll.md. Ключевая мысль: рэгдолл заменяет труп, а не живого врага.
+    Пока враг жив, им управляет боевой автомат состояний (`game/meleeCombat.ts`) с предсказуемыми кадрами;
+    физика включается ровно в момент смерти и получает импульс от последнего удара. Гибридный «активный
+    рэгдолл» с PD-контроллерами на каждом суставе — отдельная задача, и на мобильном он стоит кадра.'
+  lines: 214
+  kind: adapt
+  deps:
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge:
+  - knowledge/mechanics/ragdoll.md
+  exports:
+  - Ragdoll
+  - RagdollOptions
+- id: shooterAnimData
+  path: workspace/knowledge-showcase/src/world/shooterAnimData.ts
+  title: shooterAnimData (world) — экспортирует SHOOTER_ANIM
+  summary: ''
+  lines: 278
+  kind: adapt
+  deps:
+  - ./shooterAnimTypes
+  knowledge: []
+  exports:
+  - SHOOTER_ANIM
+- id: shooterAnimTypes
+  path: workspace/knowledge-showcase/src/world/shooterAnimTypes.ts
+  title: Формат процедурной анимации стрелка.
+  summary: 'Отдельный файл, потому что его читают обе стороны: скрипт запекания (`scripts/bake-shooter-anim.ts`)
+    и рантайм (`shooterPose.ts`). Сгенерированный `shooterAnimData.ts` импортирует типы отсюда — так формат
+    остаётся одним и тем же для того, кто пишет числа, и для того, кто их читает.'
+  lines: 70
+  kind: drop-in
+  deps: []
+  knowledge: []
+  exports:
+  - CycleClip
+  - JOINTS
+  - JointKey
+  - POSE_SIZE
+  - PoseClip
+  - ShooterAnimData
+- id: shooterPose
+  path: workspace/knowledge-showcase/src/world/shooterPose.ts
+  title: Проигрыватель процедурной анимации стрелка.
+  summary: 'Никакого `AnimationMixer`: поза собирается из чисел, снятых с мокапа (`scripts/bake-shooter-anim.ts`),
+    четырьмя слоями поверх друг друга.'
+  lines: 303
+  kind: adapt
+  deps:
+  - ./shooterAnimData
+  - ./shooterAnimTypes
+  - ./shooterRig
+  - three
+  knowledge: []
+  exports:
+  - HitZone
+  - LocoCycle
+  - LocoInput
+  - SHOOTER_DURATIONS
+  - ShooterAnimState
+  - aimShooterAt
+  - calibrateAim
+  - createShooterAnim
+- id: shooterRagdoll
+  path: workspace/knowledge-showcase/src/world/shooterRagdoll.ts
+  title: 'Рэгдолл трупа БЕЗ физического движка: точки, связки, верле.'
+  summary: 'В стенде уже два рэгдолла на Rapier — `ragdoll.ts` (капсулы вместо модели) и `boxerRagdoll.ts`
+    (тела из самих костей). Оба правильные, и оба здесь не подходят: во вкладке FPS физического мира нет
+    вообще, а заводить его ради падающих трупов — это лишний wasm, асинхронная инициализация и полтора
+    десятка тел на каждого из семи врагов.'
+  lines: 395
+  kind: adapt
+  deps:
+  - ./shooterRig
+  - three
+  knowledge: []
+  exports:
+  - DroppedProp
+  - RagdollSolid
+  - ShooterRagdoll
+  - ShooterRagdollOptions
+- id: shooterRig
+  path: workspace/knowledge-showcase/src/world/shooterRig.ts
+  title: Скиненный стрелок (Mixamo X Bot / Y Bot) с драйверами суставов.
+  summary: 'От `buildMixamoBoxer` отличается снаряжением и позой покоя, а машинерия суставов — та же и
+    живёт в `mixamoRig.ts`: между родителем и костью вставляются `pivot` (гасит мировой поворот родителя)
+    и `driver` (его крутит анимация). После этого `driver.rotation` означает поворот в осях персонажа,
+    и в него ложатся числа, снятые с мокапа (`scripts/bake-shooter-anim.ts`).'
+  lines: 306
+  kind: adapt
+  deps:
+  - ./mixamoRig
+  - ./shooterAnimTypes
+  - three
+  - three/examples/jsm/utils/SkeletonUtils.js
+  knowledge: []
+  exports:
+  - ShooterRig
+  - ShooterRigOptions
+  - buildShooterRig
+- id: terrain
+  path: workspace/knowledge-showcase/src/world/terrain.ts
+  title: Terrain shape and geometry, free of renderer dependency, so the exact same buffers
+  summary: can be built in a head-less physics harness as in the game.
+  lines: 396
+  kind: adapt
+  deps:
+  - ./levels
+  - three
+  knowledge: []
+  exports:
+  - ActiveForkInfo
+  - RoadProximity
+  - TERRAIN
+  - buildTerrainGeometry
+  - getActiveFork
+  - getActiveLevel
+  - getMudIntensity
+  - getRoadProximity
+- id: InputHub
+  path: workspace/knowledge-showcase/src/input/InputHub.ts
+  title: InputHub (input) — экспортирует InputHub, PointerSample
+  summary: ''
+  lines: 258
+  kind: adapt
+  deps:
+  - ../core/types
+  - ./InputManager
+  - three
+  knowledge: []
+  exports:
+  - InputHub
+  - PointerSample
+- id: InputManager
+  path: workspace/knowledge-showcase/src/input/InputManager.ts
+  title: InputManager (input) — экспортирует InputManager
+  summary: ''
+  lines: 53
+  kind: adapt
+  deps:
+  - ../core/types
+  - ./TouchControls
+  knowledge: []
+  exports:
+  - InputManager
+- id: TouchControls
+  path: workspace/knowledge-showcase/src/input/TouchControls.ts
+  title: TouchControls (input) — экспортирует TouchControls
+  summary: ''
+  lines: 138
+  kind: drop-in
+  deps: []
+  knowledge: []
+  exports:
+  - TouchControls
+- id: PhysicsWorld
+  path: workspace/knowledge-showcase/src/physics/PhysicsWorld.ts
+  title: PhysicsWorld (physics) — экспортирует CARGO_GROUPS, GROUND_GROUPS, GROUP_CARGO, GROUP_GROUND
+  summary: ''
+  lines: 338
+  kind: adapt
+  deps:
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - CARGO_GROUPS
+  - GROUND_GROUPS
+  - GROUP_CARGO
+  - GROUP_GROUND
+  - GROUP_VEHICLE
+  - PhysicsWorld
+  - VEHICLE_GROUPS
+  - WHEEL_RAY_GROUPS
+- id: ParticleSystem
+  path: workspace/knowledge-showcase/src/rendering/ParticleSystem.ts
+  title: ParticleSystem (rendering) — экспортирует ParticleKind, ParticleSystem
+  summary: ''
+  lines: 724
+  kind: adapt
+  deps:
+  - ../world/RoadGenerator
+  - ./SceneManager
+  - three
+  knowledge: []
+  exports:
+  - ParticleKind
+  - ParticleSystem
+- id: RacingVFX
+  path: workspace/knowledge-showcase/src/rendering/RacingVFX.ts
+  title: RacingVFX (rendering) — экспортирует RacingVFX
+  summary: ''
+  lines: 291
+  kind: three
+  deps:
+  - three
+  knowledge: []
+  exports:
+  - RacingVFX
+- id: SceneManager
+  path: workspace/knowledge-showcase/src/rendering/SceneManager.ts
+  title: SceneManager (rendering) — экспортирует SceneManager
+  summary: ''
+  lines: 297
+  kind: three
+  deps:
+  - three
+  knowledge: []
+  exports:
+  - SceneManager
+- id: TireTracksManager
+  path: workspace/knowledge-showcase/src/rendering/TireTracksManager.ts
+  title: TireTracksManager (rendering) — экспортирует TireTracksManager
+  summary: ''
+  lines: 478
+  kind: adapt
+  deps:
+  - ../world/RoadGenerator
+  - ./SceneManager
+  - three
+  knowledge: []
+  exports:
+  - TireTracksManager
+- id: CargoManager
+  path: workspace/knowledge-showcase/src/vehicle/CargoManager.ts
+  title: CargoManager (vehicle) — экспортирует CargoManager
+  summary: ''
+  lines: 314
+  kind: adapt
+  deps:
+  - ../core/EventBus
+  - ../core/types
+  - ../physics/PhysicsWorld
+  - ../rendering/SceneManager
+  - ../world/RoadGenerator
+  - ./TruckController
+  - ./truckSpec
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - CargoManager
+- id: RacingCarController
+  path: workspace/knowledge-showcase/src/vehicle/RacingCarController.ts
+  title: RacingCarController (vehicle) — экспортирует DEFAULT_SPORTS_SPEC, RacingCarController, RacingCarInput,
+    RacingCarSpec
+  summary: ''
+  lines: 460
+  kind: adapt
+  deps:
+  - ../physics/PhysicsWorld
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - DEFAULT_SPORTS_SPEC
+  - RacingCarController
+  - RacingCarInput
+  - RacingCarSpec
+- id: TruckController
+  path: workspace/knowledge-showcase/src/vehicle/TruckController.ts
+  title: TruckController (vehicle) — экспортирует TruckController
+  summary: ''
+  lines: 1506
+  kind: adapt
+  deps:
+  - ../core/types
+  - ../physics/PhysicsWorld
+  - ../rendering/ParticleSystem
+  - ../rendering/SceneManager
+  - ../rendering/TireTracksManager
+  - ../world/RoadGenerator
+  - ./truckSpec
+  - '@dimforge/rapier3d-compat'
+  - three
+  - three/examples/jsm/utils/BufferGeometryUtils.js
+  knowledge: []
+  exports:
+  - TruckController
+- id: truckSpec
+  path: workspace/knowledge-showcase/src/vehicle/truckSpec.ts
+  title: Single source of truth for the trucks' dimensions, handling and cargo packages.
+  summary: 'Chassis-local axes: +X right, +Y up, +Z forward. The cabin sits at +Z, the bed at -Z, and
+    the route runs from the village towards +Z.'
+  lines: 584
+  kind: adapt
+  deps:
+  - ../core/types
+  knowledge: []
+  exports:
+  - BED
+  - BRAKE
+  - BURNOUT
+  - CABIN
+  - CARGO
+  - CARGO_PACKAGES
+  - CARGO_SLOTS
+  - CARGO_SPECS
+- id: bvhSetup
+  path: workspace/knowledge-showcase/src/stack/bvhSetup.ts
+  title: Установка расширений three-mesh-bvh — ОДИН раз на приложение.
+  summary: 'knowledge/stack/three_mesh_bvh.md §1. Модуль существует отдельно намеренно: если ставить расширения
+    внутри какого-то одного демо, остальные начинают зависеть от того, был ли тот модуль загружен. В браузере
+    это «работает» (реестр вкладок импортирует всё), а в головном прогоне падает с `computeBoundsTree
+    is not a function` — что и случилось на самом деле.'
+  lines: 28
+  kind: adapt
+  deps:
+  - three
+  - three-mesh-bvh
+  knowledge:
+  - knowledge/stack/three_mesh_bvh.md
+  exports:
+  - installBvh
+- id: AudioManager
+  path: workspace/knowledge-showcase/src/audio/AudioManager.ts
+  title: 'Web Audio: Procedural Sound Synthesizer & Analyser (Zero MP3 files)'
+  summary: Authoritative implementation based on knowledge/audio/procedural_sound_synthesizer.md
+  lines: 530
+  kind: drop-in
+  deps: []
+  knowledge:
+  - knowledge/audio/procedural_sound_synthesizer.md
+  exports:
+  - AudioManager
+- id: AudioRhythmDemo
+  path: workspace/knowledge-showcase/src/demos/AudioRhythmDemo.ts
+  title: 'Демо AudioRhythm: как rhythmAudio собирается в живую сцену'
+  summary: ''
+  lines: 283
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/rhythmAudio
+  - three
+  knowledge: []
+  exports:
+  - AudioRhythmDemo
+- id: BuildingDemo
+  path: workspace/knowledge-showcase/src/demos/BuildingDemo.ts
+  title: 'Демо Building: как gridBuilding собирается в живую сцену'
+  summary: ''
+  lines: 548
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/gridBuilding
+  - three
+  knowledge: []
+  exports:
+  - BuildingDemo
+- id: BuoyancyDemo
+  path: workspace/knowledge-showcase/src/demos/BuoyancyDemo.ts
+  title: 'Демо Buoyancy: как fluidPhysics собирается в живую сцену'
+  summary: ''
+  lines: 457
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/fluidPhysics
+  - three
+  knowledge: []
+  exports:
+  - BuoyancyDemo
+- id: BvhDemo
+  path: workspace/knowledge-showcase/src/demos/BvhDemo.ts
+  title: 'Демо Bvh: как bvhLevel собирается в живую сцену'
+  summary: ''
+  lines: 305
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../stack/bvhSetup
+  - ../world/bvhLevel
+  - three
+  - three-mesh-bvh
+  knowledge: []
+  exports:
+  - BvhDemo
+- id: FightingDemo
+  path: workspace/knowledge-showcase/src/demos/FightingDemo.ts
+  title: 'Демо Fighting: как boxerRagdoll, boxerRig, fightClips, fightingMoves, mixamoRig собирается в
+    живую сцену'
+  summary: ''
+  lines: 2129
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/fightingMoves
+  - ../world/boxerRagdoll
+  - ../world/boxerRig
+  - ../world/fightClips
+  - ../world/mixamoRig
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - FightingDemo
+- id: FpsDemo
+  path: workspace/knowledge-showcase/src/demos/FpsDemo.ts
+  title: 'Демо Fps: как bvhLevel, mixamoRig, shooterPose, shooterRagdoll, shooterRig, vfxJuice собирается
+    в живую сцену'
+  summary: ''
+  lines: 1995
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/vfxJuice
+  - ../stack/bvhSetup
+  - ../world/bvhLevel
+  - ../world/mixamoRig
+  - ../world/shooterPose
+  - ../world/shooterRagdoll
+  - ../world/shooterRig
+  - postprocessing
+  - three
+  - three/examples/jsm/environments/RoomEnvironment.js
+  - three/examples/jsm/utils/BufferGeometryUtils.js
+  knowledge: []
+  exports:
+  - FpsDemo
+- id: MeleeDemo
+  path: workspace/knowledge-showcase/src/demos/MeleeDemo.ts
+  title: 'Демо Melee: как fighterRig, meleeCombat, ragdoll собирается в живую сцену'
+  summary: ''
+  lines: 546
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/meleeCombat
+  - ../world/fighterRig
+  - ../world/ragdoll
+  - '@dimforge/rapier3d-compat'
+  - three
+  knowledge: []
+  exports:
+  - MeleeDemo
+- id: Ortho2dDemo
+  path: workspace/knowledge-showcase/src/demos/Ortho2dDemo.ts
+  title: 'Демо Ortho2d: как ortho2dEvidence собирается в живую сцену'
+  summary: ''
+  lines: 472
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/ortho2dEvidence
+  - three
+  knowledge: []
+  exports:
+  - Ortho2dDemo
+- id: PostFxDemo
+  path: workspace/knowledge-showcase/src/demos/PostFxDemo.ts
+  title: 'Демо PostFx: собранная сцена целиком — образец подключения'
+  summary: ''
+  lines: 236
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - postprocessing
+  - three
+  knowledge: []
+  exports:
+  - PostFxDemo
+- id: Procedural3dDemo
+  path: workspace/knowledge-showcase/src/demos/Procedural3dDemo.ts
+  title: 'Демо Procedural3d: как proceduralMesh собирается в живую сцену'
+  summary: ''
+  lines: 438
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/proceduralMesh
+  - three
+  knowledge: []
+  exports:
+  - Procedural3dDemo
+  - ProceduralMeshFactory
+- id: RacingDemo
+  path: workspace/knowledge-showcase/src/demos/RacingDemo.ts
+  title: 'Демо Racing: как RacingCarController, RacingTrack3D собирается в живую сцену'
+  summary: ''
+  lines: 545
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../physics/PhysicsWorld
+  - ../rendering/RacingVFX
+  - ../vehicle/RacingCarController
+  - ../world/RacingTrack3D
+  - three
+  knowledge: []
+  exports:
+  - RacingDemo
+- id: RecastDemo
+  path: workspace/knowledge-showcase/src/demos/RecastDemo.ts
+  title: 'Демо Recast: собранная сцена целиком — образец подключения'
+  summary: ''
+  lines: 291
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - '@recast-navigation/three'
+  - recast-navigation
+  - three
+  knowledge: []
+  exports:
+  - RecastDemo
+- id: RtsDemo
+  path: workspace/knowledge-showcase/src/demos/RtsDemo.ts
+  title: 'Демо Rts: как flowField собирается в живую сцену'
+  summary: ''
+  lines: 540
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/flowField
+  - three
+  knowledge: []
+  exports:
+  - RtsDemo
+- id: StealthDemo
+  path: workspace/knowledge-showcase/src/demos/StealthDemo.ts
+  title: 'Демо Stealth: как stealthSensing собирается в живую сцену'
+  summary: ''
+  lines: 504
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/stealthSensing
+  - ../stack/bvhSetup
+  - three
+  knowledge: []
+  exports:
+  - StealthDemo
+- id: SurvivorDemo
+  path: workspace/knowledge-showcase/src/demos/SurvivorDemo.ts
+  title: 'Демо Survivor: как survivorRun, towerDefense собирается в живую сцену'
+  summary: ''
+  lines: 546
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/survivorRun
+  - ../game/towerDefense
+  - bitecs
+  - three
+  knowledge: []
+  exports:
+  - SurvivorDemo
+- id: TowerDefenseDemo
+  path: workspace/knowledge-showcase/src/demos/TowerDefenseDemo.ts
+  title: 'Демо TowerDefense: как towerDefense собирается в живую сцену'
+  summary: ''
+  lines: 664
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/towerDefense
+  - bitecs
+  - three
+  knowledge: []
+  exports:
+  - TowerDefenseDemo
+- id: TruckDemo
+  path: workspace/knowledge-showcase/src/demos/TruckDemo.ts
+  title: 'Эталонная вкладка стенда: ЗиЛ-130 на честной физике Rapier3D.'
+  summary: 'knowledge/threejs/rapier_vehicle_controller.md + vehicle_wheel_rig.md. Порядок кадра тот же,
+    что у всех: updateVehicle ДО world.step() (CRITICAL_RULES §62), синхронизация мешей после шага.'
+  lines: 101
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../physics/PhysicsWorld
+  - ../rendering/SceneManager
+  - ../vehicle/TruckController
+  - ../world/RoadGenerator
+  - ../world/levels
+  - three
+  knowledge:
+  - knowledge/threejs/rapier_vehicle_controller.md
+  exports:
+  - TruckDemo
+- id: VfxPoolDemo
+  path: workspace/knowledge-showcase/src/demos/VfxPoolDemo.ts
+  title: 'Демо VfxPool: как vfxJuice собирается в живую сцену'
+  summary: ''
+  lines: 214
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - ../game/vfxJuice
+  - three
+  knowledge: []
+  exports:
+  - VfxPoolDemo
+- id: YukaDemo
+  path: workspace/knowledge-showcase/src/demos/YukaDemo.ts
+  title: 'Демо Yuka: собранная сцена целиком — образец подключения'
+  summary: ''
+  lines: 465
+  kind: adapt
+  deps:
+  - ../core/Demo
+  - three
+  - yuka
+  knowledge: []
+  exports:
+  - YukaDemo

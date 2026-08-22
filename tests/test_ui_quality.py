@@ -182,7 +182,7 @@ def test_master_prompt_carries_ui_theme_and_visual_section():
     prompt = PromptCompilerAgent().compile(ctx)
 
     assert "Визуальный контракт интерфейса" in prompt
-    assert "UI Theme" in prompt
+    assert "Тема интерфейса" in prompt
     assert concept.art.ui_theme.split(".")[0] in prompt
     # Слой UI перестал быть одним UIManager.
     assert "theme.css" in prompt and "ScreenRouter.ts" in prompt

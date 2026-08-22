@@ -12,7 +12,7 @@ import re
 from typing import Dict, List
 
 from app.context import GenerationContext
-from app.mechanics_repo import _slugify
+from app.slugs import _slugify
 from app.logging import log_agent
 
 

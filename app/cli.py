@@ -294,6 +294,22 @@ def _project_dir(game_id: str, output_dir: Path) -> Path:
     raise typer.Exit(code=1)
 
 
+@app.command(name="catalog", help="Пересобрать каталог готового кода из стенда (knowledge/mechanics/CATALOG.yaml).")
+def rebuild_catalog():
+    from app import library
+    entries = library.scan()
+    if not entries:
+        console.print("[bold red]Стенд не найден — каталог не пересобран.[/bold red]")
+        raise typer.Exit(code=1)
+    path = library.save(entries)
+    by_kind = {}
+    for entry in entries:
+        by_kind[entry.kind] = by_kind.get(entry.kind, 0) + 1
+    console.print(f"[bold green]Каталог пересобран:[/bold green] {len(entries)} модулей → {path}")
+    for kind, count in sorted(by_kind.items()):
+        console.print(f"  {library.KIND_LABELS.get(kind, kind)}: {count}")
+
+
 @app.command(name="gui", help="УСТАРЕЛО: десктопное окно. Используйте веб (run_web.py).")
 def launch_gui():
     from app.gui.ctk_app import run_gui

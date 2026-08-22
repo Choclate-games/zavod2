@@ -12,7 +12,6 @@ from agents.model_call import RU_SYSTEM_SUFFIX, ask_model, merge_filled
 from app.config import config
 from app.context import GenerationContext
 from app.logging import log_agent
-from app.mechanics_repo import MechanicsRepository
 from app.models import CoreDesignSpec, LoopStep, MechanicDeepSpec, MechanicParameter, MechanicSpec
 
 SYSTEM_PROMPT = (
@@ -58,15 +57,11 @@ class MechanicsArchitectAgent:
         # Синхронизация плоского списка механик concept.mechanics с глубокими спецификациями
         self._sync_concept_mechanics(concept, core)
 
-        # Автоматическое сохранение новых уникальных механик в каталог
-        repo = MechanicsRepository.get_instance()
-        saved_count = repo.register_and_persist_mechanics(
-            core.mechanics,
-            genre=concept.genre or "",
-            renderer=concept.renderer or "threejs"
-        )
-        if saved_count > 0:
-            log_agent("MechanicsArchitect", f"Сохранено {saved_count} новых механик в config/mechanics.yaml")
+        # Обратной записи в каталог здесь больше нет. Механики каждого прогона
+        # дописывались в config/mechanics.yaml, и категорией становилась целая
+        # фраза из описания — каталог зарастал мусором и начинал подсовывать
+        # следующим играм механики предыдущих. Придуманное этой игрой остаётся
+        # у этой игры.
 
         log_agent(
             "MechanicsArchitect",
@@ -81,16 +76,12 @@ class MechanicsArchitectAgent:
         c = ctx.concept
         mechanics = "\n".join(
             f"- {m.name} ({m.priority}/{m.category}): {m.description}" for m in c.mechanics
-        ) or "- список пуст, автономно спроектируй 3–5 уникальных механик под фантазию и крючок игры"
+        ) or "- список пуст, автономно спроектируй механики под фантазию и крючок игры"
         systems = ", ".join(s.name for s in c.gameplay_systems) or "не заданы"
         refs = "\n".join(
             f"- {r.name}: чему учит — {r.lessons or '—'}; чего избегать — {r.what_to_avoid or '—'}"
             for r in c.references[:4]
         ) or "- референсы не заданы"
-
-        repo = MechanicsRepository.get_instance()
-        matched = repo.find_relevant(f"{ctx.raw_prompt} {c.genre} {c.hook}", limit=4)
-        catalog_inspiration = repo.format_for_prompt(matched)
 
         return (
             f"Игра: {c.title}\nЖанр: {c.genre} ({c.subgenre})\n"
@@ -102,7 +93,6 @@ class MechanicsArchitectAgent:
             f"Рендерер: {c.renderer}\nАудитория: {c.target_audience}\n"
             f"Игровые системы: {systems}\n"
             f"Текущие механики концепции:\n{mechanics}\n"
-            f"Каталог проверенных механик (для вдохновения/адаптации):\n{catalog_inspiration}\n"
             f"Референсы:\n{refs}\n"
             f"Исходная идея пользователя: {ctx.raw_prompt}"
         )

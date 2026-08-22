@@ -346,10 +346,27 @@ def describe(rel_path: str) -> str:
             continue
         if stripped.startswith(("```", "|", ">", "---")):
             continue
-        summary = stripped.lstrip("-*").strip()
+        # Документы базы перенесены по 80 колонок, поэтому первая строка абзаца
+        # обрывается на полуслове. Собираем абзац целиком и только потом режем.
+        paragraph = [stripped.lstrip("-*").strip()]
+        for follow in body.splitlines()[body.splitlines().index(line) + 1:]:
+            nxt = follow.strip()
+            if not nxt or nxt.startswith(("#", "```", "|", ">", "---", "-", "*")):
+                break
+            paragraph.append(nxt)
+        summary = " ".join(paragraph)
         break
     text = f"{title} — {summary}" if title and summary else (title or summary)
-    return text[:_SUMMARY_LIMIT].strip()
+    if len(text) <= _SUMMARY_LIMIT:
+        return text.strip()
+    # Обрезаем по границе слова: это описание — единственное, что агент видит о
+    # документе, прежде чем решить, открывать его или нет, и оборванное на
+    # полуслове «reads as one deliberate product rather than» ему не помогает.
+    cut = text[:_SUMMARY_LIMIT]
+    space = cut.rfind(" ")
+    if space > _SUMMARY_LIMIT // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:—-") + "…"
 
 
 def index(folders: Optional[List[str]] = None) -> List[Dict[str, str]]:

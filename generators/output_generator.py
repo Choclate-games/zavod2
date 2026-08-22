@@ -1,14 +1,15 @@
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List
 import yaml
 
-from app import sandbox
-from app.mechanics_repo import _slugify
+from app import knowledge, library, sandbox
+from app.slugs import _slugify
 from app.context import GenerationContext
 from app.logging import log_agent, log_success, log_info
 from generators.check_spec_script import CHECK_SPEC_MJS
+from generators.fetch_knowledge_script import FETCH_KNOWLEDGE_MJS
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator
 from generators.preview_generator import PreviewGenerator
@@ -67,6 +68,17 @@ class OutputGenerator:
         check_script.write_text(CHECK_SPEC_MJS, encoding="utf-8")
         ctx.generated_files.append(check_script)
 
+        # 2c. База знаний по требованию: манифест плюс загрузчик.
+        # Раньше пакет носил в себе двести килобайт дословных копий, и один и
+        # тот же документ лежал в двух скиллах сразу. Теперь он носит список
+        # того, что нужно этой игре, и одну команду, которая кладёт всё в
+        # docs/ref/. Дальше прогон идёт офлайн — файлы уже локальные.
+        fetch_script = scripts_dir / "fetch-knowledge.mjs"
+        fetch_script.write_text(FETCH_KNOWLEDGE_MJS, encoding="utf-8")
+        ctx.generated_files.append(fetch_script)
+        self._write_manifest(ctx, game_dir)
+        self._write_library(game_dir, ctx)
+
         # 3. Generate game skills
         self.skill_gen.generate(ctx)
 
@@ -122,6 +134,101 @@ class OutputGenerator:
         log_success(f"Agent instructions & devlog prepared: [highlight]{sandbox.AGENTS_NAME}[/highlight]")
 
         return game_dir
+
+    @staticmethod
+    def _write_library(game_dir: Path, ctx: GenerationContext) -> None:
+        """LIBRARY.md — полный каталог готового кода фабрики.
+
+        В мастер-промпте остаются только модули, похожие на механики этой игры:
+        семьдесят строк там просматриваются по диагонали. Полный список лежит
+        отдельным файлом, и агент открывает его, когда берётся за механику,
+        которой в короткой таблице не оказалось.
+        """
+        entries = library.load()
+        if not entries:
+            return
+        text = (
+            "# Готовый код фабрики\n\n"
+            "Это не примеры из статьи, а модули, которые работали в живых сценах.\n"
+            "В шапке каждого файла написано, почему константы именно такие.\n\n"
+            "Забрать любой файл:\n\n"
+            "```bash\n"
+            "node scripts/fetch-knowledge.mjs <путь из таблицы>\n"
+            "```\n\n"
+            "Файл появится в `docs/ref/<путь>` — оттуда копируй в `src/`.\n\n"
+            "| Готовность | Что значит |\n|---|---|\n"
+            "| копируется как есть | ни одного импорта, чистая логика и числа |\n"
+            "| нужен three, больше ничего | тянет только `three`, чужого проекта в нём нет |\n"
+            "| образец, переписать под себя | тянет модули стенда: читать, не копировать |\n\n"
+            + library.catalog_markdown(entries) + "\n"
+        )
+        path = game_dir / "LIBRARY.md"
+        path.write_text(text, encoding="utf-8")
+        ctx.generated_files.append(path)
+
+    @staticmethod
+    def _write_manifest(ctx: GenerationContext, game_dir: Path) -> None:
+        """knowledge.manifest.json — что этой игре нужно из базы.
+
+        Обязательное — то, без чего игра не запустится или не пройдёт
+        модерацию: контракт платформы и правила интерфейса. Остальное
+        помечено необязательным: агент решает сам, глядя на каталог готового
+        кода в мастер-промпте, и дотягивает файл одной командой.
+
+        Токена здесь нет и быть не может: манифест уезжает в git вместе с
+        игрой. Ключ живёт в окружении фабрики и попадает к агенту через
+        переменные процесса.
+        """
+        concept = ctx.concept
+        files: List[Dict[str, object]] = []
+        seen: set = set()
+
+        def add(path: str, why: str, required: bool = False) -> None:
+            if not path or path in seen:
+                return
+            seen.add(path)
+            files.append({"path": path, "why": why, "required": required})
+
+        add(f"knowledge/{knowledge.CRITICAL_RULES_FILE}",
+            "запреты, которые дороже всего нарушить", required=True)
+        for topic in knowledge.MANDATORY_TOPICS:
+            add(f"knowledge/{topic}", "обязательный документ платформы и интерфейса", required=True)
+
+        # Документы, отобранные куратором под эту игру.
+        for skill in (concept.skills or []):
+            for ref in (getattr(skill, "knowledge_refs", None) or []):
+                add(f"knowledge/{ref}", f"нужен скиллу {getattr(skill, 'filename', '')}".strip())
+
+        # Готовый код, похожий на придуманные механики. Это подсказка, а не
+        # предписание: агент смотрит на файлы и решает сам.
+        query = " ".join([
+            concept.title or "", concept.genre or "", concept.hook or "",
+            " ".join(m.name for m in (concept.mechanics or [])),
+            " ".join(getattr(m, "description", "") for m in (concept.mechanics or [])),
+        ])
+        for entry in library.match(query, limit=10):
+            add(entry.path, f"готовый код: {entry.title}"[:160])
+
+        payload = {
+            "repo": library.REPO_SLUG,
+            "ref": library.REPO_REF,
+            "game": concept.slug or game_dir.name,
+            "note": (
+                "node scripts/fetch-knowledge.mjs — положит всё это в docs/ref/. "
+                "Отдельный файл: node scripts/fetch-knowledge.mjs <путь>."
+            ),
+            "files": files,
+        }
+        manifest = game_dir / "knowledge.manifest.json"
+        manifest.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        ctx.generated_files.append(manifest)
+        required = sum(1 for f in files if f["required"])
+        log_success(
+            f"Манифест базы знаний: [highlight]{len(files)}[/highlight] файл(ов), "
+            f"из них обязательных {required}"
+        )
 
     @staticmethod
     def _write_balance(ctx: GenerationContext, game_dir: Path) -> None:
