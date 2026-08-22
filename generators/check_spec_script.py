@@ -328,6 +328,34 @@ if (!cssFiles.length) {
   fail('G7', 'Ни одного @media во всём CSS: интерфейс свёрстан под один размер экрана')
 }
 
+/* ── H: чек-листы базы знаний отработаны ───────────────────────────────── */
+// Пункты едут в промпт с просьбой «закрой или объясни». Просьба, которую никто
+// не проверяет, ничем не отличается от её отсутствия: документ на 726 строк уже
+// доезжал в пакет, назывался в промпте и не был открыт ни разу.
+const ACCEPTANCE = join(ROOT, 'ACCEPTANCE.md')
+if (!existsSync(ACCEPTANCE)) {
+  skip('H1', 'ACCEPTANCE.md отсутствует — чек-листы базы проверить негде')
+} else {
+  const accepted = read(ACCEPTANCE)
+  const section = accepted.split(/^## H\./m)[1]
+  if (!section) {
+    skip('H1', 'В ACCEPTANCE.md нет раздела H — пакет собран старой версией фабрики')
+  } else {
+    const body = section.split(/^## /m)[0]
+    const open = body.split('\n').filter((l) => /^\s*-\s*\[\s*\]/.test(l))
+    const done = (body.match(/^\s*-\s*\[[xX]\]/gm) || []).length
+    const waived = (body.match(/^\s*-\s*\[~\]/gm) || []).length
+    if (!done && !waived && !open.length) {
+      skip('H1', 'Чек-листов у отобранных документов нет — проверять нечего')
+    } else if (open.length) {
+      fail('H1', `Пункты чек-листов базы не отработаны: ${open.length} без отметки (сделано ${done}, отказов ${waived})`,
+           open.slice(0, 10).map((l) => l.trim().replace(/^-\s*\[\s*\]\s*/, '')))
+    } else {
+      pass('H1', `Чек-листы базы отработаны: сделано ${done}, осознанных отказов ${waived}`)
+    }
+  }
+}
+
 /* ── вывод ─────────────────────────────────────────────────────────────── */
 const failed = results.filter((r) => r.ok === false)
 for (const r of results) {

@@ -187,6 +187,53 @@ workspace/{c.slug}/
 6. Verify every deliverable against the **Definition of Done**.
 """
 
+    @staticmethod
+    def _knowledge_checklists(concept) -> str:
+        """Чек-листы отобранных документов — как пункты приёмки, а не как совет.
+
+        Пункты уже едут в мастер-промпт рядом с адресом документа, и там же
+        стоит просьба закрыть их или объяснить отказ. Ровно этот механизм —
+        «агенту сказали» — один раз уже провалился: документ на 726 строк
+        доехал в пакет, был назван в промпте и не был открыт. Просьба, которую
+        никто не проверяет, ничем не отличается от отсутствия просьбы.
+
+        Поэтому пункты дублируются сюда: приёмка живёт в файле, переживает
+        контекст агента и проверяется `check-spec`, который требует у каждого
+        пункта отметку — сделано либо отказ с причиной."""
+        from app import knowledge
+
+        paths = []
+        for selection in concept.knowledge_plan.selections:
+            if selection.role == "core":
+                paths.append(selection.path)
+        for rel in knowledge.MANDATORY_TOPICS:
+            if rel not in paths:
+                paths.append(rel)
+
+        blocks = []
+        for path in paths:
+            items = knowledge.checklist(path)
+            if not items:
+                continue
+            rows = "\n".join(f"- [ ] {item}" for item in items)
+            blocks.append(f"### `{path}`\n\n{rows}")
+
+        if not blocks:
+            return (
+                "_У отобранных документов чек-листов нет: соберите их командой_ "
+                "`python -m app.cli checklists` _на фабрике._"
+            )
+
+        head = (
+            "Каждый пункт ниже — уже починенная кем-то ошибка, взятая из документа базы\n"
+            "дословно. Пункты проверяются взглядом на запущенную игру.\n\n"
+            "**Отметить обязан каждый.** `- [x]` — сделано. Пункт, который в этой игре не\n"
+            "нужен, помечается `- [~]` и строкой причины сразу после него: «не делаем,\n"
+            "потому что …». Оставленный пустым `- [ ]` считается невыполненным, и\n"
+            "`check-spec` не даст закрыть проект."
+        )
+        return head + "\n\n" + "\n\n".join(blocks)
+
     def _gen_acceptance(self, ctx: GenerationContext) -> str:
         """Приёмка проекта — проверками, а не обещаниями.
 
@@ -199,19 +246,25 @@ workspace/{c.slug}/
         c = ctx.concept
         ui = c.ui_ux
 
+        # Пункты геймплея живут в разделе D и нумеруются буквой своего раздела.
+        # Раньше они шли под «G» — буквой, которой в документе не было, а строка
+        # отчёта при этом просила «D1–D5». С появлением раздела G это стало ещё
+        # и столкновением: два разных пункта с номером G1 в одном файле.
         gameplay = []
         for index, mechanic in enumerate(c.mechanics[:8], start=1):
             check = mechanic.player_interaction or mechanic.description or mechanic.name
-            gameplay.append(f"- [ ] **G{index}** · {mechanic.name}: {check}")
+            gameplay.append(f"- [ ] **D{index}** · {mechanic.name}: {check}")
         if c.win_conditions:
-            gameplay.append(f"- [ ] **G{len(gameplay) + 1}** · Условие успеха срабатывает: {c.win_conditions}")
+            gameplay.append(f"- [ ] **D{len(gameplay) + 1}** · Условие успеха срабатывает: {c.win_conditions}")
         if c.lose_conditions:
-            gameplay.append(f"- [ ] **G{len(gameplay) + 1}** · Условие проигрыша срабатывает: {c.lose_conditions}")
-        gameplay_md = "\\n".join(gameplay) or "- [ ] **G1** · Петля игры проходится целиком (см. CORE_LOOP.md)."
+            gameplay.append(f"- [ ] **D{len(gameplay) + 1}** · Условие проигрыша срабатывает: {c.lose_conditions}")
+        gameplay_md = "\\n".join(gameplay) or "- [ ] **D1** · Петля игры проходится целиком (см. CORE_LOOP.md)."
 
         screens = ", ".join(
             (s.get("id") or "").strip() for s in _normalize_screens(ui.screens) if s.get("id")
         ) or "main_menu, gameplay, session_end"
+
+        knowledge_checklists = self._knowledge_checklists(c)
 
         boards = c.playgama.leaderboards[0] if c.playgama.leaderboards else "таблица лидеров не используется"
         save_key = c.playgama.cloud_save_keys[0] if c.playgama.cloud_save_keys else f"{c.slug}_save_v1"
@@ -321,12 +374,18 @@ CSS. Ни один из этих дефектов не виден в отчёт�
 
 ---
 
+## H. Чек-листы отобранных документов базы знаний
+
+{knowledge_checklists}
+
+---
+
 ## Как отчитываться
 
 Прогон приёмки записывается в `DEVLOG.md` строкой вида:
 
 ```text
-2026-01-01 приёмка: A1–A4 ✅, B1–B12 ✅, C1–C11 ✅, D1–D5 ✅, E1–E5 частично (E1 на телефоне 48 FPS), F1–F4 ✅, G1–G10 ✅
+2026-01-01 приёмка: A1–A4 ✅, B1–B12 ✅, C1–C11 ✅, D1–D5 ✅, E1–E5 частично (E1 на телефоне 48 FPS), F1–F4 ✅, G1–G10 ✅, H1 ✅ (2 осознанных отказа)
 ```
 
 Пункт, который не проходит, честнее оставить красным с объяснением, чем

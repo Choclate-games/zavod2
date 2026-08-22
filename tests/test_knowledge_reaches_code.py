@@ -213,3 +213,49 @@ def test_acceptance_requires_at_least_one_breakpoint():
 def test_acceptance_checks_colours_written_as_rgba():
     """`rgba(255,153,0,0.8)` в инлайновом стиле — тот же цвет мимо темы, что и hex."""
     assert re.search(r"rgba\?\|hsla\?", CHECK_SPEC), "проверка цвета всё ещё только про hex"
+
+
+# ------------------------------------------ чек-лист как приёмка, а не пожелание
+
+def test_checklists_become_numbered_acceptance():
+    """Просьба, которую никто не проверяет, равна её отсутствию.
+
+    Пункты уже ехали в промпт со словами «закрой или объясни» — ровно тот
+    механизм, который один раз провалился: документ назвали, и он остался
+    неоткрытым. Приёмка живёт в файле, переживает контекст агента и
+    проверяется скриптом."""
+    from generators.document_generator import DocumentGenerator
+
+    concept = _concept("Тактический шутер", "Проверка")
+    concept.knowledge_plan = KnowledgePlan(selections=[
+        KnowledgeSelection(path="threejs/fps_controller_and_shooting.md",
+                           role="core", reason="управление"),
+    ])
+    concept.playgama.cloud_save_keys = ["test_save_v1"]
+    md = DocumentGenerator()._gen_acceptance(_ctx(concept))
+
+    assert "## H." in md, "чек-листы не доехали в приёмку"
+    assert "Прыжок с гравитацией, койот-таймом и буфером нажатия" in md
+    assert "- [~]" in md, "нет способа осознанно отказаться от пункта"
+
+
+def test_acceptance_item_ids_do_not_collide():
+    """Пункты геймплея нумеровались буквой G — как и раздел «объявлено, значит
+    подключено». Два разных пункта G1 в одном документе."""
+    from generators.document_generator import DocumentGenerator
+
+    concept = _concept("Гонка", "Проверка", mechanics=[
+        MechanicSpec(name="Дрифт", player_interaction="удержание ручника в повороте"),
+    ])
+    concept.playgama.cloud_save_keys = ["test_save_v1"]
+    md = DocumentGenerator()._gen_acceptance(_ctx(concept))
+
+    ids = re.findall(r"\*\*([A-H]\d+)\*\*", md)
+    assert len(ids) == len(set(ids)), f"номера пунктов повторяются: {sorted(ids)}"
+    assert "**D1**" in md, "пункт геймплея должен нумероваться буквой своего раздела"
+
+
+def test_check_spec_blocks_release_on_unmarked_items():
+    assert "H1" in CHECK_SPEC
+    assert "не отработаны" in CHECK_SPEC
+    assert r"\[~\]" in CHECK_SPEC, "осознанный отказ должен засчитываться"
