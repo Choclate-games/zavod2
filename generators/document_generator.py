@@ -627,24 +627,129 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
 """
 
     def _gen_ui_ux(self, ctx: GenerationContext) -> str:
+        """Спецификация интерфейса.
+
+        Прежняя версия документа состояла из трёх абзацев: список HUD, ASCII и
+        имена экранов. По ней невозможно собрать интерфейс — только угадать его,
+        и угадывался он всегда одинаково. Теперь документ несёт то же, что и
+        мастер-промпт: материал, акценты, типографику, компоненты, якоря,
+        переходы и состояния экранов."""
         c = ctx.concept
-        hud_md = "\n".join([f"- {h}" for h in c.ui_ux.hud_elements]) if isinstance(c.ui_ux.hud_elements, list) else str(c.ui_ux.hud_elements)
+        ui = c.ui_ux
+        art = c.art
+
+        hud_md = "\n".join(f"- {h}" for h in ui.hud_elements) if isinstance(ui.hud_elements, list) else str(ui.hud_elements)
         screens_md = "\n".join([
             f"### Screen: {str(s.get('id', s.get('name', 'Screen')) if isinstance(s, dict) else s).replace('_', ' ').title()}\n- {s.get('desc', s.get('description', '')) if isinstance(s, dict) else ''}"
-            for s in c.ui_ux.screens
-        ]) if isinstance(c.ui_ux.screens, list) else ""
+            for s in ui.screens
+        ]) if isinstance(ui.screens, list) else ""
+
+        accents_md = "\n".join(
+            f"| `{name}` | {meaning} |" for name, meaning in ui.accent_roles.items()
+        ) if ui.accent_roles else "| `primary` | Главное действие петли |\n| `danger` | Потеря и риск |\n| `neutral` | Служебный интерфейс в покое |"
+        anchors_md = "\n".join(
+            f"| `{anchor}` | {content} |" for anchor, content in ui.hud_anchors.items()
+        ) if ui.hud_anchors else "| `top-right` | Пауза и настройки |"
+        components_md = "\n".join(f"- {comp}" for comp in ui.components) or "- Набор компонентов не задан — см. `knowledge/ux/ui_design_system.md`, раздел 6"
+        feedback_md = "\n".join(f"- {f}" for f in ui.feedback_moments) or "- Любое нажатие отвечает в том же кадре"
+        diegetic_md = "\n".join(f"- {d}" for d in ui.diegetic_elements) or "- Не задано: состояние показывается только через HUD"
+        states_md = "\n".join(f"- {st}" for st in ui.state_coverage) or "- Состояния экранов не расписаны — обязательны загрузка, пустота и ошибка"
+        # Тема от арт-директора и визуальный язык совпадают, когда UX-агент принял
+        # решение арт-дирекции как есть. Печатать одно и то же дважды незачем.
+        material_md = f"- **Тема от арт-директора**: {art.ui_theme}" if art.ui_theme else ""
+        if ui.visual_language and ui.visual_language != art.ui_theme:
+            material_md += ("\n" if material_md else "") + f"- **Визуальный язык**: {ui.visual_language}"
+        material_md = material_md or "- Материал интерфейса не задан — см. ART_DIRECTION.md"
+
         return f"""# UI/UX Specification: {c.title}
 
-## 1. HUD Overlay Elements
-{hud_md if hud_md else "Health bar, Score counter, Virtual controls"}
+## 1. Материал интерфейса
+Интерфейс живёт в том же мире, что и сцена. Проверка: если закрыть игровое поле,
+меню обязано выдавать именно эту игру, а не любую другую.
 
-## 2. Screen Wireframes & Flow
+{material_md}
+- **Типографика**: {ui.typography or "две гарнитуры: акцидентная на цифры и заголовки, текстовая на подписи"}
+
+## 2. Акценты: один цвет — один смысл
+Разный цвет у каждой кнопки «чтобы отличались» — главная ошибка игрового
+интерфейса. На одном экране одновременно видно не больше двух акцентов.
+
+| Токен | Единственный смысл |
+|---|---|
+{accents_md}
+
+Все значения — токенами в `src/ui/theme.css`: цвета, гарнитуры, шкала отступов,
+радиусы, длительности, порядок слоёв `--z-*`. Литерал цвета внутри экрана — баг.
+
+## 3. Композиция экрана
+Экран — не колонка кнопок по центру. Три зоны, и каждый элемент лежит ровно в одной:
+
+1. **Идентичность** — что это за экран: заголовок, режим, состояние игрока.
+2. **Главное действие** — ровно одно на экран, самое крупное и единственное с
+   основным акцентом.
+3. **Второстепенный ряд** — всё остальное, одним рядом или сеткой, одним весом.
+
+Зоны нажатия: основная ≥ 96 px, остальные ≥ 64 px, зазор ≥ 12 px, отступы через
+`env(safe-area-inset-*)` плюс измеренная высота липкого баннера. Ни один экран не
+скроллит страницу: длинный список скроллится во внутреннем контейнере.
+
+## 4. Набор компонентов (закрытый)
+Всё на экране — один из этих компонентов. Одноразовый `<div>` с инлайновыми
+стилями — это то, из-за чего второй экран перестаёт совпадать с первым.
+
+{components_md}
+
+Каждый интерактивный компонент несёт пять состояний: покой, наведение, нажатие,
+недоступность, `:focus-visible`; асинхронное действие — ещё и `loading`.
+
+## 5. HUD
+Не больше пяти постоянных элементов на телефоне. Пять якорей, посередине экрана
+не висит ничего, кроме временной обратной связи.
+
+| Якорь | Что там |
+|---|---|
+{anchors_md}
+
+Элементы:
+{hud_md if hud_md else "- Индикатор состояния главной механики"}
+
+Меняющиеся числа — `tabular-nums` в слоте фиксированной ширины, полосы —
+`transform: scaleX()`, а не `width`. Текст поверх геймплея всегда с подложкой или
+обводкой: белое число исчезает на светлой сцене.
+
+## 6. Состояние, показанное миром, а не оверлеем
+{diegetic_md}
+
+## 7. Каталог экранов
+{screens_md if screens_md else "Main Menu, Gameplay HUD, Session End, Settings"}
+
+**Переходы**: {ui.screen_flow or "виден ровно один экран; скрытый убирается через display: none"}
+
+## 8. Состояния экрана
+{states_md}
+
+## 9. Отклик и движение
+{feedback_md}
+
+Переход один на всю игру и укладывается в 300 мс; анимируются только `transform`
+и `opacity`; `prefers-reduced-motion: reduce` убирает трансформации.
+
+## 10. Вайрфрейм игрового экрана
 ```text
-{c.ui_ux.wireframes_ascii}
+{ui.wireframes_ascii}
 ```
 
-## 3. Screen Catalog
-{screens_md if screens_md else "Main Menu, Gameplay HUD, Modal Dialogs"}
+## 11. Чек-лист приёмки интерфейса
+- [ ] Ни одного литерала цвета, шрифта, радиуса или длительности вне `theme.css`.
+- [ ] Слои над канвасом не перехватывают игровой ввод: контейнеры `pointer-events: none`.
+- [ ] Каждый экран помещается в измеренный вьюпорт, страница не скроллится.
+- [ ] Одно главное действие на экран, не больше двух акцентов одновременно.
+- [ ] Меняющиеся числа не дёргают строку HUD.
+- [ ] У каждого экрана описаны загрузка, пустота и ошибка.
+- [ ] Возможность, которой нет на площадке, не нарисована вовсе.
+- [ ] Ни `alert`/`confirm`, ни эмодзи вместо иконок, ни `z-index` мимо токенов.
+- [ ] Самая длинная переведённая строка помещается в кнопку.
+- [ ] С закрытым игровым полем меню всё ещё узнаётся как «{c.title}».
 """
 
     def _gen_mobile_controls(self, ctx: GenerationContext) -> str:

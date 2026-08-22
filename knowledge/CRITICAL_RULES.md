@@ -295,3 +295,42 @@ watchdog, and Recast is loaded **only** when the game actually needs a navmesh.
     with an exact quaternion `from barrel to target`, not by tweaking a
     single Euler axis: a barrel that sits at an angle to the rotation plane
     turns by only `angle · cos(that angle)`.
+
+## Interface
+
+75. UI layers over the canvas are **transparent to input by default**: every
+    layer container is `pointer-events: none` and only leaf interactive elements
+    turn it back on. A full-screen overlay left at `auto` swallows every gameplay
+    pointer, and the bug reads as "the car does not steer on mobile". The HUD
+    layer is read-only and never becomes interactive at all — pause and settings
+    are buttons on the screen layer.
+
+76. Every colour, font, radius, spacing step and duration comes from tokens in
+    one theme file. A literal `#RRGGBB`, `px` padding or `z-index: 9999` written
+    inside a screen is the reason the second screen stops matching the first.
+    `grep -rE '#[0-9a-fA-F]{3,8}' src/ui` minus the theme file returns nothing.
+
+77. Browser dialogs (`alert`, `confirm`, `prompt`) and emoji used as icons are
+    **banned in shipped UI**. The first blocks the game loop, cannot be styled and
+    breaks immersion; the second renders differently on every OS and reads as a
+    placeholder. Use the project's `Modal` component and one inline SVG sprite
+    coloured by `currentColor`.
+
+78. The HUD updates by writing to **cached nodes** and only when the value
+    changed — never by rebuilding markup inside the frame loop, and never by
+    reading layout (`offsetWidth`, `getBoundingClientRect`) there. Changing
+    numbers carry `font-variant-numeric: tabular-nums` in a fixed-width slot, and
+    bars animate with `transform: scaleX()`, not `width`; otherwise the row
+    reflows on every tick and the whole overlay repaints.
+
+79. Every screen defines its **loading, empty and error** states, not only the
+    happy path. Saves, leaderboards, purchases and ads are network calls that fail
+    routinely on these portals; a failure that renders an empty frame or says
+    nothing costs the player their run and reads as a broken game.
+
+80. Menu and HUD geometry is sized against the **measured** viewport
+    (`visualViewport`, re-measured after orientation change, fullscreen exit and
+    ad close), never `100vh`, and every UI layer is inset by
+    `env(safe-area-inset-*)` **plus** the measured sticky-banner height. The page
+    itself never scrolls — long content scrolls in an inner container.
+    See `knowledge/ux/ui_design_system.md` and `knowledge/ux/ui_implementation.md`.

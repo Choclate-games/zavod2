@@ -84,7 +84,7 @@ workspace/<game_slug>/
 ├── ARCHITECTURE_DOCUMENT.md
 ├── THREEJS_ARCHITECTURE.md
 ├── ART_DIRECTION.md
-├── UI_UX_SPECIFICATION.md
+├── UI_UX_SPECIFICATION.md      # материал интерфейса, акценты, компоненты, состояния экранов
 ├── MOBILE_CONTROLS.md
 ├── AUDIO_DESIGN.md
 ├── MONETIZATION.md
@@ -123,6 +123,8 @@ workspace/<game_slug>/
     ├── GAMEPLAY_SKILL.md
     ├── RENDERER_SKILL.md
     ├── PLAYGAMA_SKILL.md
+    ├── CONTROLS_SKILL.md
+    ├── UI_SKILL.md             # токены, слои над канвасом, компоненты, состояния экранов
     └── <specialized>_skill.md
 ```
 

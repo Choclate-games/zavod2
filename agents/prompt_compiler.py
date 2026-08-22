@@ -120,6 +120,97 @@ class PromptCompilerAgent:
         return "\n\n".join(parts)
 
     @staticmethod
+    def _ui_block(concept) -> str:
+        """Визуальный контракт интерфейса.
+
+        До этого блока секция про UI состояла целиком из эргономики тача: где
+        кнопки и какого они размера. Как интерфейс ВЫГЛЯДИТ, промпт не говорил
+        ничего, и кодовый агент честно добирал вид умолчаниями — фиолетовый
+        градиент, системный шрифт, эмодзи вместо иконок, alert() вместо модалки.
+        Здесь решения UX-дизайнера и арт-директора доходят до него как
+        требование, а не как пожелание."""
+        ui = concept.ui_ux
+        art = concept.art
+        parts = []
+
+        theme = art.ui_theme or ui.visual_language
+        if theme:
+            parts.append(f"**Материал интерфейса**: {theme}")
+        if ui.visual_language and ui.visual_language != theme:
+            parts.append(f"**Визуальный язык**: {ui.visual_language}")
+        if ui.typography:
+            parts.append(f"**Типографика**: {ui.typography}")
+        if ui.accent_roles:
+            rows = "\n".join(f"| `{name}` | {meaning} |" for name, meaning in ui.accent_roles.items())
+            parts.append(
+                "**Акценты — один цвет = один смысл** (разный цвет у каждой кнопки «чтобы "
+                "отличались» читается как мусор):\n\n"
+                "| Токен | Единственный смысл |\n|---|---|\n" + rows
+            )
+        if ui.components:
+            items = "\n".join(f"- {c}" for c in ui.components)
+            parts.append(
+                "**Набор компонентов — закрытый.** Всё на экране обязано быть одним из них; "
+                "одноразовый `<div>` с инлайновыми стилями — это баг, из-за которого второй "
+                "экран перестаёт совпадать с первым:\n" + items
+            )
+        if ui.hud_anchors:
+            rows = "\n".join(f"| `{anchor}` | {content} |" for anchor, content in ui.hud_anchors.items())
+            parts.append(
+                "**Якоря HUD** — пять и только пять; посередине экрана не висит ничего, кроме "
+                "временной обратной связи:\n\n| Якорь | Что там |\n|---|---|\n" + rows
+            )
+        if ui.diegetic_elements:
+            items = "\n".join(f"- {d}" for d in ui.diegetic_elements)
+            parts.append("**Состояние, показанное миром, а не оверлеем**:\n" + items)
+        if ui.screen_flow:
+            parts.append(f"**Переходы экранов**: {ui.screen_flow}")
+        if ui.feedback_moments:
+            items = "\n".join(f"- {f}" for f in ui.feedback_moments)
+            parts.append("**Отклик интерфейса на действие**:\n" + items)
+        if ui.state_coverage:
+            items = "\n".join(f"- {st}" for st in ui.state_coverage)
+            parts.append(
+                "**Состояния экранов** — загрузка, пустота и ошибка проектируются наравне с "
+                "удачным путём: сохранение, таблица лидеров, покупки и реклама на этих "
+                "площадках отваливаются регулярно:\n" + items
+            )
+
+        parts.append(
+            "**Обязательные технические правила интерфейса** (каждое — из починенного бага, "
+            "подробности в `knowledge/ux/ui_design_system.md` и `knowledge/ux/ui_implementation.md`):\n"
+            "- Все значения — токенами в одном `src/ui/theme.css`: цвета, две гарнитуры, шкала "
+            "отступов, радиусы, длительности, `--z-*`. Литерал `#RRGGBB` или `z-index: 9999` "
+            "внутри экрана запрещён; `grep -rE '#[0-9a-fA-F]{3,8}' src/ui` мимо темы обязан быть пуст.\n"
+            "- Слои над канвасом прозрачны для ввода: контейнер — `pointer-events: none`, "
+            "`auto` включают только листовые интерактивные элементы. Слой HUD не кликается "
+            "никогда. Полноэкранный оверлей, оставленный на `auto`, съедает игровой ввод — "
+            "и это выглядит как «на телефоне не работает управление».\n"
+            "- Один масштаб на весь интерфейс (`--ui-scale`), а не отдельная раскладка под "
+            "каждый размер экрана. Размеры зон нажатия при этом не масштабируются: основная "
+            "≥ 96 px, остальные ≥ 64 px, зазор ≥ 12 px.\n"
+            "- Меняющиеся числа — `font-variant-numeric: tabular-nums` в слоте фиксированной "
+            "ширины; полосы — `transform: scaleX()`, не `width`. HUD пишет в закэшированные "
+            "узлы и только при изменении значения: пересборка разметки в кадре стоит кадров.\n"
+            "- Один экран виден за раз, скрытый — `display: none`; переход один на всю игру и "
+            "укладывается в 300 мс. Анимируются только `transform` и `opacity`. "
+            "`prefers-reduced-motion: reduce` убирает трансформации.\n"
+            "- Любое нажатие отвечает в том же кадре; действие с ожиданием переводит кнопку в "
+            "`loading` и снимает его в `finally`.\n"
+            "- Запрещено: `alert`/`confirm`/`prompt`, эмодзи вместо иконок (один инлайновый "
+            "SVG-спрайт с `currentColor`), голый `<input type=range>` и `<select>`, текст над "
+            "геймплеем без подложки или обводки, серая неактивная кнопка вместо отсутствующей "
+            "на площадке возможности — такой элемент не рисуется вовсе.\n"
+            "- Геометрия меню считается от ИЗМЕРЕННОГО вьюпорта (`visualViewport`, пересчёт "
+            "после поворота, выхода из фуллскрина и закрытия рекламы), а не от `100vh`; "
+            "нижний отступ включает измеренную высоту липкого баннера. Страница под игрой не "
+            "скроллится — длинные списки скроллятся во внутреннем контейнере.\n"
+            "- `backdrop-filter: blur()` на полноэкранном слое — самое дорогое свойство "
+            "оверлея на мобильных GPU; только на маленьких панелях."
+        )
+        return "\n\n".join(parts)
+
+    @staticmethod
     def _direction_section(concept) -> str:
         """Рамка проекта в мастер-промпте: направление и список запретов.
 
@@ -404,7 +495,13 @@ class PromptCompilerAgent:
 │   ├── ProceduralModels.ts    # Styled models / geometry for {concept.title}
 │   └── ParticleSystem.ts      # Particle effects & visual feedback
 ├── ui/
-│   ├── UIManager.ts           # HUD overlay, state transitions
+│   ├── theme.css              # Единственное место со значениями: цвета, шрифты, шкала, слои
+│   ├── UiRoot.ts              # Слои над канвасом, измеренный вьюпорт, safe-area + баннер
+│   ├── ScreenRouter.ts        # Экраны как автомат: один видимый, один общий переход
+│   ├── Hud.ts                 # Запись в закэшированные узлы только при изменении значения
+│   ├── components/            # Button, IconButton, Panel, Modal, Toast, Meter, Stat, ListRow
+│   ├── screens/               # По файлу на экран, каждый — со своими loading/empty/error
+│   ├── icons.ts               # Один инлайновый SVG-спрайт, цвет через currentColor
 │   └── TouchControls.ts       # Mobile touch input adapter
 └── audio/
     └── AudioManager.ts        # Sound effects pool & dynamic audio feedback"""
@@ -441,6 +538,8 @@ class PromptCompilerAgent:
         touch_layout = self._TOUCH_LAYOUTS[profile]
         desktop_controls = self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
         log_agent("PromptCompiler", f"Control profile: {profile}")
+
+        ui_contract = self._ui_block(concept)
 
         direction_section = self._direction_section(concept)
 
@@ -630,6 +729,13 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 - **Safe Area Insets**: `padding: calc(18px + env(safe-area-inset-bottom))` и аналогично
   для left/right — кнопки не должны попадать под вырез камеры и системные жесты.
 
+### Визуальный контракт интерфейса
+Интерфейс — первое, что видит игрок: до геймплея он смотрит на меню. Меню,
+собранное из умолчаний браузера, обесценивает всё, что сделано за ним, и это
+самый заметный признак недоделанной игры. Всё ниже — требование, а не пожелание.
+
+{ui_contract}
+
 ### Обязательный контракт тач-управления
 {touch_layout}
 
@@ -678,6 +784,7 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 - **Camera Perspective**: {concept.art.camera_perspective} (FOV: {concept.art.camera_fov}°, Pitch: {concept.art.camera_pitch_angle}°)
 - **Environment**: {concept.art.environment_theme}
 - **Lighting**: {concept.art.lighting_setup}
+- **UI Theme**: {concept.art.ui_theme} (реализация — секция 6, «Визуальный контракт интерфейса»)
 - **Visual Feedback**: Screen-space hitstop (40ms on critical hit), directional particle sparks, additive ribbon weapon trails.
 
 ---

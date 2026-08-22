@@ -50,6 +50,14 @@ class CompletenessValidator:
                 results.append({"item": "Mobile Controls Spec", "status": "FAIL", "detail": "Master prompt lacks the touch controls contract"})
                 all_passed = False
 
+            # Визуальный контракт интерфейса — вторая по частоте дыра после
+            # управления: игра собирается, работает и выглядит как заготовка.
+            if "Визуальный контракт интерфейса" in content and "theme.css" in content:
+                results.append({"item": "UI Visual Contract", "status": "PASS", "detail": "Визуальный контракт интерфейса дошёл до мастер-промпта"})
+            else:
+                results.append({"item": "UI Visual Contract", "status": "FAIL", "detail": "В мастер-промпте нет визуального контракта интерфейса"})
+                all_passed = False
+
         # 4. Инструкция агенту от фабрики
         agents_file = game_dir / "AGENTS.md"
         if agents_file.exists() and agents_file.stat().st_size > 200:

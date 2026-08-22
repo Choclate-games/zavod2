@@ -164,6 +164,18 @@ class UIUXSpec(BaseSafeModel):
     keyboard_controls: Dict[str, str] = Field(default_factory=dict)
     touch_controls: Dict[str, str] = Field(default_factory=dict)
     wireframes_ascii: str = Field(default="")
+    # Визуальная часть интерфейса. Раньше её здесь не было вообще: спецификация
+    # знала, ЧТО показывать, и ничего не говорила о том, КАК это выглядит, —
+    # поэтому кодовый агент каждый раз добирал вид из умолчаний браузера.
+    visual_language: str = Field(default="")
+    accent_roles: Dict[str, str] = Field(default_factory=dict)
+    typography: str = Field(default="")
+    components: List[str] = Field(default_factory=list)
+    hud_anchors: Dict[str, str] = Field(default_factory=dict)
+    screen_flow: str = Field(default="")
+    feedback_moments: List[str] = Field(default_factory=list)
+    diegetic_elements: List[str] = Field(default_factory=list)
+    state_coverage: List[str] = Field(default_factory=list)
 
 class MobileSpec(BaseSafeModel):
     orientation: str = Field(default="landscape")

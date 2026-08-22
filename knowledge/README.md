@@ -34,7 +34,8 @@ and the tasks each one owns instead of hand-written code, are in `stack/README.m
 | `monetization/rewarded_ads_patterns.md` | Placements, conversion, button UX |
 | `monetization/interstitial_best_practices.md` | Frequency and placement |
 | `ux/localization_system.md` | i18n engine, `_touch` variants, parity audit |
-| `ux/ui_design_system.md` | Tokens, one geometry, capability-gated layout, no-scroll menus |
+| `ux/ui_design_system.md` | Токены и одна шкала масштаба, один акцент на смысл, одна геометрия рамки, типографика и табличные цифры, композиция экрана из трёх зон, конечный набор компонентов, пять состояний экрана, тайминги движения, читаемость HUD над геймплеем, вывод темы из мира игры, таблица анти-паттернов «сгенерированного UI» и чек-лист приёмки |
+| `ux/ui_implementation.md` | Как это собрать над канвасом: слои и `pointer-events` (та самая ошибка, из-за которой не работает управление), `theme.css` как единственный источник значений, роутер экранов, HUD без пересборки DOM в кадре, измеренный вьюпорт и резерв под баннер, компоненты без фреймворка, шрифты и локализация, дорогие свойства оверлея, головная приёмка |
 | `audio/web_audio_and_muting.md` | Web Audio only, autoplay unlock, master bus, platform mute |
 | `platform_builds/android_capacitor.md` | Capacitor shell, package/icon setup, native banner reserve |
 | **`stack/README.md`** | The Three.js stack, pinned versions, the "task → library" table, frame order |

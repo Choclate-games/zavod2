@@ -44,6 +44,23 @@ class SelfCritiqueAgent:
             concept.mobile.safe_area_handling = "CSS env(safe-area-inset-*) padding applied to HUD root."
             corrections.append("Added safe area inset handling to mobile specification.")
 
+        # 4b. Визуальная часть интерфейса.
+        # Спецификация может знать, ЧТО показывать, и молчать о том, КАК это
+        # выглядит. Всё, о чём документ молчит, кодовый агент добирает
+        # умолчаниями браузера — и добирает одинаково в каждой игре.
+        missing_ui = [
+            name for name in ("visual_language", "accent_roles", "typography", "components")
+            if not getattr(concept.ui_ux, name, None)
+        ]
+        if missing_ui:
+            issues_found.append(
+                "Визуальная часть интерфейса не описана: " + ", ".join(missing_ui)
+            )
+            log_warning(
+                "UI_UX_SPECIFICATION.md не задаёт внешний вид интерфейса — пересоберите "
+                "раздел (`rebuild ux`), иначе кодовый агент соберёт меню из умолчаний браузера."
+            )
+
         # 5. Жанровые клише в спецификации.
         # Ловим шаблон, протёкший в текст: он попадёт в мастер-промпт как
         # требование, и кодовый агент построит чужую игру, а не эту.
@@ -91,6 +108,17 @@ class SelfCritiqueAgent:
             f"Условие успеха ({concept.win_conditions or 'см. GAME_DESIGN_DOCUMENT.md'}) "
             f"и условие проигрыша ({concept.lose_conditions or 'см. GAME_DESIGN_DOCUMENT.md'}) работают.",
             "Тач-управление отвечает без задержки, страница под игрой не скроллится.",
+            # Интерфейс раньше не проверялся вообще: единственный пункт про него
+            # говорил о задержке тача. Готовая игра с интерфейсом из умолчаний
+            # браузера проходила приёмку молча.
+            "Интерфейс собран из токенов одного `src/ui/theme.css`: в экранах нет литералов "
+            "цвета, шрифта и `z-index`.",
+            "Слои интерфейса прозрачны для игрового ввода — управление работает под всеми "
+            "оверлеями, слой HUD не кликается.",
+            "У каждого экрана работают состояния загрузки, пустоты и ошибки; возможность, "
+            "которой нет на площадке, не нарисована вовсе.",
+            f"Меню и HUD помещаются в измеренный вьюпорт с учётом safe-area и баннера, а с "
+            f"закрытым игровым полем меню узнаётся как «{concept.title}».",
             f"Rewarded-реклама выдаёт награду ровно один раз ({rewarded}); interstitial соблюдает паузу 90 с.",
             "Audio and physics automatically pause/resume on tab blur and ad display.",
             "Persistent progress saves and loads from Playgama Cloud Storage.",

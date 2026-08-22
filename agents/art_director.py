@@ -32,7 +32,12 @@ SYSTEM_PROMPT = (
     "Изометрия — один из вариантов, а не умолчание.\n"
     "- Стиль называй материалами и светом, а не ярлыком «стилизованный low-poly».\n"
     "- Каждый эффект в vfx_list обслуживает конкретную механику и читается на телефоне.\n"
-    "- Серые кубы на пустой плоскости запрещены: геометрия выразительная и процедурная."
+    "- Серые кубы на пустой плоскости запрещены: геометрия выразительная и процедурная.\n"
+    "- ui_theme — это МАТЕРИАЛ, из которого сделан интерфейс, а не эпитет. Назови, из чего "
+    "панели, рамки и иконки: крашеная сталь с трафаретами, поцарапанный акрил над бирюзовым "
+    "свечением, эмалированная ярмарочная вывеска. Интерфейс живёт в том же мире, что и сцена; "
+    "проверка — если закрыть игровое поле, меню обязано выдавать именно эту игру. "
+    "«Минималистичный тёмный UI» — не ответ."
     + RU_SYSTEM_SUFFIX
 )
 
@@ -46,6 +51,7 @@ class ArtDirectorAgent:
 
         art = concept.art
         if art.style_name and art.camera_perspective:
+            self._ensure_ui_theme(concept)
             log_agent("ArtDirector", f"Visual style: [highlight]{art.style_name}[/highlight] | Camera: {art.camera_perspective}")
             return
 
@@ -68,8 +74,28 @@ class ArtDirectorAgent:
             art.style_name = (option.world if option and option.world else
                               f"Визуальный язык мира игры «{concept.title}»: выразительная процедурная "
                               "геометрия и контрастный свет")
+        self._ensure_ui_theme(concept)
 
         log_agent("ArtDirector", f"Visual style: [highlight]{art.style_name}[/highlight] | Camera: {art.camera_perspective}")
+
+    @staticmethod
+    def _ensure_ui_theme(concept) -> None:
+        """Тема интерфейса не остаётся пустой ни на одном пути.
+
+        Пустое поле кодовый агент добирает умолчаниями браузера, и меню любой
+        игры приходит к одному и тому же фиолетовому градиенту с системным
+        шрифтом. Интерфейс делается из материала мира — это решение принимается
+        здесь, а реализуется в UI_UX_SPECIFICATION.md."""
+        art = concept.art
+        if art.ui_theme:
+            return
+        option = ProjectDirectorAgent.selected_option(concept.direction) if concept.direction else None
+        world = art.environment_theme or (option.world if option and option.world else "") or art.style_name
+        art.ui_theme = (
+            f"Интерфейс сделан из материалов этого мира: {world}. Панели и рамки повторяют "
+            "его фактуру, иконки — его формы; ни одного элемента, который мог бы принадлежать "
+            "любой другой игре."
+        )
 
     @staticmethod
     def _brief(ctx: GenerationContext) -> str:
