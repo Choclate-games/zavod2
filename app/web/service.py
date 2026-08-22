@@ -401,6 +401,9 @@ class FactoryService:
 
         ctx = self._make_context(prompt, renderer, provider, mode, image_provider)
         ctx.session = session
+        # Каталог проекта уже заведён сессией — генератор пакета пишет в него.
+        ctx.game_dir = session.project_dir
+        bus.publish("projects.changed")
         if resume_run_id:
             session.restore(ctx)
         bus.publish("runs.changed")
@@ -480,13 +483,21 @@ class FactoryService:
             session = RunSession.load(run_id, config.output_dir)
         except FileNotFoundError as exc:
             return {"status": "error", "message": str(exc)}
-        chat = session.chat_file.read_text(encoding="utf-8") if session.chat_file.exists() else ""
+        chat = chat_store.load_session(session.slug, session.chat_session_id)
+        messages = [
+            {"role": m.role, "text": m.text, "timestamp": m.timestamp}
+            for m in (chat.messages if chat else [])
+        ]
         return {
             "status": "ok",
             "run_id": session.run_id,
+            "slug": session.slug,
+            "chat_session_id": session.chat_session_id,
             "raw_prompt": session.raw_prompt,
             "steps": session.steps,
-            "chat": chat,
+            "messages": messages,
+            # Транскрипт одним куском — так его показывает панель прогонов.
+            "chat": "\n\n---\n\n".join(m["text"] for m in messages),
         }
 
     def continue_run(self, run_id: str, opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

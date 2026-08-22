@@ -24,19 +24,28 @@ class OutputGenerator:
     def generate_package(self, ctx: GenerationContext) -> Path:
         concept = ctx.concept
         
-        # 1. Determine unique project directory
+        # 1. Каталог проекта.
+        # Его заводит сессия прогона ещё до первого вызова модели — там же
+        # создаётся чат, в котором прогон и идёт. Раньше каталог появлялся
+        # здесь, то есть в самом конце: до этой строки прогону было негде
+        # жить, и прервавшийся прогон не оставлял после себя ничего.
         base_dir = ctx.output_base_dir
         base_dir.mkdir(parents=True, exist_ok=True)
-        
-        slug = concept.slug or "game_project"
-        game_dir = base_dir / slug
-        counter = 2
-        while game_dir.exists() and not (ctx.mode == "rebuild"):
-            game_dir = base_dir / f"{slug}_{counter:03d}"
-            counter += 1
-            
+
+        if ctx.game_dir is not None:
+            game_dir = ctx.game_dir
+        else:
+            slug = concept.slug or "game_project"
+            game_dir = base_dir / slug
+            counter = 2
+            while game_dir.exists() and not (ctx.mode == "rebuild"):
+                game_dir = base_dir / f"{slug}_{counter:03d}"
+                counter += 1
+
         game_dir.mkdir(parents=True, exist_ok=True)
         ctx.game_dir = game_dir
+        # Слаг концепции подтягивается к имени каталога: документы и мастер-промпт
+        # ссылаются на проект по нему, и расхождение здесь ломает пути в скиллах.
         concept.slug = game_dir.name
         
         log_info(f"Target Project Directory: [highlight]{game_dir}[/highlight]")

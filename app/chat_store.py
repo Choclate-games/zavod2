@@ -77,6 +77,11 @@ def _session_path(slug: str, session_id: str) -> Path:
     return _chats_dir(slug) / f"{safe}.json"
 
 
+def session_path(slug: str, session_id: str) -> Path:
+    """Публичный путь к файлу чата — нужен сессии прогона для показа в вебе."""
+    return _session_path(slug, session_id)
+
+
 def list_sessions(slug: str) -> List[ChatSession]:
     """Все беседы проекта, свежие сверху."""
     try:

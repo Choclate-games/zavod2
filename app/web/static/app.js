@@ -1805,7 +1805,7 @@ function runRow(run) {
   const title = el("div", "", esc(run.raw_prompt || "(без идеи)"));
   title.style.fontWeight = "600";
   const meta = el("div", "small dim",
-    esc(`${run.run_id} · шагов пройдено: ${run.done}` +
+    esc(`проект: ${run.slug || "—"} · шагов пройдено: ${run.done}` +
         (run.provider_name ? ` · провайдер: ${run.provider_name}` : "")));
   left.appendChild(title);
   left.appendChild(meta);
@@ -1824,8 +1824,17 @@ function runRow(run) {
   }
   right.appendChild(status);
 
-  const chatBtn = el("button", "btn small", "💬 Чат");
-  chatBtn.onclick = () => openRunChat(run.run_id);
+  // Чат прогона — обычный чат проекта, поэтому ведём прямо в него: там же
+  // разговор продолжается с кодовым агентом, когда спецификация собрана.
+  const chatBtn = el("button", "btn small", "💬 Чат прогона");
+  chatBtn.onclick = async () => {
+    if (run.slug && run.chat_session_id) {
+      await selectProject(run.slug);
+      openChat(run.chat_session_id);
+    } else {
+      openRunChat(run.run_id);
+    }
+  };
   right.appendChild(chatBtn);
 
   if (run.can_continue) {

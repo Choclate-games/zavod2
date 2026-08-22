@@ -14,6 +14,7 @@ from agents.model_call import ask_model
 from app.context import GenerationContext
 from app.models import ArtSpec, GameConcept, ProjectDirection
 from app.pipeline import Pipeline
+from app import chat_store
 from app.run_session import STATUS_DONE, STATUS_FAILED, RunPaused, RunSession
 from providers.factory import ProviderFactory
 from providers.local import LocalAIProvider
@@ -75,6 +76,61 @@ def test_pause_names_the_run_and_the_step(tmp_path, monkeypatch):
     assert "continue" in str(paused), "человеку нужна команда продолжения, а не стектрейс"
 
 
+# --------------------------------------------------------------------------- проект и чат
+
+def test_run_creates_project_and_chat_before_the_first_call(tmp_path):
+    """Каталог проекта и чат появляются до первого вызова модели.
+
+    Раньше проект создавался последним шагом конвейера: прогон, вставший на
+    середине, не оставлял после себя ничего — ни каталога, ни переписки."""
+    session = RunSession.start("игра про смотрителя маяка", tmp_path, "test-provider")
+
+    assert session.slug, "у прогона должен быть слаг проекта"
+    assert session.project_dir.is_dir(), "каталог проекта заводится на старте"
+    assert session.project_dir.name == session.slug
+
+    chats = chat_store.list_sessions(session.slug)
+    assert len(chats) == 1, "прогон заводит ровно один чат в проекте"
+    assert chats[0].id == session.chat_session_id
+    # Первая реплика чата — идея пользователя, как в обычной переписке.
+    assert chats[0].messages[0].role == "user"
+    assert chats[0].messages[0].text == "игра про смотрителя маяка"
+
+
+def test_run_transcript_goes_into_the_project_chat(tmp_path):
+    session = RunSession.start("игра про смотрителя маяка", tmp_path)
+    ctx = make_ctx(FlakyProvider(failures=0), session, tmp_path)
+
+    session.begin_step("art_director", "Арт-дирекция")
+    ask_model(ctx, "ArtDirector", "system", "какой материал у интерфейса?", GameConcept)
+    session.complete_step("art_director", ctx)
+
+    chat = chat_store.load_session(session.slug, session.chat_session_id)
+    texts = "\n".join(m.text for m in chat.messages)
+    assert "ArtDirector" in texts
+    assert "какой материал у интерфейса?" in texts
+    assert "art_director" in texts, "шаги прогона видны в переписке"
+
+
+def test_retries_are_visible_in_the_chat(tmp_path):
+    """Повтор — это то, что человек должен видеть, а не молчаливая пауза."""
+    session = RunSession.start("игра про смотрителя маяка", tmp_path)
+    ask_model(make_ctx(FlakyProvider(failures=2), session, tmp_path),
+              "ArtDirector", "system", "user", GameConcept)
+
+    chat = chat_store.load_session(session.slug, session.chat_session_id)
+    texts = "\n".join(m.text for m in chat.messages)
+    assert "попытка 1 из 3" in texts
+    assert "обрыв связи" in texts
+
+
+def test_slug_does_not_collide_with_an_existing_project(tmp_path):
+    first = RunSession.start("игра про смотрителя маяка", tmp_path)
+    second = RunSession.start("игра про смотрителя маяка", tmp_path)
+    assert first.slug != second.slug
+    assert second.project_dir.is_dir()
+
+
 # --------------------------------------------------------------------------- сессия
 
 def test_session_records_chat_and_step_statuses(tmp_path):
@@ -85,11 +141,6 @@ def test_session_records_chat_and_step_statuses(tmp_path):
     ask_model(ctx, "ArtDirector", "system", "какой материал у интерфейса?", GameConcept)
     session.complete_step("art_director", ctx)
     session.fail_step("ux_designer", "провайдер молчит")
-
-    chat = session.chat_file.read_text(encoding="utf-8")
-    assert "ArtDirector" in chat
-    assert "какой материал у интерфейса?" in chat
-    assert session.raw_prompt in chat
 
     reloaded = RunSession.load(session.run_id, tmp_path)
     assert reloaded.steps["art_director"] == STATUS_DONE

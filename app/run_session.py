@@ -1,21 +1,23 @@
-"""Сессия прогона: чат, снимки и продолжение с места остановки.
+"""Сессия прогона: проект, чат и продолжение с места остановки.
 
-Раньше прогон был одноразовым. Двадцать агентов по очереди дёргали провайдера,
-и осечка на восемнадцатом означала, что семнадцать удачных ответов выброшены —
-повторять приходилось всё с нуля, заново оплачивая каждый вызов. Ровно поэтому
-когда-то и появилась офлайн-подстраховка: лучше плохой пакет, чем никакого.
+Раньше прогон был одноразовым и бездомным. Двадцать агентов по очереди дёргали
+провайдера, каталог проекта появлялся только в самом конце, а осечка на
+восемнадцатом шаге означала, что семнадцать удачных ответов выброшены —
+повторять приходилось всё с нуля, заново оплачивая каждый вызов.
 
-Сессия убирает выбор между этими двумя плохими вариантами. Каждый прогон живёт
-в своём каталоге:
+Теперь прогон с первой секунды живёт в проекте:
 
-    <output>/.runs/<run_id>/
-        state.json     статус каждого шага, провайдер, идея, время
-        concept.json   снимок концепции после последнего удачного шага
-        chat.md        человекочитаемый транскрипт: что спросили, что ответили
+    workspace/<слаг>/
+        .factory/run/state.json      статус каждого шага, провайдер, идея
+        .factory/run/concept.json    снимок концепции после последнего шага
+        .factory/chats/<id>.json     чат прогона — обычный чат проекта
 
-Если провайдер не отвечает даже после повторов, прогон не падает со стектрейсом,
-а приостанавливается: всё сделанное уже на диске, и `continue <run_id>`
-поднимает концепцию из снимка и продолжает ровно со следующего шага.
+Каталог проекта и чат заводятся до первого вызова модели, а не после последнего.
+Ход прогона, повторы и пауза пишутся сообщениями в этот чат — тот самый, что
+виден на вкладке «Чаты разработки»; когда спецификация собрана, в нём же
+продолжается разговор с кодовым агентом. Приостановленный прогон продолжается
+оттуда же: концепция поднимается из снимка, а шаги, на которые модель уже
+ответила, не переспрашиваются.
 """
 from __future__ import annotations
 
@@ -25,10 +27,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app import chat_store
 from app.mechanics_repo import _slugify
 from app.models import GameConcept, ProjectDirection
 
-RUNS_DIRNAME = ".runs"
+RUN_DIRNAME = Path(".factory") / "run"
 
 # Длинные куски в чате режутся: транскрипт нужен читаемым, а мастер-промпт и
 # JSON-схема концепта весят сотни килобайт. Полные тексты и так уходят
@@ -61,6 +64,8 @@ class RunSession:
     raw_prompt: str = ""
     provider_name: str = ""
     mode: str = "standard"
+    slug: str = ""
+    chat_session_id: str = ""
     steps: Dict[str, str] = field(default_factory=dict)
     created_at: str = ""
     game_dir: Optional[str] = None
@@ -69,7 +74,23 @@ class RunSession:
 
     @staticmethod
     def runs_dir(output_base: Path) -> Path:
-        return Path(output_base) / RUNS_DIRNAME
+        """Корень, внутри которого лежат проекты. Прогоны теперь живут в них."""
+        return Path(output_base)
+
+    @staticmethod
+    def _free_slug(raw_prompt: str, output_base: Path) -> str:
+        """Слаг проекта из идеи — до первого вызова модели.
+
+        Раньше слаг брался из названия концепции, а оно появлялось только после
+        IdeaAnalyzer: до этого момента прогону негде было жить. Слаг из идеи
+        известен сразу, и он же остаётся именем проекта — переименовывать
+        каталог на середине прогона дороже, чем смириться с именем от идеи."""
+        base = _slugify(raw_prompt)[:48] or "game_project"
+        slug, counter = base, 2
+        while (Path(output_base) / slug).exists():
+            slug = f"{base}_{counter:03d}"
+            counter += 1
+        return slug
 
     @classmethod
     def start(
@@ -80,41 +101,62 @@ class RunSession:
         mode: str = "standard",
     ) -> "RunSession":
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        run_id = f"{stamp}-{_slugify(raw_prompt)[:32] or 'run'}"
-        root = cls.runs_dir(output_base) / run_id
+        slug = cls._free_slug(raw_prompt, output_base)
+        run_id = f"{stamp}-{slug}"
+
+        # Каталог проекта заводится сразу: чат обязан лежать внутри проекта,
+        # а проект — существовать до первого ответа модели, чтобы прогон было
+        # где продолжить, даже если он встал на первом же шаге.
+        project = Path(output_base) / slug
+        project.mkdir(parents=True, exist_ok=True)
+        root = project / RUN_DIRNAME
         root.mkdir(parents=True, exist_ok=True)
+
+        chat = chat_store.create_session(slug, title=_chat_title(raw_prompt))
+        chat_store.append_message(slug, chat, "user", raw_prompt)
 
         session = cls(
             run_id=run_id, root=root, raw_prompt=raw_prompt,
-            provider_name=provider_name, mode=mode,
+            provider_name=provider_name, mode=mode, slug=slug,
+            chat_session_id=chat.id,
             created_at=datetime.now().isoformat(timespec="seconds"),
         )
         session.save()
-        session._write_chat_header()
+        session.note(
+            f"Прогон `{run_id}` начат. Провайдер: {provider_name or 'по умолчанию'}, "
+            f"режим: {mode}. Проект: `{slug}`."
+        )
         return session
 
     @classmethod
-    def load(cls, run_id: str, output_base: Path) -> "RunSession":
-        root = cls.runs_dir(output_base) / run_id
-        state_file = root / "state.json"
-        if not state_file.exists():
-            # Позволяем сокращённый идентификатор: человек копирует его глазами.
-            matches = sorted(cls.runs_dir(output_base).glob(f"*{run_id}*"))
-            matches = [m for m in matches if (m / "state.json").exists()]
-            if not matches:
-                raise FileNotFoundError(
-                    f"Прогон '{run_id}' не найден в {cls.runs_dir(output_base)}"
-                )
-            root = matches[-1]
-            state_file = root / "state.json"
+    def _state_files(cls, output_base: Path) -> List[Path]:
+        base = Path(output_base)
+        if not base.is_dir():
+            return []
+        return sorted(base.glob(f"*/{RUN_DIRNAME.as_posix()}/state.json"))
 
-        data = json.loads(state_file.read_text(encoding="utf-8"))
+    @classmethod
+    def load(cls, run_id: str, output_base: Path) -> "RunSession":
+        for state_file in cls._state_files(output_base):
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            # Прогон ищется и по слагу проекта: в вебе под рукой обычно он.
+            if run_id in (data.get("run_id"), data.get("slug")) or run_id in str(state_file):
+                return cls._from_dict(data, state_file.parent)
+        raise FileNotFoundError(f"Прогон '{run_id}' не найден в {output_base}")
+
+    @classmethod
+    def _from_dict(cls, data: Dict[str, Any], root: Path) -> "RunSession":
         return cls(
-            run_id=data.get("run_id", root.name),
+            run_id=data.get("run_id", root.parent.parent.name),
             root=root,
             raw_prompt=data.get("raw_prompt", ""),
             provider_name=data.get("provider_name", ""),
             mode=data.get("mode", "standard"),
+            slug=data.get("slug", ""),
+            chat_session_id=data.get("chat_session_id", ""),
             steps=data.get("steps", {}),
             created_at=data.get("created_at", ""),
             game_dir=data.get("game_dir"),
@@ -122,19 +164,18 @@ class RunSession:
 
     @classmethod
     def list_runs(cls, output_base: Path) -> List[Dict[str, Any]]:
-        """Прогоны от свежих к старым — для команды `runs` и для GUI."""
-        base = cls.runs_dir(output_base)
-        if not base.is_dir():
-            return []
+        """Прогоны от свежих к старым — для команды `runs` и для веба."""
         rows: List[Dict[str, Any]] = []
-        for state_file in sorted(base.glob("*/state.json"), reverse=True):
+        for state_file in cls._state_files(output_base):
             try:
                 data = json.loads(state_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             statuses = data.get("steps", {})
             rows.append({
-                "run_id": data.get("run_id", state_file.parent.name),
+                "run_id": data.get("run_id", state_file.parent.parent.parent.name),
+                "slug": data.get("slug", state_file.parent.parent.parent.name),
+                "chat_session_id": data.get("chat_session_id", ""),
                 "raw_prompt": data.get("raw_prompt", ""),
                 "created_at": data.get("created_at", ""),
                 "provider_name": data.get("provider_name", ""),
@@ -143,9 +184,15 @@ class RunSession:
                 "finished": bool(data.get("game_dir")),
                 "game_dir": data.get("game_dir"),
             })
+        rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         return rows
 
     # ------------------------------------------------------------------ состояние
+
+    @property
+    def project_dir(self) -> Path:
+        """Каталог проекта: .factory/run лежит внутри него."""
+        return self.root.parent.parent
 
     @property
     def state_file(self) -> Path:
@@ -157,11 +204,14 @@ class RunSession:
 
     @property
     def chat_file(self) -> Path:
-        return self.root / "chat.md"
+        """Файл чата прогона — обычного чата проекта."""
+        return chat_store.session_path(self.slug, self.chat_session_id)
 
     def save(self) -> None:
         payload = {
             "run_id": self.run_id,
+            "slug": self.slug,
+            "chat_session_id": self.chat_session_id,
             "raw_prompt": self.raw_prompt,
             "provider_name": self.provider_name,
             "mode": self.mode,
@@ -180,7 +230,7 @@ class RunSession:
     def begin_step(self, step_key: str, title: str = "") -> None:
         self.steps[step_key] = STATUS_RUNNING
         self.save()
-        self._append_chat(f"\n## ▶ {step_key}{(' — ' + title) if title else ''}\n")
+        self._append_chat(f"▶ **{step_key}**{(' — ' + title) if title else ''}")
 
     def complete_step(self, step_key: str, ctx=None) -> None:
         self.steps[step_key] = STATUS_DONE
@@ -191,12 +241,12 @@ class RunSession:
     def fail_step(self, step_key: str, error: str) -> None:
         self.steps[step_key] = STATUS_FAILED
         self.save()
-        self._append_chat(f"\n**Шаг остановлен:** {error}\n")
+        self._append_chat(f"⏸ Шаг **{step_key}** остановлен: {error}")
 
     def finish(self, game_dir: Path) -> None:
         self.game_dir = str(game_dir)
         self.save()
-        self._append_chat(f"\n---\n\n**Пакет собран:** `{game_dir}`\n")
+        self._append_chat(f"✅ Пакет спецификаций собран: `{game_dir}`")
 
     # ------------------------------------------------------------------ снимки
 
@@ -239,34 +289,42 @@ class RunSession:
         attempt: int = 1,
         attempts_total: int = 1,
     ) -> None:
-        """Одна реплика чата: что у модели спросили и что она ответила."""
-        marker = f" (попытка {attempt} из {attempts_total})" if attempts_total > 1 else ""
-        parts = [f"\n**{agent_name}**{marker}\n", "\n_Запрос_\n", _quote(user_prompt), "\n"]
+        """Одна реплика чата: что у модели спросили и что она ответила.
+
+        Раньше это уходило в отдельный chat.md рядом с прогоном — файл, который
+        нигде не показывался. Теперь в обычный чат проекта: тот же, что виден на
+        вкладке «Чаты разработки», и тот, в котором разговор продолжается после
+        сборки спецификации."""
+        marker = f" · попытка {attempt} из {attempts_total}" if attempts_total > 1 else ""
         if error:
-            parts.append(f"\n_Ошибка_: {error}\n")
+            body = f"**{agent_name}**{marker}\n\n❌ {error}"
         else:
-            parts.append("\n_Ответ_\n")
-            parts.append(_quote(answer))
-            parts.append("\n")
-        self._append_chat("".join(parts))
+            body = (
+                f"**{agent_name}**{marker}\n\n"
+                f"_Запрос_\n{_quote(user_prompt)}\n\n"
+                f"_Ответ_\n{_quote(answer)}"
+            )
+        self._append_chat(body)
 
     def note(self, text: str) -> None:
-        self._append_chat(f"\n> {text}\n")
-
-    def _write_chat_header(self) -> None:
-        header = (
-            f"# Прогон `{self.run_id}`\n\n"
-            f"- **Идея:** {self.raw_prompt}\n"
-            f"- **Провайдер:** {self.provider_name or 'по умолчанию'}\n"
-            f"- **Режим:** {self.mode}\n"
-            f"- **Начат:** {self.created_at}\n\n"
-            f"Продолжить прерванный прогон: `python -m app.cli continue {self.run_id}`\n"
-        )
-        self.chat_file.write_text(header, encoding="utf-8")
+        self._append_chat(text)
 
     def _append_chat(self, text: str) -> None:
-        with open(self.chat_file, "a", encoding="utf-8") as f:
-            f.write(text)
+        """Сообщение в чат прогона.
+
+        Молча пропускается, если чата нет: прогон важнее своего протокола и
+        падать на записи в журнал не должен."""
+        if not (self.slug and self.chat_session_id):
+            return
+        session = chat_store.load_session(self.slug, self.chat_session_id)
+        if session is None:
+            return
+        chat_store.append_message(self.slug, session, "assistant", text)
+
+
+def _chat_title(raw_prompt: str) -> str:
+    title = " ".join((raw_prompt or "").split())
+    return f"🏭 Прогон: {title[:40]}" if title else "🏭 Прогон фабрики"
 
 
 def _quote(text: str) -> str:

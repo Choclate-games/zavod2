@@ -153,6 +153,9 @@ class Pipeline:
             image_provider=ProviderFactory.get_image_provider(image_provider_name),
             session=session,
         )
+        # Каталог проекта уже существует — его завела сессия. Генератор пакета
+        # пишет в него, а не заводит свой в конце прогона.
+        ctx.game_dir = session.project_dir
         if resume_run_id:
             session.restore(ctx)
 

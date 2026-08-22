@@ -32,6 +32,7 @@ MANIFEST
 # --- Виртуальные окружения ---
 venv/
 .venv/
+.venv-check/
 ENV/
 env/
 env.bak/

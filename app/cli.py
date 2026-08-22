@@ -93,9 +93,14 @@ def _run_or_pause(**kwargs) -> None:
     except RunPaused as paused:
         console.print(f"\n[bold yellow]⏸ Прогон приостановлен[/bold yellow]\n{paused}")
         if paused.run_id:
+            try:
+                session = RunSession.load(paused.run_id, kwargs["output_dir"])
+                chat_hint = f"\n[dim]Чат прогона:[/dim] {session.chat_file}"
+            except FileNotFoundError:
+                chat_hint = ""
             console.print(
-                f"\n[dim]Чат прогона:[/dim] {RunSession.runs_dir(kwargs['output_dir']) / paused.run_id / 'chat.md'}"
-                f"\n[bold]Продолжить:[/bold] python -m app.cli continue {paused.run_id}"
+                chat_hint
+                + f"\n[bold]Продолжить:[/bold] python -m app.cli continue {paused.run_id}"
             )
         raise typer.Exit(code=2)
 
@@ -133,6 +138,7 @@ def list_runs(
 
     table = Table(title="Прогоны фабрики")
     table.add_column("Прогон", style="cyan", no_wrap=True)
+    table.add_column("Проект", style="magenta")
     table.add_column("Идея")
     table.add_column("Шагов", justify="right")
     table.add_column("Статус")
@@ -143,7 +149,8 @@ def list_runs(
             status = f"[yellow]пауза на {row['failed'][0]}[/yellow]"
         else:
             status = "[dim]не завершён[/dim]"
-        table.add_row(row["run_id"], (row["raw_prompt"] or "")[:60], str(row["done"]), status)
+        table.add_row(row["run_id"], row.get("slug", ""),
+                      (row["raw_prompt"] or "")[:50], str(row["done"]), status)
     console.print(table)
     console.print("[dim]Продолжить: python -m app.cli continue <прогон>[/dim]")
 
