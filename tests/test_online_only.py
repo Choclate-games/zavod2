@@ -15,6 +15,7 @@ import pytest
 from agents.design_os_base import ask_model
 from app.context import GenerationContext
 from app.models import GameConcept
+from app.run_session import RunPaused
 from providers.factory import ProviderFactory
 
 
@@ -61,9 +62,13 @@ def test_missing_provider_stops_the_run():
         ask_model(make_ctx(None), "TestAgent", "system", "user", GameConcept)
 
 
-def test_provider_failure_stops_the_run_instead_of_falling_back():
-    """Раньше здесь было предупреждение и None — и раздел собирала эвристика."""
-    with pytest.raises(RuntimeError, match="только онлайн"):
+def test_provider_failure_pauses_the_run_instead_of_falling_back(monkeypatch):
+    """Раньше здесь было предупреждение и None — и раздел собирала эвристика.
+
+    Теперь, исчерпав повторы, прогон приостанавливается: это RunPaused, а не
+    подстановка заготовки и не падение с потерей сделанного."""
+    monkeypatch.setenv("AGENT_RETRY_ATTEMPTS", "2")
+    with pytest.raises(RunPaused, match="приостановлен"):
         ask_model(make_ctx(ExplodingProvider()), "TestAgent", "system", "user", GameConcept)
 
 

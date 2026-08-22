@@ -21,6 +21,7 @@ from app.logging import console, log_info, log_error, log_success
 from app.config import config
 from app.pipeline import Pipeline
 from app.context import GenerationContext
+from app.run_session import RunPaused, RunSession
 from providers.factory import ProviderFactory
 from agents.idea_analyzer import IdeaAnalyzerAgent
 from app import design_os
@@ -73,14 +74,79 @@ def create(
         raise typer.Exit(code=1)
 
     console.print(f"[bold cyan]🚀 Initializing AI Game Prompt Factory[/bold cyan] [dim](Mode: {mode}, Provider: {provider}, Renderer: {renderer})[/dim]")
-    pipeline.run(
+    _run_or_pause(
         raw_prompt=final_prompt,
         output_dir=output_dir,
         mode=mode,
         forced_renderer=renderer if renderer != "auto" else None,
         provider_name=provider,
-        image_provider_name=image_provider
+        image_provider_name=image_provider,
     )
+
+
+def _run_or_pause(**kwargs) -> None:
+    """Запускает прогон и показывает паузу по-человечески.
+
+    Приостановленный прогон — это не падение: всё сделанное лежит в сессии.
+    Печатать сюда стектрейс незачем, нужен идентификатор и команда продолжения."""
+    try:
+        pipeline.run(**kwargs)
+    except RunPaused as paused:
+        console.print(f"\n[bold yellow]⏸ Прогон приостановлен[/bold yellow]\n{paused}")
+        if paused.run_id:
+            console.print(
+                f"\n[dim]Чат прогона:[/dim] {RunSession.runs_dir(kwargs['output_dir']) / paused.run_id / 'chat.md'}"
+                f"\n[bold]Продолжить:[/bold] python -m app.cli continue {paused.run_id}"
+            )
+        raise typer.Exit(code=2)
+
+
+@app.command(name="continue", help="Продолжить приостановленный прогон с места остановки.")
+def continue_run(
+    run_id: str = typer.Argument(..., help="Идентификатор прогона (см. `runs`); можно часть"),
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o", help="Каталог с прогонами"),
+    provider: str = typer.Option("", "--provider", "-p", help="Сменить провайдера на продолжении"),
+    image_provider: str = typer.Option("local", "--image-provider", help="Image generator: qwen, agy, local, none"),
+):
+    session = RunSession.load(run_id, output_dir)
+    console.print(
+        f"[bold cyan]▶ Продолжаю прогон[/bold cyan] [highlight]{session.run_id}[/highlight]\n"
+        f"[dim]{session.raw_prompt}[/dim]"
+    )
+    _run_or_pause(
+        raw_prompt=session.raw_prompt,
+        output_dir=output_dir,
+        provider_name=provider or session.provider_name,
+        image_provider_name=image_provider,
+        resume_run_id=session.run_id,
+    )
+
+
+@app.command(name="runs", help="Показать прогоны: что завершено, что можно продолжить.")
+def list_runs(
+    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o", help="Каталог с прогонами"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Сколько показать"),
+):
+    rows = RunSession.list_runs(output_dir)
+    if not rows:
+        console.print(f"[dim]Прогонов не найдено в {RunSession.runs_dir(output_dir)}[/dim]")
+        return
+
+    table = Table(title="Прогоны фабрики")
+    table.add_column("Прогон", style="cyan", no_wrap=True)
+    table.add_column("Идея")
+    table.add_column("Шагов", justify="right")
+    table.add_column("Статус")
+    for row in rows[:limit]:
+        if row["finished"]:
+            status = "[green]собран[/green]"
+        elif row["failed"]:
+            status = f"[yellow]пауза на {row['failed'][0]}[/yellow]"
+        else:
+            status = "[dim]не завершён[/dim]"
+        table.add_row(row["run_id"], (row["raw_prompt"] or "")[:60], str(row["done"]), status)
+    console.print(table)
+    console.print("[dim]Продолжить: python -m app.cli continue <прогон>[/dim]")
 
 @app.command(name="analyze", help="Analyze game concept and estimate viability scores without generating full package.")
 def analyze(

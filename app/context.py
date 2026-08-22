@@ -24,6 +24,10 @@ class GenerationContext:
     concept: Optional[GameConcept] = None
     metadata: Optional[GenerationMetadata] = None
     
+    # Сессия прогона: чат, снимки концепции и продолжение с места остановки.
+    # Типизирована как Any, чтобы app.run_session не тянуло сюда циклический импорт.
+    session: Optional[Any] = None
+
     game_dir: Optional[Path] = None
     generated_files: List[Path] = field(default_factory=list)
     validation_reports: List[Dict[str, Any]] = field(default_factory=list)

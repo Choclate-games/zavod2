@@ -3,8 +3,11 @@ from typing import Optional, Tuple
 import yaml
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from datetime import datetime
+
 from app.context import GenerationContext
 from app.logging import console, log_info, log_success, log_error
+from app.run_session import RunPaused, RunSession
 from providers.factory import ProviderFactory
 from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
@@ -47,6 +50,56 @@ class Pipeline:
         self.compiler = PromptCompilerAgent()
         self.validator = OutputValidator()
 
+    # Шаги прогона одной таблицей: ключ, заголовок, действие, нужен ли слой
+    # Design OS. Раньше это был линейный список вызовов внутри run(); таблица
+    # нужна, чтобы продолжение прерванного прогона и запись в сессию жили в
+    # одном месте, а не повторялись у каждого шага.
+    @staticmethod
+    def _steps():
+        return [
+            # Без директора проекта IdeaAnalyzer сам выбирал жанр и стабильно
+            # приходил к арене с волнами: это самый вероятный ответ на любой запрос.
+            ("project_director", "[magenta]Project Director: Направления проекта и запрет шаблонов...",
+             lambda ctx: ProjectDirectorAgent().run(ctx), False),
+            ("idea_analyzer", "[magenta]Idea Analyzer: Deconstructing concept and pillars...",
+             lambda ctx: IdeaAnalyzerAgent().run(ctx), False),
+            ("concept_architect", "[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...",
+             lambda ctx: ConceptArchitectAgent().run(ctx), True),
+            ("game_designer", "[magenta]Game Designer: Shaping vision, core loop, and session rules...",
+             lambda ctx: GameDesignerAgent().run(ctx), False),
+            ("reference_analyst", "[magenta]Reference Analyst: Extracting mechanics & market patterns...",
+             lambda ctx: ReferenceAnalystAgent().run(ctx), False),
+            ("mechanics_architect", "[magenta]Mechanics Architect: Designing formulas, input, and feedback...",
+             lambda ctx: MechanicsArchitectAgent().run(ctx), False),
+            # Раньше каждому проекту доставались все документы threejs и stack.
+            ("knowledge_curator", "[magenta]Knowledge Curator: Подбор документов базы знаний...",
+             lambda ctx: KnowledgeCuratorAgent().run(ctx), False),
+            ("renderer_selector", "[magenta]Renderer Selector: Configuring Three.js stack...",
+             lambda ctx: RendererSelectorAgent().run(ctx), False),
+            ("technical_architect", "[magenta]Technical Architect: Designing TypeScript & system layers...",
+             lambda ctx: TechnicalArchitectAgent().run(ctx), False),
+            ("playgama_specialist", "[magenta]Playgama Specialist: Integrating Bridge SDK, ads, & cloud save...",
+             lambda ctx: PlaygamaSpecialistAgent().run(ctx), False),
+            ("monetization_designer", "[magenta]Monetization Designer: Designing Rewarded & Interstitial flow...",
+             lambda ctx: MonetizationDesignerAgent().run(ctx), False),
+            ("art_director", "[magenta]Art Director: Formulating lighting, camera angle, and aesthetics...",
+             lambda ctx: ArtDirectorAgent().run(ctx), False),
+            ("ux_designer", "[magenta]UX Designer: Laying out HUD wireframes & mobile ergonomics...",
+             lambda ctx: UXDesignerAgent().run(ctx), False),
+            ("experience_density", "[magenta]Experience Density: Плотность первой сессии и телеметрия...",
+             lambda ctx: ExperienceDensityAgent().run(ctx), True),
+            ("preview_designer", "[magenta]Preview Designer: Framing concept screenshot prompt...",
+             lambda ctx: PreviewDesignerAgent().run(ctx), False),
+            ("skill_generator", "[magenta]Skill Generator: Preparing reusable game-specific skills...",
+             lambda ctx: SkillGeneratorAgent().run(ctx), False),
+            ("validation_planner", "[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...",
+             lambda ctx: ValidationPlannerAgent().run(ctx), True),
+            ("decision_recorder", "[magenta]Decision Recorder: Решения, откаты и человеческие ворота...",
+             lambda ctx: DecisionRecorderAgent().run(ctx), True),
+            ("critic", "[magenta]Self-Critique Agent: Verifying coherence & Definition of Done...",
+             lambda ctx: SelfCritiqueAgent().run(ctx), False),
+        ]
+
     def run(
         self,
         raw_prompt: str,
@@ -54,130 +107,70 @@ class Pipeline:
         mode: str = "standard",
         forced_renderer: Optional[str] = None,
         provider_name: str = "default",   # офлайн-режим отключён, см. ProviderFactory
-        image_provider_name: str = "local"
+        image_provider_name: str = "local",
+        resume_run_id: Optional[str] = None,
     ) -> Path:
+        # Прогон живёт в сессии: чат с моделью, снимок концепции после каждого
+        # шага и статусы шагов. Продолжение поднимает ровно её.
+        if resume_run_id:
+            session = RunSession.load(resume_run_id, output_dir)
+            raw_prompt = raw_prompt or session.raw_prompt
+            provider_name = provider_name or session.provider_name
+            mode = session.mode or mode
+            log_info(f"Продолжаю прогон [highlight]{session.run_id}[/highlight]: {session.raw_prompt}")
+            session.note(f"Прогон продолжен {datetime.now().isoformat(timespec='seconds')}")
+        else:
+            session = RunSession.start(raw_prompt, output_dir, provider_name, mode)
+            log_info(f"Прогон [highlight]{session.run_id}[/highlight] — чат: {session.chat_file}")
+
         ctx = GenerationContext(
-            raw_prompt=raw_prompt,
+            raw_prompt=raw_prompt or session.raw_prompt,
             output_base_dir=output_dir,
             mode=mode,
             forced_renderer=forced_renderer,
             provider_name=provider_name,
             image_provider_name=image_provider_name,
             ai_provider=ProviderFactory.get_ai_provider(provider_name),
-            image_provider=ProviderFactory.get_image_provider(image_provider_name)
+            image_provider=ProviderFactory.get_image_provider(image_provider_name),
+            session=session,
         )
+        if resume_run_id:
+            session.restore(ctx)
 
         with Progress(
             SpinnerColumn(spinner_name="dots"),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            # 0. Project Director — решает, чем станет идея, до написания ТЗ.
-            # Без этого шага IdeaAnalyzer сам выбирал жанр и стабильно приходил
-            # к арене с волнами: это самый вероятный ответ на любой запрос.
-            t0 = progress.add_task("[magenta]Project Director: Направления проекта и запрет шаблонов...", total=1)
-            ProjectDirectorAgent().run(ctx)
-            progress.update(t0, completed=1)
+            for key, title, action, needs_design_os in self._steps():
+                # Слой Design OS отключается флагом config.DESIGN_OS_ENABLED.
+                if needs_design_os and not DESIGN_OS_ENABLED:
+                    continue
+                if session.is_done(key):
+                    # Шаг уже отвечен в прошлый раз — модель об этом не переспрашиваем.
+                    progress.update(progress.add_task(f"[dim]{title} (готово ранее)", total=1), completed=1)
+                    continue
 
-            # 1. Idea Analyzer
-            t1 = progress.add_task("[magenta]Idea Analyzer: Deconstructing concept and pillars...", total=1)
-            IdeaAnalyzerAgent().run(ctx)
-            progress.update(t1, completed=1)
+                task = progress.add_task(title, total=1)
+                session.begin_step(key, title)
+                try:
+                    action(ctx)
+                except RunPaused as paused:
+                    session.fail_step(key, str(paused))
+                    raise
+                except Exception as exc:
+                    # Не связанная с провайдером ошибка — тоже не теряем прогон:
+                    # шаг помечен, снимок предыдущего шага на диске.
+                    session.fail_step(key, f"{type(exc).__name__}: {exc}")
+                    raise
+                session.complete_step(key, ctx)
+                progress.update(task, completed=1)
 
-            # 1b. Concept Architect — часть слоя Design OS, отключён флагом
-            # config.DESIGN_OS_ENABLED (см. app/config.py).
-            if DESIGN_OS_ENABLED:
-                t1b = progress.add_task("[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...", total=1)
-                ConceptArchitectAgent().run(ctx)
-                progress.update(t1b, completed=1)
-
-            # 2. Game Designer
-            t2 = progress.add_task("[magenta]Game Designer: Shaping vision, core loop, and session rules...", total=1)
-            GameDesignerAgent().run(ctx)
-            progress.update(t2, completed=1)
-
-            # 3. Reference Analyst
-            t3 = progress.add_task("[magenta]Reference Analyst: Extracting mechanics & market patterns...", total=1)
-            ReferenceAnalystAgent().run(ctx)
-            progress.update(t3, completed=1)
-
-            # 4. Mechanics Architect
-            t4 = progress.add_task("[magenta]Mechanics Architect: Designing formulas, input, and feedback...", total=1)
-            MechanicsArchitectAgent().run(ctx)
-            progress.update(t4, completed=1)
-
-            # 4b. Knowledge Curator — выбирает документы базы знаний под проект.
-            # Раньше каждому проекту доставались все документы threejs и stack.
-            t4b = progress.add_task("[magenta]Knowledge Curator: Подбор документов базы знаний...", total=1)
-            KnowledgeCuratorAgent().run(ctx)
-            progress.update(t4b, completed=1)
-
-            # 5. Renderer Selector
-            t5 = progress.add_task("[magenta]Renderer Selector: Configuring Three.js stack...", total=1)
-            RendererSelectorAgent().run(ctx)
-            progress.update(t5, completed=1)
-
-            # 6. Technical Architect
-            t6 = progress.add_task("[magenta]Technical Architect: Designing TypeScript & system layers...", total=1)
-            TechnicalArchitectAgent().run(ctx)
-            progress.update(t6, completed=1)
-
-            # 7. Playgama Specialist
-            t7 = progress.add_task("[magenta]Playgama Specialist: Integrating Bridge SDK, ads, & cloud save...", total=1)
-            PlaygamaSpecialistAgent().run(ctx)
-            progress.update(t7, completed=1)
-
-            # 8. Monetization Designer
-            t8 = progress.add_task("[magenta]Monetization Designer: Designing Rewarded & Interstitial flow...", total=1)
-            MonetizationDesignerAgent().run(ctx)
-            progress.update(t8, completed=1)
-
-            # 9. Art Director
-            t9 = progress.add_task("[magenta]Art Director: Formulating lighting, camera angle, and aesthetics...", total=1)
-            ArtDirectorAgent().run(ctx)
-            progress.update(t9, completed=1)
-
-            # 10. UX Designer
-            t10 = progress.add_task("[magenta]UX Designer: Laying out HUD wireframes & mobile ergonomics...", total=1)
-            UXDesignerAgent().run(ctx)
-            progress.update(t10, completed=1)
-
-            # 10b. Experience Density — часть слоя Design OS, отключена флагом.
-            if DESIGN_OS_ENABLED:
-                t10b = progress.add_task("[magenta]Experience Density: Плотность первой сессии и телеметрия...", total=1)
-                ExperienceDensityAgent().run(ctx)
-                progress.update(t10b, completed=1)
-
-            # 11. Preview Designer
-            t11 = progress.add_task("[magenta]Preview Designer: Framing concept screenshot prompt...", total=1)
-            PreviewDesignerAgent().run(ctx)
-            progress.update(t11, completed=1)
-
-            # 12. Skill Generator Agent
-            t12 = progress.add_task("[magenta]Skill Generator: Preparing reusable game-specific skills...", total=1)
-            SkillGeneratorAgent().run(ctx)
-            progress.update(t12, completed=1)
-
-            # 12b/12c. Validation Planner и Decision Recorder — слой Design OS,
-            # отключён флагом.
-            if DESIGN_OS_ENABLED:
-                t12b = progress.add_task("[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...", total=1)
-                ValidationPlannerAgent().run(ctx)
-                progress.update(t12b, completed=1)
-
-                t12c = progress.add_task("[magenta]Decision Recorder: Решения, откаты и человеческие ворота...", total=1)
-                DecisionRecorderAgent().run(ctx)
-                progress.update(t12c, completed=1)
-
-            # 13. Self-Critique Agent
-            t13 = progress.add_task("[magenta]Self-Critique Agent: Verifying coherence & Definition of Done...", total=1)
-            SelfCritiqueAgent().run(ctx)
-            progress.update(t13, completed=1)
-
-            # 14. Output Generator
-            t14 = progress.add_task("[cyan]Output Generator: Writing specification package and preview...", total=1)
+            t_out = progress.add_task("[cyan]Output Generator: Writing specification package and preview...", total=1)
             game_dir = self.output_gen.generate_package(ctx)
-            progress.update(t14, completed=1)
+            progress.update(t_out, completed=1)
+
+        session.finish(game_dir)
 
         # Run Validator Suite
         console.print("\n[step]▶ Running Package Validation Suite...[/step]")
