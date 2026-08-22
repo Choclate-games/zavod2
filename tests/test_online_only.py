@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.design_os_base import ask_model
+from agents.model_call import ask_model
 from app.context import GenerationContext
 from app.models import GameConcept
 from app.run_session import RunPaused

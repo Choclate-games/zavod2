@@ -3,8 +3,6 @@ from typing import Dict, Callable
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
-from generators.design_os_docs import DESIGN_OS_DOCS
-from app.config import DESIGN_OS_ENABLED
 
 class DocumentGenerator:
     """Generates the full suite of specialized Game Development Documents in Markdown."""
@@ -38,9 +36,6 @@ class DocumentGenerator:
         }
         # Слой Design OS (обещание игроку, допущения, плотность впечатлений,
         # телеметрия, план валидации, решения и ворота) отключён флагом
-        # config.DESIGN_OS_ENABLED — документы этого слоя не создаются.
-        if DESIGN_OS_ENABLED:
-            generators.update(DESIGN_OS_DOCS)
 
         for filename, gen_fn in generators.items():
             content = gen_fn(ctx)
@@ -325,7 +320,6 @@ This document specifies the exact mechanical logic, mathematical formulas, state
 - **Фирменный момент**: {core.signature_moment or c.hook}
 - **Отличие от жанрового шаблона**: {core.what_makes_it_different or c.unique_value_proposition}
 - **Сознательно НЕ берём**: {core.genre_template_rejected or "—"}
-- **Дизайн-ядро**: {c.selected_nucleus or "—"}
 
 ---
 
@@ -458,7 +452,7 @@ This document specifies the exact mechanical logic, mathematical formulas, state
 
 ## 3. Правила экономики
 - Любая награда объясняется игроку в момент выдачи, без отдельного экрана обучения.
-- Ни одно усиление не отменяет решение из ядра «{c.selected_nucleus or c.hook}» — иначе петля схлопывается.
+- Ни одно усиление не отменяет главный крючок «{c.hook}» — иначе петля схлопывается.
 - Валюта и открытия хранятся в облаке платформы; локальное хранилище — только кэш.
 """
 

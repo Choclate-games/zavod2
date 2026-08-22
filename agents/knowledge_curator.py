@@ -13,7 +13,7 @@
 """
 from typing import List, Optional
 
-from agents.design_os_base import RU_SYSTEM_SUFFIX, ask_model
+from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from app import anticliche, knowledge
 from app.context import GenerationContext
 from app.logging import log_agent

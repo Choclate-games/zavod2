@@ -8,7 +8,7 @@
 import re
 from typing import List, Dict, Any
 
-from agents.design_os_base import RU_SYSTEM_SUFFIX, ask_model, merge_filled
+from agents.model_call import RU_SYSTEM_SUFFIX, ask_model, merge_filled
 from app.config import config
 from app.context import GenerationContext
 from app.logging import log_agent
@@ -95,7 +95,6 @@ class MechanicsArchitectAgent:
         return (
             f"Игра: {c.title}\nЖанр: {c.genre} ({c.subgenre})\n"
             f"Крючок: {c.hook}\nФантазия игрока: {c.player_fantasy}\n"
-            f"Дизайн-ядро: {c.selected_nucleus}\n"
             f"Core loop одной строкой: {c.core_loop}\n"
             f"Условие победы: {c.win_conditions}\nУсловие поражения: {c.lose_conditions}\n"
             f"Прогрессия: {c.progression_summary}\nКривая сложности: {c.difficulty_curve}\n"

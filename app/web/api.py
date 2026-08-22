@@ -265,24 +265,6 @@ async def project_rebuild(slug: str, request: Request) -> Dict[str, Any]:
         return {"status": "error", "message": f"❌ Ошибка: {exc}"}
 
 
-@app.get("/api/projects/{slug}/design-os")
-def project_design_os(slug: str) -> Dict[str, Any]:
-    return service.design_os_payload(_slug(slug))
-
-
-@app.post("/api/projects/{slug}/gates/{gate_id}")
-async def project_set_gate(slug: str, gate_id: str, request: Request) -> Dict[str, Any]:
-    payload = await _body(request)
-    status = str(payload.get("status", "accepted")).strip()
-    note = str(payload.get("note", "")).strip()
-    return service.set_gate(_slug(slug), gate_id, status, note)
-
-
-@app.get("/api/projects/{slug}/health")
-def project_health(slug: str) -> Dict[str, Any]:
-    return service.design_os_health(_slug(slug))
-
-
 @app.get("/api/projects/{slug}/export")
 def project_export(slug: str):
     path = service.export_zip(_slug(slug))

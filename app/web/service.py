@@ -27,9 +27,9 @@ from urllib.parse import urlparse
 
 import yaml
 
-from app import chat_store, design_os, notify, project_meta, sandbox, snapshots, uploads
+from app import chat_store, notify, project_meta, sandbox, snapshots, uploads
 from app.chat_jobs import ChatJobManager
-from app.config import BASE_DIR, DESIGN_OS_ENABLED, config
+from app.config import BASE_DIR, config
 from app.context import GenerationContext
 from app.game_runner import DevServer, read_scripts, detect_start_command, open_internal_browser
 from app.logging import register_log_listener
@@ -161,10 +161,6 @@ DOC_TABS = [
     {"key": "Changelog", "label": "🧾 Changelog", "file": sandbox.CHANGELOG_NAME},
 ]
 # Документы слоя Design OS показываются только при включённом слое
-# (config.DESIGN_OS_ENABLED): без него фабрика их не создаёт.
-_DESIGN_OS_TABS = {"Promise", "Density", "Telemetry", "Validation", "Assumptions", "Decisions"}
-if not DESIGN_OS_ENABLED:
-    DOC_TABS = [tab for tab in DOC_TABS if tab["key"] not in _DESIGN_OS_TABS]
 
 DOC_FILES = {tab["key"]: tab["file"] for tab in DOC_TABS}
 
@@ -175,10 +171,7 @@ REBUILD_SECTIONS = [
     {"key": "playgama", "label": "🎮 Перегенерировать Playgama Bridge SDK"},
     {"key": "preview", "label": "🎨 Перегенерировать Концепт-Превью Скриншот"},
     {"key": "skills", "label": "🧩 Перегенерировать Game Skills для ИИ"},
-    {"key": "design-os", "label": "🧠 Пересобрать слой Design OS (ядро, плотность, валидация)"},
 ]
-if not DESIGN_OS_ENABLED:
-    REBUILD_SECTIONS = [s for s in REBUILD_SECTIONS if s["key"] != "design-os"]
 
 CODE_TASK_PROMPT = (
     "Прочитай AI_DEVELOPER_PROMPT.md и специализированные скиллы в папке skills/ "
@@ -1029,60 +1022,6 @@ class FactoryService:
     # =====================================================================
     # Design OS: обещание игроку, допущения, плотность, ворота
     # =====================================================================
-
-    def design_os_payload(self, slug: str) -> Dict[str, Any]:
-        """Сводка проверяемого слоя проекта для вкладки «Design OS»."""
-        if not DESIGN_OS_ENABLED:
-            return {"available": False,
-                    "message": "Слой Design OS отключён (config.DESIGN_OS_ENABLED = False)."}
-        game_dir = sandbox.docs_dir(slug)
-        concept = design_os.load_concept(game_dir)
-        if concept is None:
-            return {"available": False, "message": "Проект не содержит GAME_DATA.yaml"}
-
-        report = design_os.health(game_dir)
-        ed = concept.experience_density
-        return {
-            "available": True,
-            "slug": slug,
-            "title": concept.title,
-            "nucleus": concept.selected_nucleus,
-            "nucleus_options": [n.model_dump() for n in concept.design_nucleus],
-            "promise": concept.player_promise.model_dump(),
-            "assumptions": [a.model_dump() for a in concept.assumptions],
-            "decisions": [d.model_dump() for d in concept.decisions],
-            "gates": [g.model_dump() for g in concept.gates],
-            "density": {
-                "formula": ed.formula,
-                "primary_lever": ed.primary_lever,
-                "boredom_type": ed.boredom_type,
-                "md_per_min_target": ed.md_per_min_target,
-                "time_to_first_action_sec": ed.time_to_first_action_sec,
-                "time_to_first_reward_sec": ed.time_to_first_reward_sec,
-                "beats": [b.model_dump() for b in ed.first_session_beats],
-                "variants": [v.model_dump() for v in ed.variants],
-                "telemetry": [t.model_dump() for t in ed.telemetry],
-            },
-            "validation": concept.validation.model_dump(),
-            "health": report,
-        }
-
-    def set_gate(self, slug: str, gate_id: str, status: str, note: str = "") -> Dict[str, Any]:
-        game_dir = sandbox.docs_dir(slug)
-        try:
-            result = design_os.set_gate_status(game_dir, gate_id.upper(), status, note)
-        except (ValueError, KeyError, FileNotFoundError) as exc:
-            return {"status": "error", "message": str(exc)}
-        bus.publish("projects.changed")
-        labels = {"accepted": "приняты", "rejected": "отклонены", "pending": "возвращены в ожидание"}
-        return {
-            "status": "success",
-            "message": f"✅ Ворота {gate_id.upper()} {labels.get(status, status)}. Ожидают: {result['pending']}",
-            "gate": result["gate"],
-        }
-
-    def design_os_health(self, slug: str) -> Dict[str, Any]:
-        return design_os.health(sandbox.docs_dir(slug))
 
     def export_zip(self, slug: str) -> Path:
         folder = sandbox.project_dir(slug)
@@ -2504,7 +2443,6 @@ class FactoryService:
             "image_providers": IMAGE_PROVIDER_OPTIONS,
             "studio_presets": STUDIO_PRESETS,
             "chat_presets": CHAT_PRESETS,
-            "design_os_enabled": DESIGN_OS_ENABLED,
             "doc_tabs": DOC_TABS,
             "rebuild_sections": REBUILD_SECTIONS,
             "model_default": MODEL_DEFAULT,

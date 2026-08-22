@@ -6,8 +6,6 @@ from app.logging import console
 from validators.document_validator import DocumentValidator
 from validators.consistency_validator import ConsistencyValidator
 from validators.completeness_validator import CompletenessValidator
-from validators.design_os_validator import DesignOsValidator
-from app.config import DESIGN_OS_ENABLED
 
 class OutputValidator:
     """Master validator aggregating document, consistency, and completeness checks."""
@@ -16,18 +14,11 @@ class OutputValidator:
         self.doc_val = DocumentValidator()
         self.const_val = ConsistencyValidator()
         self.comp_val = CompletenessValidator()
-        self.design_os_val = DesignOsValidator()
 
     def run_all(self, game_dir: Path) -> bool:
         doc_pass, doc_results = self.doc_val.validate(game_dir)
         const_pass, const_results = self.const_val.validate(game_dir)
         comp_pass, comp_results = self.comp_val.validate(game_dir)
-        # Проверки слоя Design OS идут только при включённом слое: иначе они
-        # ругались бы на отсутствие документов, которые фабрика больше не пишет.
-        if DESIGN_OS_ENABLED:
-            design_pass, design_results = self.design_os_val.validate(game_dir)
-        else:
-            design_pass, design_results = True, []
 
         table = Table(title=f"Validation Suite Report: {game_dir.name}", header_style="bold magenta")
         table.add_column("Category", style="cyan")
@@ -47,9 +38,5 @@ class OutputValidator:
             status_style = "green" if r["status"] == "PASS" else ("yellow" if r["status"] == "WARN" else "red")
             table.add_row("Completeness", r["item"], f"[{status_style}]{r['status']}[/{status_style}]", r["detail"])
 
-        for r in design_results:
-            status_style = "green" if r["status"] == "PASS" else ("yellow" if r["status"] == "WARN" else "red")
-            table.add_row("Design OS", r["item"], f"[{status_style}]{r['status']}[/{status_style}]", r["detail"])
-
         console.print(table)
-        return doc_pass and const_pass and comp_pass and design_pass
+        return doc_pass and const_pass and comp_pass

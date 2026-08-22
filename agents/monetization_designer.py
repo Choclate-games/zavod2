@@ -9,7 +9,7 @@ from typing import List
 
 from pydantic import Field
 
-from agents.design_os_base import RU_SYSTEM_SUFFIX, ask_model
+from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from app import anticliche
 from app.context import GenerationContext
 from app.logging import log_agent

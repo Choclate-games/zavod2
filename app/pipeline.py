@@ -11,7 +11,6 @@ from app.run_session import RunPaused, RunSession
 from providers.factory import ProviderFactory
 from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
-from agents.concept_architect import ConceptArchitectAgent
 from agents.game_designer import GameDesignerAgent
 from agents.reference_analyst import ReferenceAnalystAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
@@ -24,20 +23,14 @@ from agents.art_director import ArtDirectorAgent
 from agents.ux_designer import UXDesignerAgent
 from agents.preview_designer import PreviewDesignerAgent
 from agents.skill_generator import SkillGeneratorAgent
-from agents.experience_density import ExperienceDensityAgent
-from agents.validation_planner import ValidationPlannerAgent
-from agents.decision_recorder import DecisionRecorderAgent
 from agents.critic import SelfCritiqueAgent
 from agents.prompt_compiler import PromptCompilerAgent
 from generators.output_generator import OutputGenerator
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator as SkillGenModule
 from generators.preview_generator import PreviewGenerator
-from generators.contract_generator import ContractGenerator
-from generators.design_os_docs import DESIGN_OS_DOCS
 from validators.output_validator import OutputValidator
 from app.models import GameConcept
-from app.config import DESIGN_OS_ENABLED
 
 class Pipeline:
     """Main execution pipeline orchestrating AI role agents, generators, and validators."""
@@ -50,54 +43,46 @@ class Pipeline:
         self.compiler = PromptCompilerAgent()
         self.validator = OutputValidator()
 
-    # Шаги прогона одной таблицей: ключ, заголовок, действие, нужен ли слой
-    # Design OS. Раньше это был линейный список вызовов внутри run(); таблица
-    # нужна, чтобы продолжение прерванного прогона и запись в сессию жили в
-    # одном месте, а не повторялись у каждого шага.
+    # Шаги прогона одной таблицей: ключ, заголовок, действие. Раньше это был
+    # линейный список вызовов внутри run(); таблица нужна, чтобы продолжение
+    # прерванного прогона и запись в сессию жили в одном месте, а не
+    # повторялись у каждого шага.
     @staticmethod
     def _steps():
         return [
             # Без директора проекта IdeaAnalyzer сам выбирал жанр и стабильно
             # приходил к арене с волнами: это самый вероятный ответ на любой запрос.
             ("project_director", "[magenta]Project Director: Направления проекта и запрет шаблонов...",
-             lambda ctx: ProjectDirectorAgent().run(ctx), False),
+             lambda ctx: ProjectDirectorAgent().run(ctx)),
             ("idea_analyzer", "[magenta]Idea Analyzer: Deconstructing concept and pillars...",
-             lambda ctx: IdeaAnalyzerAgent().run(ctx), False),
-            ("concept_architect", "[magenta]Concept Architect: Дизайн-ядро, обещание игроку, допущения...",
-             lambda ctx: ConceptArchitectAgent().run(ctx), True),
+             lambda ctx: IdeaAnalyzerAgent().run(ctx)),
             ("game_designer", "[magenta]Game Designer: Shaping vision, core loop, and session rules...",
-             lambda ctx: GameDesignerAgent().run(ctx), False),
+             lambda ctx: GameDesignerAgent().run(ctx)),
             ("reference_analyst", "[magenta]Reference Analyst: Extracting mechanics & market patterns...",
-             lambda ctx: ReferenceAnalystAgent().run(ctx), False),
+             lambda ctx: ReferenceAnalystAgent().run(ctx)),
             ("mechanics_architect", "[magenta]Mechanics Architect: Designing formulas, input, and feedback...",
-             lambda ctx: MechanicsArchitectAgent().run(ctx), False),
+             lambda ctx: MechanicsArchitectAgent().run(ctx)),
             # Раньше каждому проекту доставались все документы threejs и stack.
             ("knowledge_curator", "[magenta]Knowledge Curator: Подбор документов базы знаний...",
-             lambda ctx: KnowledgeCuratorAgent().run(ctx), False),
+             lambda ctx: KnowledgeCuratorAgent().run(ctx)),
             ("renderer_selector", "[magenta]Renderer Selector: Configuring Three.js stack...",
-             lambda ctx: RendererSelectorAgent().run(ctx), False),
+             lambda ctx: RendererSelectorAgent().run(ctx)),
             ("technical_architect", "[magenta]Technical Architect: Designing TypeScript & system layers...",
-             lambda ctx: TechnicalArchitectAgent().run(ctx), False),
+             lambda ctx: TechnicalArchitectAgent().run(ctx)),
             ("playgama_specialist", "[magenta]Playgama Specialist: Integrating Bridge SDK, ads, & cloud save...",
-             lambda ctx: PlaygamaSpecialistAgent().run(ctx), False),
+             lambda ctx: PlaygamaSpecialistAgent().run(ctx)),
             ("monetization_designer", "[magenta]Monetization Designer: Designing Rewarded & Interstitial flow...",
-             lambda ctx: MonetizationDesignerAgent().run(ctx), False),
+             lambda ctx: MonetizationDesignerAgent().run(ctx)),
             ("art_director", "[magenta]Art Director: Formulating lighting, camera angle, and aesthetics...",
-             lambda ctx: ArtDirectorAgent().run(ctx), False),
+             lambda ctx: ArtDirectorAgent().run(ctx)),
             ("ux_designer", "[magenta]UX Designer: Laying out HUD wireframes & mobile ergonomics...",
-             lambda ctx: UXDesignerAgent().run(ctx), False),
-            ("experience_density", "[magenta]Experience Density: Плотность первой сессии и телеметрия...",
-             lambda ctx: ExperienceDensityAgent().run(ctx), True),
+             lambda ctx: UXDesignerAgent().run(ctx)),
             ("preview_designer", "[magenta]Preview Designer: Framing concept screenshot prompt...",
-             lambda ctx: PreviewDesignerAgent().run(ctx), False),
+             lambda ctx: PreviewDesignerAgent().run(ctx)),
             ("skill_generator", "[magenta]Skill Generator: Preparing reusable game-specific skills...",
-             lambda ctx: SkillGeneratorAgent().run(ctx), False),
-            ("validation_planner", "[magenta]Validation Planner: Допущения, эксперименты, ворота объёма...",
-             lambda ctx: ValidationPlannerAgent().run(ctx), True),
-            ("decision_recorder", "[magenta]Decision Recorder: Решения, откаты и человеческие ворота...",
-             lambda ctx: DecisionRecorderAgent().run(ctx), True),
+             lambda ctx: SkillGeneratorAgent().run(ctx)),
             ("critic", "[magenta]Self-Critique Agent: Verifying coherence & Definition of Done...",
-             lambda ctx: SelfCritiqueAgent().run(ctx), False),
+             lambda ctx: SelfCritiqueAgent().run(ctx)),
         ]
 
     @staticmethod
@@ -176,12 +161,8 @@ class Pipeline:
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            # Слой Design OS отключается флагом config.DESIGN_OS_ENABLED.
-            steps = [
-                (key, title, action) for key, title, action, needs_design_os in self._steps()
-                if DESIGN_OS_ENABLED or not needs_design_os
-            ]
-            for key, title, _action, _flag in self._steps():
+            steps = self._steps()
+            for key, title, _action in steps:
                 if session.is_done(key):
                     # Шаг отвечен в прошлый раз — модель о нём не переспрашиваем.
                     progress.update(progress.add_task(f"[dim]{title} (готово ранее)", total=1), completed=1)
@@ -306,25 +287,10 @@ class Pipeline:
             with open(game_dir / "PLAYGAMA_INTEGRATION.md", "w", encoding="utf-8") as f:
                 f.write(self.doc_gen._gen_playgama(ctx).strip())
             log_success("Updated PLAYGAMA_INTEGRATION.md")
-        elif sec in ["design-os", "design_os", "designos", "validation", "density"]:
-            if not DESIGN_OS_ENABLED:
-                log_info("Слой Design OS отключён (config.DESIGN_OS_ENABLED = False) — пересборка пропущена.")
-                return
-            # Пересборка проверяемого слоя целиком: ядро, плотность, допущения,
-            # решения и ворота считаются вместе — они ссылаются друг на друга.
-            ConceptArchitectAgent().run(ctx)
-            ExperienceDensityAgent().run(ctx)
-            ValidationPlannerAgent().run(ctx)
-            DecisionRecorderAgent().run(ctx)
-            for filename, gen_fn in DESIGN_OS_DOCS.items():
-                with open(game_dir / filename, "w", encoding="utf-8") as f:
-                    f.write(gen_fn(ctx).strip() + "\n")
-            ContractGenerator().generate(ctx)
-            log_success(f"Обновлён слой Design OS: {', '.join(DESIGN_OS_DOCS)}")
         else:
             log_error(
                 f"Unknown section '{section}'. Available: monetization, architecture, preview, "
-                "skills, gameplay, references, ux, knowledge, playgama, design-os"
+                "skills, gameplay, references, ux, knowledge, playgama"
             )
             return
 
