@@ -39,7 +39,11 @@ def create(
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Run interactive prompt wizard"),
     mode: str = typer.Option("standard", "--mode", "-m", help="Generation mode: fast, standard, deep"),
     renderer: str = typer.Option("auto", "--renderer", "-r", help="Rendering engine (Three.js only): auto | threejs"),
-    provider: str = typer.Option("local", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, opencode, local"),
+    # Офлайн-провайдер отключён: значение 'local' здесь больше не принимается
+    # (ProviderFactory отвечает на него понятной ошибкой), а дефолт берётся из
+    # DEFAULT_PROVIDER. Картиночный провайдер это не затрагивает: 'local' там —
+    # процедурная заглушка превью, а не подделка концепции.
+    provider: str = typer.Option("default", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, opencode"),
     image_provider: str = typer.Option("local", "--image-provider", help="Image generator: qwen, agy, local, none"),
     output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o", help="Target output directory")
 ):
@@ -81,7 +85,7 @@ def create(
 @app.command(name="analyze", help="Analyze game concept and estimate viability scores without generating full package.")
 def analyze(
     idea: str = typer.Argument(..., help="Game concept to analyze"),
-    provider: str = typer.Option("local", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, opencode, local")
+    provider: str = typer.Option("default", "--provider", "-p", help="AI provider (CLI-агенты): agy, claude, codex, opencode")
 ):
     console.print(f"[bold cyan]🔍 Analyzing Game Concept Viability...[/bold cyan]")
     ctx = GenerationContext(
@@ -184,9 +188,9 @@ def list_projects(
 
     console.print(table)
 
-@app.command(name="test-provider", help="Test connectivity and response of an AI provider (agy, claude, codex, opencode, local).")
+@app.command(name="test-provider", help="Test connectivity and response of an AI provider (agy, claude, codex, opencode).")
 def test_provider(
-    provider: str = typer.Argument("agy", help="Provider name: agy, claude, codex, opencode, local")
+    provider: str = typer.Argument("agy", help="Provider name: agy, claude, codex, opencode")
 ):
     console.print(f"[bold cyan]Testing AI Provider: {provider}[/bold cyan]")
     prov = ProviderFactory.get_ai_provider(provider)

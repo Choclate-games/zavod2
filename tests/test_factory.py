@@ -63,14 +63,17 @@ def test_local_image_generation(tmp_path: Path):
     assert img_path.exists()
     assert img_path.stat().st_size > 1000
 
-def test_full_pipeline_run(tmp_path: Path):
+def test_full_pipeline_run(tmp_path: Path, monkeypatch):
+    # Офлайн-режим в фабрике отключён: провайдера по имени "local" она больше не
+    # отдаёт. Тест проверяет саму обвязку конвейера, поэтому детерминированный
+    # провайдер подставляется напрямую, минуя выбор по имени.
+    monkeypatch.setattr(ProviderFactory, "get_ai_provider", staticmethod(lambda *a, **k: LocalAIProvider()))
     pipeline = Pipeline()
     output_dir = tmp_path / "output"
     game_dir = pipeline.run(
         raw_prompt="3D гладиаторский roguelike с активным рэгдоллом",
         output_dir=output_dir,
         mode="standard",
-        provider_name="local"
     )
     assert game_dir.exists()
     assert (game_dir / "AI_DEVELOPER_PROMPT.md").exists()

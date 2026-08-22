@@ -8,6 +8,7 @@ from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
 from providers.cli_agents import ClaudeCodeAgent, CodexAgent, KimiAgent, OpenCodeCLIAgent
 from providers.base import NoneImageProvider
 from agents.idea_brainstormer import IdeaBrainstormerAgent
+from providers.local import LocalAIProvider
 from app.models import GameConcept
 
 class SimpleModel(BaseModel):
@@ -146,7 +147,9 @@ def test_image_provider_none(tmp_path: Path):
 
 def test_idea_brainstormer():
     agent = IdeaBrainstormerAgent()
-    ideas = agent.brainstorm(provider_name="local", count=4)
+    # Офлайн-режим в фабрике отключён, поэтому детерминированный провайдер для
+    # теста вносится напрямую, а не выбирается по имени.
+    ideas = agent.brainstorm(ai_provider=LocalAIProvider(), count=4)
     assert len(ideas) >= 4
     for idea in ideas:
         assert idea.title

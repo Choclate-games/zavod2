@@ -2,7 +2,9 @@ import os
 from typing import Optional, Tuple
 
 from providers.base import AIProvider, ImageProvider, NoneImageProvider
-from providers.local import LocalAIProvider, LocalImageProvider
+# LocalAIProvider отключён: фабрика работает только онлайн (см. get_ai_provider).
+# Класс не удалён — на нём держатся тесты и он нужен, если офлайн когда-нибудь вернут.
+from providers.local import LocalImageProvider  # LocalAIProvider
 from providers.agy import AGYProvider, AGYImageProvider
 from providers.qwen import QwenImageProvider
 from providers.cli_agents import AGENT_CLASSES, make_cli_agent
@@ -32,8 +34,18 @@ class ProviderFactory:
             # Терминальные агенты: claude (Claude Code), codex, kimi, opencode.
             # Путь к CLI и модель берутся из <PREFIX>_CLI_PATH / <PREFIX>_MODEL.
             return make_cli_agent(name)
-        elif name == "local":
-            return LocalAIProvider()
+        elif name in ("local", "offline", "expert"):
+            # Офлайн-режим выключен. Раньше здесь отдавался LocalAIProvider —
+            # процедурный «эксперт», который на любую идею возвращал заранее
+            # заготовленную концепцию. Пакет при этом собирался целиком и
+            # выглядел успешным, хотя ни один агент не думал об этой игре.
+            # elif name == "local":
+            #     return LocalAIProvider()
+            raise RuntimeError(
+                "Офлайн-режим отключён: фабрика работает только с живой моделью. "
+                f"Выберите провайдера из {sorted(AGENT_CLASSES)} или 'agy' "
+                "(переменная DEFAULT_PROVIDER)."
+            )
         elif default_agent in AGENT_CLASSES:
             return make_cli_agent(default_agent)
         else:

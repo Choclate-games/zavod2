@@ -12,7 +12,7 @@ class GenerationContext:
     output_base_dir: Path
     mode: str = "standard" # fast, standard, deep
     forced_renderer: Optional[str] = None # threejs | auto (the factory is Three.js only)
-    provider_name: str = "local"
+    provider_name: str = "default"   # офлайн-режим отключён, см. ProviderFactory
     image_provider_name: str = "local"
     
     ai_provider: Optional[AIProvider] = None

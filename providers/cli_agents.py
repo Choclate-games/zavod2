@@ -52,7 +52,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from app.logging import log_warning
 from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
 from providers.base import AIProvider, T
-from providers.local import LocalAIProvider
+# from providers.local import LocalAIProvider   # офлайн-режим отключён
 from providers.proc_stream import (
     env_seconds,
     iter_process_lines,
@@ -122,7 +122,8 @@ class CodingCLIAgent(AIProvider):
         self.effort = (effort or os.getenv(f"{self.env_prefix}_EFFORT") or "").strip() or None
         self.yolo = yolo
         self.timeout_seconds = timeout_seconds
-        self.fallback = LocalAIProvider()
+        # Офлайн-подстраховка отключена (и здесь она всё равно не использовалась).
+        # self.fallback = LocalAIProvider()
         # Расход считаем сами: у этих CLI нет машинного отчёта об остатке квоты.
         self.usage_tracker = AgentUsageTracker()
 

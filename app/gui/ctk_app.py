@@ -861,8 +861,10 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.combo_provider = ctk.CTkComboBox(
             col1,
             # API-модели (openai / anthropic / google / OpenCode Zen) отключены —
-            # спека и код идут через терминальные агенты либо офлайн-эксперта.
-            values=list(AGENT_LABELS.values()) + ["💻 local (Offline Expert)"],
+            # спека и код идут через терминальные агенты.
+            # Офлайн-эксперт убран из списка: фабрика работает только онлайн.
+            # values=list(AGENT_LABELS.values()) + ["💻 local (Offline Expert)"],
+            values=list(AGENT_LABELS.values()),
             height=32,
             fg_color="#0e1626"
         )
@@ -1334,7 +1336,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
     def _get_selected_provider_key(self) -> str:
         val = self.combo_provider.get().lower()
-        for key in ("agy", "opencode", "codex", "claude", "local"):
+        for key in ("agy", "opencode", "codex", "claude"):   # "local" убран: офлайн отключён
             if key in val:
                 return key
         return "agy"

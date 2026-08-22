@@ -82,13 +82,15 @@ def test_skill_generator_dynamic_mechanic_skills(tmp_path):
     if stealth_skill:
         assert "mechanics/stealth_detection.md" in stealth_skill.knowledge_refs
 
-def test_pipeline_end_to_end_custom_mechanics(tmp_path):
+def test_pipeline_end_to_end_custom_mechanics(tmp_path, monkeypatch):
     """Проверяет полный цикл генерации проекта с уникальными механиками."""
+    # Офлайн-режим отключён — см. комментарий в tests/test_factory.py.
+    from providers.factory import ProviderFactory
+    monkeypatch.setattr(ProviderFactory, "get_ai_provider", staticmethod(lambda *a, **k: LocalAIProvider()))
     pipeline = Pipeline()
     project_dir = pipeline.run(
         raw_prompt="Ритмичное бурение астероидов на мехах в космосе",
         output_dir=tmp_path,
-        provider_name="local",
         image_provider_name="local"
     )
     

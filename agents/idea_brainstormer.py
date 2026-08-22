@@ -85,7 +85,7 @@ class IdeaBrainstormerAgent:
     def brainstorm(
         self,
         ai_provider: Optional[AIProvider] = None,
-        provider_name: str = "local",
+        provider_name: str = "default",   # офлайн-режим отключён, см. ProviderFactory
         theme_hint: str = "",
         count: int = 10
     ) -> List[BrainstormedIdea]:

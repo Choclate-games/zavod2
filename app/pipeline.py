@@ -53,7 +53,7 @@ class Pipeline:
         output_dir: Path,
         mode: str = "standard",
         forced_renderer: Optional[str] = None,
-        provider_name: str = "local",
+        provider_name: str = "default",   # офлайн-режим отключён, см. ProviderFactory
         image_provider_name: str = "local"
     ) -> Path:
         ctx = GenerationContext(
