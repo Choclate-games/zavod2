@@ -1938,12 +1938,19 @@ class FactoryService:
         }
 
     def _project_title(self, slug: str) -> str:
-        """Читаемое имя проекта по слагу (слаг, если названия нет)."""
+        """
+        Читаемое имя проекта по слагу (слаг, если названия нет).
+
+        Переименование игроком главнее спеки: агент переписывает GAME_DATA.yaml
+        как хочет, а имя из реестра дал пользователь — его и показываем.
+        """
         try:
-            data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
+            title = str(project_meta.get(slug).get("title") or "").strip()
+            if not title:
+                data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
+                title = str((data or {}).get("title") or "").strip()
         except Exception:
             return slug
-        title = str((data or {}).get("title") or "").strip()
         return f"{title} · {slug}" if title else slug
 
     def _quota_summary(self, families: Dict[str, Any], live: Optional[Dict[str, Any]]) -> Dict[str, Any]:

@@ -136,8 +136,13 @@ function normalize(root: THREE.Group): THREE.Group {
 const DOWN = new THREE.Vector3(0, -1, 0);
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** Кости, которые нужны анимации. «L» — сторона −X, у Mixamo это Right*. */
-const BONES = {
+/**
+ * Кости, которые нужны анимации. «L» — сторона −X, у Mixamo это Right*.
+ *
+ * Экспортируется: тем же скелетом пользуется риг стрелка (`shooterRig.ts`),
+ * и две копии карты костей разошлись бы на первой же правке.
+ */
+export const BONES = {
   hips: 'mixamorigHips',
   waist: 'mixamorigSpine',
   chest: 'mixamorigSpine1',
@@ -357,7 +362,7 @@ const WEAR_COLOR = new THREE.Color(0x5a1f22);
  * скручивание вокруг самой кости не контролируется — для конечностей в
  * перчатках это незаметно, а для позвоночника поворот и так почти нулевой.
  */
-function insertJoint(
+export function insertJoint(
   b: THREE.Bone,
   child: THREE.Object3D | null,
   aim: THREE.Vector3 | null,

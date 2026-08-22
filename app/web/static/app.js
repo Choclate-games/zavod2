@@ -968,11 +968,19 @@ function activeProjects() {
   return (state.projects || []).filter((p) => !p.archived || p.slug === state.project);
 }
 
+/* Игру выбирают по названию, а не по имени папки: игрок мог переименовать её,
+   и в списках должно стоять именно его имя. Слуг остаётся техническим ключом
+   (каталог, ссылки в чатах), поэтому прячем его в подсказку. */
+function projectName(slug) {
+  const p = (state.projects || []).find((x) => x.slug === slug);
+  return (p && p.title) || slug;
+}
+
 function fillChatProjects() {
   const select = $("chat-project");
   const projects = activeProjects();
   select.innerHTML = "";
-  projects.forEach((p) => select.appendChild(new Option(p.slug, p.slug)));
+  projects.forEach((p) => select.appendChild(new Option(p.title || p.slug, p.slug)));
   if (state.project && projects.some((p) => p.slug === state.project)) select.value = state.project;
   else if (projects.length) { state.project = select.value; localStorage.setItem("project", state.project); }
 }
@@ -1464,7 +1472,7 @@ function renderActivity() {
 
   state.activity.forEach((item) => {
     const node = el("div", `act-item ${item.running ? "running" : item.status}`);
-    node.title = `${item.title}\n${item.slug}`;
+    node.title = `${item.title}\n${projectName(item.slug)} (${item.slug})`;
 
     const title = el("div", "act-title");
     title.appendChild(el("span", "act-name",
@@ -1481,8 +1489,8 @@ function renderActivity() {
 
     node.appendChild(el("div", "act-meta", esc(
       item.running
-        ? `${item.slug} · ${item.stopping ? "останавливаю" : "идёт"} ${item.duration}`
-        : `${item.slug} · ${item.duration} · ${agoText(item.finished_ago)}`)));
+        ? `${projectName(item.slug)} · ${item.stopping ? "останавливаю" : "идёт"} ${item.duration}`
+        : `${projectName(item.slug)} · ${item.duration} · ${agoText(item.finished_ago)}`)));
 
     const foot = el("div", "act-foot");
     if (item.running) {
@@ -1632,7 +1640,8 @@ function fillPlayProjects() {
   const projects = (state.projects || []).filter((p) => !p.archived || p.slug === state.playSlug);
   const current = select.value;
   select.innerHTML = "";
-  projects.forEach((p) => select.appendChild(new Option(p.slug + (p.playable ? "" : "  (нет кода)"), p.slug)));
+  projects.forEach((p) => select.appendChild(
+    new Option((p.title || p.slug) + (p.playable ? "" : "  (нет кода)"), p.slug)));
   const wanted = state.playSlug || current || state.project;
   if (wanted && projects.some((p) => p.slug === wanted)) select.value = wanted;
   state.playSlug = select.value || null;
@@ -1652,12 +1661,12 @@ function openGameTab(slug) {
     if (!tab.location.href || tab.location.href === "about:blank") {
       tab.document.write(
         `<!doctype html><html lang="ru"><head><meta charset="utf-8">`
-        + `<title>🎮 ${slug}</title><style>`
+        + `<title>🎮 ${projectName(slug)}</title><style>`
         + `body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;`
         + `justify-content:center;gap:10px;background:#0a0e17;color:#f0f4fc;`
         + `font-family:"Segoe UI",system-ui,sans-serif}`
         + `.s{color:#00f0ff;font-size:18px;font-weight:700}.d{color:#8ea3c0;font-size:13px}`
-        + `</style></head><body><div class="s">🚀 Запускаю ${slug}…</div>`
+        + `</style></head><body><div class="s">🚀 Запускаю ${projectName(slug)}…</div>`
         + `<div class="d">npm run dev поднимается — вкладка обновится сама.</div></body></html>`);
       tab.document.close();
     }
@@ -1685,7 +1694,10 @@ function freshUrl(url) {
  */
 function viewerUrl(url, slug) {
   if (!url) return url;
-  return `/play?url=${encodeURIComponent(freshUrl(url))}&slug=${encodeURIComponent(slug || "")}`;
+  // name — то, как игру назвал игрок: заголовок вкладки должен совпадать со
+  // списком проектов, а slug остаётся для служебных нужд обёртки.
+  return `/play?url=${encodeURIComponent(freshUrl(url))}&slug=${encodeURIComponent(slug || "")}`
+    + `&name=${encodeURIComponent(projectName(slug))}`;
 }
 
 function navigateGameTab(tab, url, slug) {
@@ -1736,7 +1748,7 @@ async function openPlay(slug) {
     return;
   }
   if (res.url) resolveGameTab(slug, res.url);
-  else toast("Запуск игры", `${slug}: поднимаю dev-сервер, вкладка откроется сама.`, "");
+  else toast("Запуск игры", `${projectName(slug)}: поднимаю dev-сервер, вкладка откроется сама.`, "");
   loadServers();
 }
 
@@ -1776,7 +1788,7 @@ async function buildAndDownloadZip(slug, btn, waitLabel = "⏳ Сборка...")
     btn.disabled = true;
     btn.textContent = waitLabel;
   }
-  toast("Сборка", `${slug}: npm run build, это может занять пару минут...`);
+  toast("Сборка", `${projectName(slug)}: npm run build, это может занять пару минут...`);
   try {
     const res = await fetch(`/api/play/${encodeURIComponent(slug)}/build-zip`, { method: "POST" });
     if (!res.ok) {
@@ -1834,7 +1846,9 @@ function renderServers() {
   }
   state.servers.forEach((s) => {
     const row = el("div", "server-row");
-    row.appendChild(el("div", "s-slug", esc(s.slug)));
+    const name = el("div", "s-slug", esc(projectName(s.slug)));
+    name.title = s.slug;
+    row.appendChild(name);
     if (s.port) row.appendChild(el("div", "s-port", `:${s.port}`));
     row.appendChild(el("div", "s-url grow", esc(s.url || "URL ещё не известен")));
     row.appendChild(el("div", `s-state ${s.running ? "" : "starting"}`,

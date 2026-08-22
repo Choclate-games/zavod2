@@ -1,5 +1,9 @@
 """
-Desktop GUI Entrypoint for AI Game Prompt Factory (CustomTkinter).
+УСТАРЕВШАЯ точка входа: десктопное окно (CustomTkinter).
+
+Основной интерфейс фабрики — веб: `start.bat` или `python run_web.py`.
+Это окно оставлено только для совместимости и больше не развивается.
+
 Usage:
     python gui.py
 """
@@ -14,4 +18,6 @@ if __name__ == "__main__":
         except Exception:
             pass
 
+    print("[!] Десктопное окно устарело и не развивается. "
+          "Рабочий интерфейс фабрики — веб: start.bat / python run_web.py")
     run_gui()

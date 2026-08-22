@@ -1,357 +1,726 @@
-# Three.js: FPS Controller, Recoil, Weapon Bobbing & Spartan Kick
+# Three.js: FPS-контроллер, оружие, вьюмодель и обратная связь выстрела
 
-Эталонная реализация First-Person Shooter на Three.js с поддержкой PointerLock на десктопе, виртуальных стиков на мобильных, процедурной отдачи, раскачивания оружия, баллистики пуль и физического пинка.
+Что делает противник и как считается урон — `shooter_enemy_ai_and_combat.md`.
+Здесь — **всё, что находится под управлением игрока**: движение, прыжок, захват
+мыши, выбор оружия, руки на экране и эффекты выстрела.
 
----
+Эталонная реализация — вкладка `fps` стенда (`workspace/knowledge-showcase/src/demos/FpsDemo.ts`),
+головные проверки — `scripts/fps-check.ts`.
 
-## 1. Контроллер камеры от первого лица (`FPSController.ts`)
-
-```typescript
-import * as THREE from 'three';
-
-export class FPSController {
-    public camera: THREE.PerspectiveCamera;
-    public yawObject: THREE.Object3D;
-    public pitchObject: THREE.Object3D;
-    
-    public moveForward = false;
-    public moveBackward = false;
-    public moveLeft = false;
-    public moveRight = false;
-    public isGrounded = true;
-    public isRunning = false;
-
-    public velocity = new THREE.Vector3();
-    public moveSpeed = 8.0;
-    public runMultiplier = 1.6;
-    public jumpForce = 9.0;
-    public gravity = 22.0;
-
-    // Weapon bobbing variables
-    public bobTimer = 0;
-    public bobAmountX = 0.035;
-    public bobAmountY = 0.025;
-    public bobSpeed = 10.0;
-
-    private isLocked = false;
-    private minPolarAngle = -Math.PI / 2.2;
-    private maxPolarAngle = Math.PI / 2.2;
-
-    constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement) {
-        this.camera = camera;
-        this.pitchObject = new THREE.Object3D();
-        this.pitchObject.add(this.camera);
-
-        this.yawObject = new THREE.Object3D();
-        this.yawObject.position.y = 1.7; // Рост глаз игрока
-        this.yawObject.add(this.pitchObject);
-
-        this.setupPointerLock(domElement);
-        this.setupKeyboard();
-    }
-
-    private setupPointerLock(domElement: HTMLElement) {
-        domElement.addEventListener('click', () => {
-            if (!this.isLocked) {
-                domElement.requestPointerLock?.();
-            }
-        });
-
-        document.addEventListener('pointerlockchange', () => {
-            this.isLocked = document.pointerLockElement === domElement;
-        });
-
-        document.addEventListener('mousemove', (event) => {
-            if (!this.isLocked) return;
-            const movementX = event.movementX || 0;
-            const movementY = event.movementY || 0;
-            const sensitivity = 0.0022;
-
-            this.yawObject.rotation.y -= movementX * sensitivity;
-            this.pitchObject.rotation.x -= movementY * sensitivity;
-            this.pitchObject.rotation.x = Math.max(
-                this.minPolarAngle,
-                Math.min(this.maxPolarAngle, this.pitchObject.rotation.x)
-            );
-        });
-    }
-
-    // Для мобильных экранов: управление поворотом от правого тач-пада
-    public applyTouchLook(deltaX: number, deltaY: number, sensitivity = 0.0035) {
-        this.yawObject.rotation.y -= deltaX * sensitivity;
-        this.pitchObject.rotation.x -= deltaY * sensitivity;
-        this.pitchObject.rotation.x = Math.max(
-            this.minPolarAngle,
-            Math.min(this.maxPolarAngle, this.pitchObject.rotation.x)
-        );
-    }
-
-    private setupKeyboard() {
-        window.addEventListener('keydown', (e) => {
-            if (e.code === 'KeyW') this.moveForward = true;
-            if (e.code === 'KeyS') this.moveBackward = true;
-            if (e.code === 'KeyA') this.moveLeft = true;
-            if (e.code === 'KeyD') this.moveRight = true;
-            if (e.code === 'ShiftLeft') this.isRunning = true;
-            if (e.code === 'Space' && this.isGrounded) {
-                this.velocity.y = this.jumpForce;
-                this.isGrounded = false;
-            }
-        });
-
-        window.addEventListener('keyup', (e) => {
-            if (e.code === 'KeyW') this.moveForward = false;
-            if (e.code === 'KeyS') this.moveBackward = false;
-            if (e.code === 'KeyA') this.moveLeft = false;
-            if (e.code === 'KeyD') this.moveRight = false;
-            if (e.code === 'ShiftLeft') this.isRunning = false;
-        });
-    }
-
-    public update(dt: number): { moveDistance: number; isMoving: boolean } {
-        // Затухание горизонтальной скорости
-        this.velocity.x -= this.velocity.x * 10.0 * dt;
-        this.velocity.z -= this.velocity.z * 10.0 * dt;
-
-        // Гравитация
-        this.velocity.y -= this.gravity * dt;
-
-        const moveVector = new THREE.Vector3();
-        if (this.moveForward) moveVector.z -= 1;
-        if (this.moveBackward) moveVector.z += 1;
-        if (this.moveLeft) moveVector.x -= 1;
-        if (this.moveRight) moveVector.x += 1;
-        moveVector.normalize();
-
-        const speed = this.moveSpeed * (this.isRunning ? this.runMultiplier : 1.0);
-
-        if (moveVector.lengthSq() > 0.001) {
-            // Направление относительно поворота yawObject
-            moveVector.applyEuler(new THREE.Euler(0, this.yawObject.rotation.y, 0));
-            this.velocity.x += moveVector.x * speed * 10.0 * dt;
-            this.velocity.z += moveVector.z * speed * 10.0 * dt;
-        }
-
-        // Интеграция координат
-        this.yawObject.position.x += this.velocity.x * dt;
-        this.yawObject.position.z += this.velocity.z * dt;
-        this.yawObject.position.y += this.velocity.y * dt;
-
-        // Простой пол (на Y=1.7)
-        if (this.yawObject.position.y <= 1.7) {
-            this.velocity.y = 0;
-            this.yawObject.position.y = 1.7;
-            this.isGrounded = true;
-        }
-
-        const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-        const isMoving = this.isGrounded && horizontalSpeed > 0.5;
-
-        if (isMoving) {
-            this.bobTimer += dt * (this.isRunning ? this.bobSpeed * 1.35 : this.bobSpeed);
-        } else {
-            // Плавный возврат в ноль
-            this.bobTimer += dt * 2.0;
-        }
-
-        return { moveDistance: horizontalSpeed * dt, isMoving };
-    }
-}
-```
+Порядок разделов здесь — это порядок, в котором шутер разваливается, если чего-то
+нет: сначала «управление наоборот», потом «не стреляет», потом «стреляет, но
+непонятно, попал ли».
 
 ---
 
-## 2. Модуль оружия, отдачи и Weapon Bobbing (`WeaponSystem.ts`)
+## 0. Оси и знаки: откуда берётся «управление инвертировано»
+
+Камера Three.js смотрит вдоль **локальной −Z**. Если поворот задан как
+`camera.rotation.set(pitch, yaw, roll, 'YXZ')`, то мировые оси такие:
 
 ```typescript
-import * as THREE from 'three';
-
-export class WeaponSystem {
-    public weaponMesh: THREE.Group;
-    public baseOffset = new THREE.Vector3(0.28, -0.25, -0.55);
-    public recoilPosition = new THREE.Vector3();
-    public recoilRotation = new THREE.Vector3();
-
-    // Параметры отдачи
-    public recoilStrengthZ = 0.08;
-    public recoilStrengthY = 0.03;
-    public recoilPitch = 0.15;
-    public recoilSnappiness = 24.0;
-    public returnSpeed = 12.0;
-
-    private targetRecoilPos = new THREE.Vector3();
-    private targetRecoilRot = new THREE.Vector3();
-
-    constructor(parentCamera: THREE.Camera) {
-        this.weaponMesh = this.buildProceduralRifle();
-        parentCamera.add(this.weaponMesh);
-        this.weaponMesh.position.copy(this.baseOffset);
-    }
-
-    // Процедурная 3D-модель штурмовой винтовки
-    private buildProceduralRifle(): THREE.Group {
-        const group = new THREE.Group();
-        const matBody = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.3, metalness: 0.8 });
-        const matAccent = new THREE.MeshStandardMaterial({ color: 0xe65c00, roughness: 0.4, metalness: 0.2 });
-        const matDark = new THREE.MeshStandardMaterial({ color: 0x111215, roughness: 0.7 });
-
-        // Ствольная коробка
-        const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.42), matBody);
-        receiver.castShadow = true;
-        group.add(receiver);
-
-        // Ствол
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.35, 12), matDark);
-        barrel.rotation.x = Math.PI / 2;
-        barrel.position.set(0, 0.02, -0.32);
-        group.add(barrel);
-
-        // Пламегаситель
-        const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 12), matDark);
-        muzzle.rotation.x = Math.PI / 2;
-        muzzle.position.set(0, 0.02, -0.52);
-        group.add(muzzle);
-
-        // Магазин
-        const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.09), matAccent);
-        mag.position.set(0, -0.12, -0.05);
-        mag.rotation.x = 0.18;
-        group.add(mag);
-
-        // Рукоять
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.14, 0.06), matDark);
-        grip.position.set(0, -0.1, 0.12);
-        grip.rotation.x = -0.35;
-        group.add(grip);
-
-        return group;
-    }
-
-    public shoot(): { origin: THREE.Vector3; direction: THREE.Vector3 } {
-        // Добавляем импульс отдачи
-        this.targetRecoilPos.z += this.recoilStrengthZ;
-        this.targetRecoilPos.y += this.recoilStrengthY;
-        this.targetRecoilRot.x += this.recoilPitch;
-        this.targetRecoilRot.y += (Math.random() - 0.5) * 0.04;
-
-        // Точка дула в мировых координатах
-        const muzzlePos = new THREE.Vector3(0, 0.02, -0.55);
-        this.weaponMesh.localToWorld(muzzlePos);
-
-        const worldDir = new THREE.Vector3();
-        this.weaponMesh.getWorldDirection(worldDir).negate();
-
-        return { origin: muzzlePos, direction: worldDir };
-    }
-
-    public update(dt: number, bobTimer: number, isMoving: boolean) {
-        // Пружинный спад отдачи
-        this.targetRecoilPos.lerp(new THREE.Vector3(), this.returnSpeed * dt);
-        this.targetRecoilRot.lerp(new THREE.Vector3(), this.returnSpeed * dt);
-
-        this.recoilPosition.lerp(this.targetRecoilPos, this.recoilSnappiness * dt);
-        this.recoilRotation.lerp(this.targetRecoilRot, this.recoilSnappiness * dt);
-
-        // Weapon bobbing (раскачивание при шагах)
-        let bobX = 0;
-        let bobY = 0;
-        if (isMoving) {
-            bobX = Math.sin(bobTimer) * 0.02;
-            bobY = Math.cos(bobTimer * 2) * 0.015;
-        }
-
-        this.weaponMesh.position.set(
-            this.baseOffset.x + this.recoilPosition.x + bobX,
-            this.baseOffset.y + this.recoilPosition.y + bobY,
-            this.baseOffset.z + this.recoilPosition.z
-        );
-
-        this.weaponMesh.rotation.set(
-            this.recoilRotation.x,
-            this.recoilRotation.y + (isMoving ? Math.sin(bobTimer) * 0.02 : 0),
-            this.recoilRotation.z
-        );
-    }
-}
+// ВПЕРЁД (куда смотрит камера)
+forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+// ВПРАВО от игрока
+right.set(Math.cos(yaw), 0, -Math.sin(yaw));
 ```
+
+Классическая ошибка — взять `forward = (sin yaw, 0, cos yaw)`. Вектор
+получается **ровно противоположным**, и W уводит назад, а S — вперёд. Баг живучий,
+потому что мышь при этом работает правильно, стрельба тоже, и виноватым выглядит
+«странное управление», а не одна пара знаков.
+
+Второй источник той же беды — соглашение о векторе ввода. Если хаб отдаёт WASD как
+`y = -1` на W (экранная система координат), то проекция берётся **со знаком минус**:
+
+```typescript
+const move = input.moveVector();          // W → y = -1
+wish.set(0, 0, 0)
+  .addScaledVector(forward, -move.y)      // минус: y уже «экранный»
+  .addScaledVector(right, move.x);
+```
+
+Смешать два соглашения — и половина клавиш работает, половина нет. Договорённость
+должна быть записана рядом с `moveVector()` и продублирована в демо.
+
+**Это проверяется головным тестом, а не руками.** Проверка формулируется в терминах
+игрока, а не координат:
+
+```typescript
+const dir = camera.getWorldDirection(v).setY(0).normalize();
+const before = camera.position.clone();
+press('KeyW'); tick(60);
+assert(camera.position.clone().sub(before).dot(dir) > 0);   // W идёт ВПЕРЁД
+```
+
+Аналогично для мыши: движение вправо должно давать `cross(before, after).y < 0`,
+движение вниз — уменьшать `getWorldDirection().y`.
 
 ---
 
-## 3. Физический пинок («Спартанский кик») (`SpartanKick.ts`)
+## 1. Контроллер: скорость, гравитация, прыжок, присед
+
+Игрок хранит позицию **ступней**, а не глаз: присед, прыжок и опора считаются от
+пола, а высота глаз добавляется только при постановке камеры.
 
 ```typescript
-import * as THREE from 'three';
+const EYE_STAND = 1.68, EYE_CROUCH = 1.05;
+const GRAVITY = 24, JUMP_SPEED = 7.6;
+const COYOTE_TIME = 0.12, JUMP_BUFFER = 0.14;
+```
 
-export class SpartanKick {
-    public kickDuration = 0.38;
-    public kickTimer = 0;
-    public isKicking = false;
-    public kickRange = 2.8;
-    public kickForce = 28.0;
+### Ускорение и трение вместо «скорость = кнопка»
 
-    private legMesh: THREE.Group;
+Прямая запись скорости из кнопки даёт «скольжение по льду» при отпускании и нулевую
+инерцию при нажатии. Разгон и трение с разными коэффициентами на земле и в воздухе:
 
-    constructor(camera: THREE.Camera) {
-        this.legMesh = this.buildProceduralLeg();
-        this.legMesh.visible = false;
-        camera.add(this.legMesh);
-    }
+```typescript
+const accel    = grounded ? 60 : 12;   // в воздухе управление ослаблено
+const friction = grounded ? 12 : 0.6;  // иначе прыжок ничего не стоит
+vel.x += wish.x * accel * dt;
+vel.z += wish.z * accel * dt;
+vel.x -= vel.x * friction * dt;
+vel.z -= vel.z * friction * dt;
+clampPlanarSpeed(vel, maxSpeed);       // потолок отдельно от разгона
+```
 
-    private buildProceduralLeg(): THREE.Group {
-        const group = new THREE.Group();
-        const matPants = new THREE.MeshStandardMaterial({ color: 0x2b3824, roughness: 0.8 });
-        const matBoot = new THREE.MeshStandardMaterial({ color: 0x1a1614, roughness: 0.6 });
+Полный контроль в воздухе убивает вес прыжка: игрок начинает «летать». Нулевой
+контроль — раздражает. Рабочая вилка — 15–25 % от наземного.
 
-        // Голень
-        const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.55, 8), matPants);
-        shin.position.set(0.18, -0.3, -0.4);
-        shin.rotation.x = -Math.PI / 4;
-        group.add(shin);
+### Прыжок: два окна прощения
 
-        // Ботинок
-        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.28), matBoot);
-        boot.position.set(0.18, -0.45, -0.65);
-        group.add(boot);
+Прыжок без них ощущается сломанным, хотя формально работает.
 
-        return group;
-    }
-
-    public trigger(origin: THREE.Vector3, forward: THREE.Vector3, onHitTarget: (target: any, impulse: THREE.Vector3) => void) {
-        if (this.isKicking) return;
-        this.isKicking = true;
-        this.kickTimer = this.kickDuration;
-        this.legMesh.visible = true;
-
-        // Рейкаст удара на дистанцию 2.8м
-        setTimeout(() => {
-            const impulse = forward.clone().multiplyScalar(this.kickForce).add(new THREE.Vector3(0, 8.0, 0));
-            // Вызов коллбека нанесения урона и отталкивания
-            onHitTarget(null, impulse);
-        }, 120);
-    }
-
-    public update(dt: number) {
-        if (!this.isKicking) return;
-        this.kickTimer -= dt;
-        const progress = 1.0 - (this.kickTimer / this.kickDuration);
-
-        if (progress < 0.35) {
-            // Выпад ноги вперёд
-            const t = progress / 0.35;
-            this.legMesh.position.set(0, 0.2 * t, -0.4 * t);
-        } else if (progress < 0.6) {
-            // Удержание в пике
-            this.legMesh.position.set(0, 0.2, -0.4);
-        } else {
-            // Возврат назад
-            const t = (progress - 0.6) / 0.4;
-            this.legMesh.position.set(0, 0.2 * (1 - t), -0.4 * (1 - t));
-        }
-
-        if (this.kickTimer <= 0) {
-            this.isKicking = false;
-            this.legMesh.visible = false;
-        }
-    }
+```typescript
+jumpBuffer = Math.max(0, jumpBuffer - dt);       // Space нажали чуть раньше касания
+coyote = grounded ? COYOTE_TIME : Math.max(0, coyote - dt);   // сошли с края
+if (jumpBuffer > 0 && coyote > 0 && !crouching) {
+  vel.y = JUMP_SPEED;
+  grounded = false;
+  coyote = 0; jumpBuffer = 0;
 }
 ```
+
+* **Койот-тайм** — прыжок засчитывается ещё 0.1 с после схода с ящика.
+* **Буфер нажатия** — Space за 0.14 с до приземления не теряется.
+
+Само нажатие приходит **событием** (`onKey`), а не чтением `isDown('Space')` в
+кадре: удержание иначе даёт бесконечный «пого» по одному кадру касания.
+
+### Опора: луч вниз по геометрии уровня
+
+Хардкод `if (y <= 1.7) y = 1.7` — это шутер на идеально плоском полу. Луч по BVH той
+же геометрии, которую видит игрок, даёт крыши ящиков как площадки бесплатно:
+
+```typescript
+raycaster.set(tmp.set(pos.x, pos.y + 2.2, pos.z), DOWN);
+raycaster.far = 40;
+(raycaster as Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true;
+const ground = raycaster.intersectObject(levelMesh, false)[0]?.point.y ?? 0;
+if (pos.y <= ground + 0.001 && vel.y <= 0) { pos.y = ground; vel.y = 0; grounded = true; }
+else grounded = false;
+```
+
+`firstHitOnly` обязателен: без него BVH собирает все пересечения и сортирует их.
+
+### Горизонтальная коллизия: круг против AABB
+
+```typescript
+for (const [cx, cz, w, d, h] of COVERS) {
+  if (pos.y >= h - 0.05) continue;               // стоим НА ящике — не выталкивать
+  const hx = w / 2 + RADIUS, hz = d / 2 + RADIUS;
+  const dx = pos.x - cx, dz = pos.z - cz;
+  if (Math.abs(dx) >= hx || Math.abs(dz) >= hz) continue;
+  // выход по оси НАИМЕНЬШЕГО проникновения, иначе игрока телепортирует
+  if (hx - Math.abs(dx) < hz - Math.abs(dz)) { pos.x = cx + Math.sign(dx || 1) * hx; vel.x = 0; }
+  else { pos.z = cz + Math.sign(dz || 1) * hz; vel.z = 0; }
+}
+```
+
+Проверка `pos.y >= h` — не микрооптимизация: без неё игрока, запрыгнувшего на ящик,
+выбрасывает с крыши в тот же кадр.
+
+**Радиус игрока связан с длиной оружия** (см. §5): если ствол выносится на 0.9 м
+вперёд, а радиус 0.3 м, оружие входит в стены.
+
+---
+
+## 2. Захват мыши: почему «не стреляет»
+
+`requestPointerLock()` требует активации пользователем. Вызов из `requestAnimationFrame`
+формально попадает в окно активации, но после выхода по Esc браузер **молча
+отклоняет** запрос, и вкладка выглядит мёртвой: клики есть, выстрелов нет.
+
+Запрашивать захват нужно **из самого обработчика нажатия**:
+
+```typescript
+unsubButtons = input.onPointerButton((button) => {
+  if (button !== 0) return;
+  if (!input.isPointerLocked) { input.requestPointerLock(); return; }  // первый клик — захват
+  semiQueued = true;                                                   // дальше — выстрел
+});
+```
+
+Три следствия, о которых забывают:
+
+1. **Глобальные горячие клавиши стенда/меню должны молчать под захватом.** Иначе
+   `Q` «сменить оружие» переключает вкладку приложения:
+   ```typescript
+   window.addEventListener('keydown', (e) => {
+     if (document.pointerLockElement) return;   // все буквы принадлежат игре
+     …
+   });
+   ```
+2. HUD обязан показывать состояние: `кликните, чтобы захватить мышь`. Без надписи
+   игрок не отличает «нет захвата» от «игра сломана».
+3. `movementX/movementY` под захватом накапливаются в собственный буфер и
+   **обнуляются при чтении** (`consumeLockDelta`) — иначе поворот удваивается на
+   кадрах, где событий пришло несколько.
+
+---
+
+## 3. Огонь: событие против удержания
+
+Это две разные вещи, и путать их нельзя.
+
+| Оружие | Источник ввода | Почему |
+|---|---|---|
+| Автомат | `isButtonDown(0)` — удержание | Очередь идёт, пока держат |
+| Полуавтомат, дробовик | событие `onPointerButton` | Иначе пистолет стреляет с темпом автомата |
+
+```typescript
+const held = input.isButtonDown(0) && input.isPointerLocked;
+const wantsShot = spec.auto ? held : semiQueued;
+semiQueued = false;                       // событие живёт ровно один кадр
+if (!wantsShot) return;
+if (busy() || fireTimer > 0) return;      // перезарядка, смена ствола, темп
+if (ammo <= 0) { startReload(); return; }
+if (sprinting) return;                    // из бега не стреляют
+shoot();
+```
+
+**Кнопки указателя нужно различать.** Снимок вида `{ down: boolean }` не говорит,
+какая кнопка нажата, и прицеливание правой кнопкой оказывается стрельбой. Хаб ввода
+обязан держать множество нажатых кнопок:
+
+```typescript
+private readonly buttons = new Set<number>();
+isButtonDown(button: number): boolean { return this.buttons.has(button); }
+// pointerdown → buttons.add(ev.button); pointerup → buttons.delete(ev.button)
+```
+
+Темп огня задаётся в **выстрелах в минуту**, а не в «секундах между выстрелами»:
+`fireTimer = 60 / spec.rpm`. Числа так сравнимы с реальными образцами и с ТТХ
+соседнего оружия.
+
+---
+
+## 4. Выбор оружия: таблица, а не три ветки `if`
+
+Оружие — это **данные**. Три ствола, отличающиеся только уроном, не дают выбора:
+различаться должен ритм боя.
+
+```typescript
+interface WeaponSpec {
+  id: string; name: string;
+  auto: boolean;                     // удержание или клик
+  damage: number; headMult: number; limbMult: number;
+  pellets: number;                   // дробовик — 9 лучей за выстрел
+  rpm: number;
+  hipSpread: number; adsSpread: number;
+  spreadPerShot: number; spreadDecay: number; maxSpread: number;
+  mag: number; reserve: number; reloadTime: number;
+  recoilPitch: number; recoilYaw: number; viewKick: number; trauma: number;
+  range: number; adsFov: number; moveScale: number;
+  audioPitch: number; audioPower: number; tracerColor: number;
+}
+```
+
+| | Пистолет | Автомат | Дробовик |
+|---|---|---|---|
+| Режим | полуавтомат | авто | полуавтомат |
+| Темп | 320 | 640 | 78 |
+| Урон × голова | 34 ×3.0 | 26 ×2.6 | 15 ×1.8 (×9 дробин) |
+| Магазин / запас | 12 / 72 | 30 / 180 | 6 / 36 |
+| Дальность | 90 м | 120 м | 34 м |
+
+Патроны и запас живут **у каждого ствола отдельно**: общий счётчик стирает разницу
+между «кончились патроны» и «пора сменить оружие».
+
+### Переключение
+
+Три входа, один код: цифры `1/2/3`, циклический `Q` и колесо мыши. Колесо — это
+событие, а не состояние, и подписка на него в хабе ввода устроена как `onKey`:
+
+```typescript
+canvas.addEventListener('wheel', this.handleWheel, { passive: false });  // иначе скроллит страницу
+```
+
+Подмена модели — **на дне анимации опускания**, а не в кадре нажатия:
+
+```typescript
+if (before > swapTime / 2 && swapTimer <= swapTime / 2) {
+  weapons[index].group.visible = false;
+  index = pendingIndex;
+  weapons[index].group.visible = true;
+  spread = 0;                       // разброс не переносится между стволами
+}
+```
+
+Смена ствола и перезарядка блокируют огонь и прицеливание одним предикатом
+`busy()`. Отдельные проверки в пяти местах — это пять мест, где забудут одну.
+
+---
+
+## 5. Вьюмодель: руки, позы, отдача
+
+«Нет рук» — не косметика. Летающий в воздухе ствол не показывает ни хвата, ни
+перезарядки, ни того, что персонаж существует.
+
+### Рука как отрезок «плечо → кисть»
+
+Два узла, а не один:
+
+```
+pivot (в плече, ЕГО крутит анимация)  →  aim (lookAt на хват)  →  сегменты
+```
+
+```typescript
+private buildArm(from: THREE.Vector3, to: THREE.Vector3, role: 'trigger' | 'support'): THREE.Group {
+  const pivot = new THREE.Group();
+  pivot.position.copy(from);
+  const g = new THREE.Group();
+  pivot.add(g);
+
+  const len = Math.max(0.12, from.distanceTo(to));
+  addSegment(g, 0.078, len * 0.58, len * 0.29);   // плечо
+  addSegment(g, 0.066, len * 0.44, len * 0.79);   // предплечье
+  addHand(g, len, role);                          // ладонь + фаланги
+
+  // Наводка ставится ПОСЛЕ сборки и только на внутренний узел. Цель — в
+  // мировых координатах: `lookAt` считает от мировой позиции узла, а она в
+  // момент сборки равна `from` (пивот ещё ни к чему не подключён).
+  g.lookAt(to);
+  return pivot;
+}
+```
+
+> **Ловушка `lookAt`.** `Object3D.lookAt` разворачивает к цели **+Z**. Минус Z —
+> только у камер и источников света. Геометрия, построенная вдоль −Z (как
+> «правильно» для камеры), после `lookAt` смотрит строго назад: руки уходят за
+> спину, трассеры летят в затылок. Тот же выбор оси касается любого объекта,
+> который наводят через `lookAt`, — трассеров, декалей, конусов зрения.
+
+Правая рука ведётся к рукояти, левая — к цевью; точки хвата задаются вместе с
+моделью ствола. Одна функция закрывает любое оружие, а анимация перезарядки
+вращает ПИВОТ, не трогая наводку.
+
+### Почему «второй руки нет»
+
+Симптом всегда одинаковый: в кадре одна кисть на рукояти, поддерживающей
+руки не видно. Причин ровно три, и они складываются.
+
+**1. Наводка живёт в том же узле, что и анимация.** Рука наведена на хват
+через `lookAt`, то есть кватернионом. Анимация перезарядки «возвращает руку
+в покой» привычным способом:
+
+```typescript
+arm.rotation.x = THREE.MathUtils.lerp(arm.rotation.x, 0, k);   // ← стирает lookAt
+```
+
+`rotation` — это Эйлер того самого кватерниона. Гася его к нулю, код гасит
+наводку: рука отворачивается от оружия и уезжает за камеру. Не «пропадает» —
+именно отворачивается, и потому баг не ищется там, где он есть.
+
+Лечится разделением узлов:
+
+```
+pivot (в плече, ЕГО крутит анимация)  →  aim (lookAt на хват)  →  сегменты
+```
+
+Снаружи остаётся чистый пивот с нулевым поворотом, который анимация вольна
+крутить как угодно. То же правило работает для любого узла, чья базовая
+ориентация задана не нулём: анимировать надо обёртку, а не сам узел.
+
+**2. Точка хвата на осевой линии ствола.** Кисть, наведённая в `x = 0`,
+оказывается ВНУТРИ геометрии оружия. Хват задаётся на видимом борту:
+ведущая рука — снизу-сбоку от рукояти, поддерживающая — на том борту
+цевья, который повёрнут к камере.
+
+**3. Обе руки на одной линии по глубине.** Если ствол смотрит строго вдоль
+взгляда, поддерживающая кисть оказывается ровно за ведущей и не видна ни в
+одном кадре. Решается развалом оружия:
+
+```typescript
+const cantY = THREE.MathUtils.lerp(0.145, 0, ads);   // ~8°, в прицеле — ноль
+const cantZ = THREE.MathUtils.lerp(-0.055, 0, ads);
+```
+
+Разворот на 8° разносит кисти по горизонтали, и хват сразу читается как хват
+двумя руками. В прицеле развал обязан уходить в ноль: там ствол смотрит в
+центр экрана.
+
+Проверять это глазом по скриншоту трудно — обе кисти тёмные и рядом с
+тёмным оружием. Быстрый способ: спроецировать мировые позиции кистей в
+пиксели и посмотреть числа.
+
+```typescript
+const p = new THREE.Vector3(); hand.getWorldPosition(p);
+const ndc = p.project(camera);      // y вне [-1, 1] — кисть за кадром
+```
+
+### Кисть — из фаланг
+
+Один брусок на конце руки читается как брусок рядом с оружием. Ладонь плюс
+четыре пальца, загнутых ВОКРУГ рукояти (поворот по X, нарастающий от пальца
+к пальцу), плюс отставленный большой — это восемь коробок, которые
+превращают «палку» в руку. Роль задаёт хват: ведущая рука кладёт палец на
+спуск, поддерживающая обхватывает цевьё.
+
+### Детализация оружия: что реально читается
+
+По убыванию отдачи на вложенный треугольник:
+
+| Деталь | Что даёт |
+|---|---|
+| Насечки на затворе, рёбра на цевье | масштаб — без них деталь не с чем сравнить |
+| Прицельные приспособления (мушка, целик) | ось ствола, и по ней собирается поза прицела |
+| Магазин под углом, а не «кирпич» | силуэт, по которому оружие узнаётся |
+| Дульный тормоз с прорезями | форма дула в кадре вспышки |
+| Разные материалы (сталь / полимер / дерево) | три ствола различаются, не читая HUD |
+
+> **Ловушка металла.** `MeshStandardMaterial` с `metalness` около единицы
+> **без карты окружения рендерится чёрным**: металлу нечего отражать. Оружие
+> превращается в дыру в кадре, и это выглядит как ошибка модели, а не
+> материала. Два лечения, и нужны оба: `scene.environment` из
+> `RoomEnvironment` (генерируется на месте, ни файла, ни запроса) и
+> `metalness ≤ 0.4` в самом материале — на низком тире среду отключают.
+
+```typescript
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.35;    // подсветка, а не второе солнце
+pmrem.dispose();
+```
+
+### Своё положение вьюмодели у каждого ствола
+
+Общее смещение на все стволы не работает: у пистолета мушка на 6 см выше
+начала координат, у автомата — на 8. От одного числа пистолет уезжает под
+нижний край кадра, а прицельная планка автомата не попадает в центр экрана.
+Положение «от бедра» и «в прицеле» — это два поля в таблице оружия рядом с
+уроном и темпом.
+
+### Три позы и один лерп
+
+Бедро, прицел, бег — не три ветки, а одна интерполяция. Переключение «телепортом»
+между позами и есть та дёрганость, из-за которой вьюмодель выглядит дешёвой.
+
+```typescript
+const ads = aiming ? 1 : 0, sprint = sprinting ? 1 : 0;
+const baseX = lerp(0.17,  0.0,   ads) + sprint * 0.07;
+const baseY = lerp(-0.15, -0.058, ads) - sprint * 0.07;
+const baseZ = lerp(-0.46, -0.56, ads) + sprint * 0.06;
+```
+
+**Масштаб и вынос подбираются под FOV, а не «на глаз в редакторе».** При FOV 75 и
+`z` ближе −0.4 ствол занимает половину кадра; дальше −1.0 он начинает входить в
+стены (см. радиус игрока в §1). Рабочее решение — вынос −0.45…−0.55 и общий масштаб
+группы ~0.6. Правильный, но дорогой вариант — рисовать вьюмодель вторым проходом со
+своей камерой и очисткой глубины; тогда клипинг исчезает совсем.
+
+### Отдача — пружина, а не сдвиг
+
+Два уровня: цель спадает к нулю, текущее значение догоняет цель.
+
+```typescript
+recoilPosTarget.multiplyScalar(Math.exp(-13 * dt));
+recoilRotTarget.multiplyScalar(Math.exp(-13 * dt));
+recoilPos.lerp(recoilPosTarget, Math.min(1, 26 * dt));
+recoilRot.lerp(recoilRotTarget, Math.min(1, 26 * dt));
+```
+
+Одноуровневый лерп даёт либо резкий скачок, либо ватную отдачу; двухуровневый —
+щелчок с откатом.
+
+Поверх позы складываются, в порядке заметности:
+
+* **покачивание при ходьбе** — от пройденного пути, а не от времени (иначе стоя на
+  месте оружие «идёт»);
+* **инерция за мышью** (`sway`) — оружие догоняет взгляд, а не приклеено к нему;
+* **дыхание** — медленная синусоида от **собственных часов демо**, а не
+  `performance.now()`: чужие часы ломают детерминизм головного прогона;
+* **перезарядка** — дуга `sin(π·p)`: ствол уходит вниз и вбок, левая рука ныряет к
+  магазину, магазин (у дробовика — цевьё) уезжает и возвращается;
+* **смена ствола** — та же дуга, подмена модели на её дне.
+
+### Отдача камеры возвращается не полностью
+
+```typescript
+camRecoilPitch += spec.recoilPitch * (aiming ? 0.7 : 1);
+camRecoilRecover = camRecoilPitch * 0.35;      // куда осядет подброс
+// в кадре:
+camRecoilPitch = lerp(camRecoilPitch, camRecoilRecover, 1 - Math.exp(-9 * dt));
+```
+
+Полный возврат к нулю превращает отдачу в декорацию: контроль отдачи существует
+именно потому, что часть подброса игрок компенсирует мышью сам.
+
+> **Но сама «осевшая» часть обязана таять.** Если `camRecoilRecover` только
+> задаётся при выстреле и никогда не спадает, уровень оседания остаётся
+> навсегда: после первой же очереди камера задрана вверх на треть подброса,
+> и обратно её уже ничто не опускает. В кадре это видно как уехавший
+> горизонт и провалившееся под нижний край оружие — и списывается на что
+> угодно, кроме отдачи. Одна строка:
+> ```typescript
+> camRecoilRecover *= Math.exp(-1.6 * dt);
+> ```
+> Проверка формулируется в терминах игрока: после очереди и четырёх секунд
+> без огня направление взгляда должно совпасть с исходным.
+
+---
+
+## 6. Обратная связь: что игрок обязан увидеть
+
+Порядок — по стоимости отсутствия. Без первых трёх пунктов шутер не читается вообще.
+
+| Эффект | Роль | Стоимость |
+|---|---|---|
+| Вспышка у дула + `PointLight` | «выстрел произошёл» | 2 треугольника + 1 свет |
+| Трассер | куда ушла пуля | 1 `InstancedMesh` |
+| Хитмаркер | попал / убил | 4 плашки на камере |
+| Декаль | пуля попала **в стену**, а не в никуда | 1 `InstancedMesh`, кольцевой буфер |
+| Искры / кровь | по чему попал | пул частиц |
+| Гильза | оружие живое | тот же пул |
+| Дым | тяжесть ствола | пул с всплытием |
+| Взрыв: шар, кольцо, свет | масштаб события | предсобранный пул мешей |
+| Виньетка урона | «бьют меня» | один эффект в конвейере |
+
+### Вспышка
+
+```typescript
+flash.visible = muzzleTimer > 0;
+muzzleLight.intensity = flash.visible ? 9 * (muzzleTimer / 0.045) : 0;
+if (flash.visible) {                    // одинаковая вспышка читается как спрайт
+  flash.rotation.z = rng() * Math.PI;
+  flash.scale.setScalar(0.8 + rng() * 0.5);
+}
+```
+
+Плоскость с `AdditiveBlending` вместо сферы: читается лучше, стоит два треугольника
+и хорошо ловится блумом на высоком тире. Свет **один на все стволы** и
+переставляется к активному дулу — три `PointLight` ради одного кадра не нужны.
+
+### Трассер
+
+Отрезок «дуло → точка попадания», живущий 50–60 мс. Геометрия — единичный бокс,
+сдвинутый началом в origin вдоль **+Z** (см. ловушку `lookAt`), масштаб по Z равен
+длине:
+
+```typescript
+dummy.position.copy(muzzleWorld);
+dummy.lookAt(hitPoint);
+dummy.scale.set(1, 1, muzzleWorld.distanceTo(hitPoint));
+dummy.updateMatrix();
+tracers.setMatrixAt(i % MAX_TRACERS, dummy.matrix);   // кольцевой буфер
+```
+
+Трассер идёт **от дула**, а урон считается **лучом от камеры**: расхождение в
+полметра невидимо, а обратный порядок даёт пули, летящие мимо прицела.
+
+### Частицы
+
+Один пул на всю вкладку, два `InstancedMesh` (аддитивные искры и полупрозрачный
+дым). Ключевое требование к пулу — **пер-партикловые гравитация и сопротивление**:
+искра, гильза и клуб дыма живут по разным законам, а пул один.
+
+```typescript
+p.vy += p.gravity * dt;                       // дым: +1.2, гильза: -16
+p.vx *= Math.max(0, 1 - p.drag * dt);
+p.currentScale = p.scale * (1 - t + p.endScale * t);   // дым растёт, искра схлопывается
+```
+
+Затухание — **через `setColorAt`**, а не через прозрачность материала: отдельный
+материал на частицу уничтожает смысл `InstancedMesh`.
+
+> **Ловушка отсечения.** Частицы живут в мировых координатах, а `InstancedMesh` стоит
+> в начале координат. `Frustum.intersectsObject` считает `boundingSphere` один раз и
+> кэширует навсегда — сфера остаётся у точки спавна, и после отхода игрока не
+> рисуется ничего. Всем таким мешам нужен `frustumCulled = false`.
+
+### Взрыв
+
+Меш взрыва создаётся **заранее**, пулом на 3–4 штуки. Создание материала в кадре
+детонации — компиляция шейдера ровно там, где нужен ровный кадр.
+
+Три слоя: аддитивный шар (`opacity ~ (1-t)^1.6`), расширяющееся кольцо по земле и
+вспышка `PointLight` с `intensity ~ (1-t)^2`. Плюс два выброса частиц — искры вверх
+конусом и медленный дым.
+
+### Виньетка урона
+
+Импульсные эффекты постобработки держатся в конвейере **постоянно** и анимируются
+через `blendMode.opacity`. Пересборка `EffectPass` компилирует шейдер и даёт фриз
+ровно в тот кадр, когда в игрока попали (`stack/postprocessing.md` §3).
+
+```typescript
+effects(): Effect[] { return [this.damageVignette]; }         // один раз при сборке
+// в кадре:
+damageVignette.blendMode.opacity.value = damageFlash * 0.85;
+```
+
+### Прицел показывает разброс
+
+Иначе рост разброса от очереди — невидимое правило, и игрок винит игру, а не себя.
+
+```typescript
+const total = (aiming ? spec.adsSpread : spec.hipSpread) + spread;
+const gap = 0.004 + total * 0.32 + (moveSpeed / 8) * 0.004;
+```
+
+Материал прицела и хитмаркера — `depthTest: false` + `renderOrder` под тысячу: они
+обязаны быть видны поверх стен и оружия. В режиме прицеливания перекрестье
+**убирается** — роль центра экрана играет мушка ствола, и два «центра» сбивают
+наводку.
+
+### Ближний бой в шутере: таймеры живут в фиксированном шаге
+
+Пинок, приклад, добивание — всё это окно активности внутри анимации. Заводить его
+на `setTimeout` нельзя: `setTimeout` не знает ни про паузу, ни про hit-stop, ни про
+скрытую вкладку, и удар прилетает после того, как игрок уже отпустил кнопку.
+
+```typescript
+// НЕТ: setTimeout(() => applyKick(), 120)
+kickTimer = Math.max(0, kickTimer - dt);          // fixedUpdate, 1/60
+const progress = 1 - kickTimer / KICK_DURATION;
+if (!kickDone && progress >= 0.32) { kickDone = true; applyKick(); }   // окно удара
+```
+
+Тот же принцип действует для фитиля бочки, задержки реакции ИИ и любого «через
+столько-то миллисекунд». Подробности по ударам и рэгдоллу —
+`melee_combat_and_ragdoll.md`.
+
+---
+
+## 7. Разброс и его восстановление
+
+```typescript
+spread = Math.min(spec.maxSpread, spread + spec.spreadPerShot);        // выстрел
+spread = Math.max(0, spread - spec.spreadDecay * dt * (held ? 0.4 : 1.6));  // кадр
+```
+
+Спад **замедлен, пока держат гашетку**: иначе автомат восстанавливается прямо во
+время очереди и длинная очередь ничем не хуже коротких. Множитель 0.4/1.6 —
+рабочая вилка.
+
+Направление луча со сбросом строится **конусом вокруг взгляда**, а не сдвигом по двум
+мировым осям: у зенита второй вариант вырождается и пули уходят вбок.
+
+```typescript
+camera.getWorldDirection(dir);
+const u = tmp.set(dir.z, 0, -dir.x).normalize();   // при |dir.y|→1 подставить (1,0,0)
+const v = tmp2.copy(dir).cross(u).normalize();
+const a = rng() * Math.PI * 2, r = Math.tan(spreadAngle) * Math.sqrt(rng());
+dir.addScaledVector(u, Math.cos(a) * r).addScaledVector(v, Math.sin(a) * r).normalize();
+```
+
+`Math.sqrt(rng())` даёт равномерное распределение по площади круга; без корня
+попадания собираются в центре, и заявленный разброс не работает.
+
+Дробовик — тот же код, вызванный `pellets` раз; урон делится на число дробин, а
+хитмаркер показывается один на выстрел.
+
+---
+
+## 8. Что проверять головным прогоном
+
+WebGL для этого не нужен: Three.js строит сцены и считает матрицы в Node. Проверки
+формулируются в терминах игрока (`scripts/fps-check.ts`):
+
+1. W идёт вперёд, S — назад, D — вправо (§0).
+2. Мышь вправо поворачивает вправо, вниз — опускает взгляд.
+3. Space поднимает игрока и возвращает на землю.
+4. Ctrl опускает камеру, отпускание возвращает рост.
+5. Автомат стреляет на удержании; патроны расходуются.
+6. Полуавтомат **не** стреляет очередью от одного удержания, но стреляет от каждого клика.
+7. `1/2/3`, `Q` и колесо переключают ствол, HUD показывает активный.
+8. Перезарядка занимает время, пополняет магазин из запаса и уменьшает запас.
+9. Выстрел дробью оставляет несколько отметин.
+10. Трассер, частицы и вспышка существуют в кадре выстрела (вспышка живёт 45 мс —
+    проверять на первом-втором тике, не на третьем).
+11. Взрыв бочки зажигает свет и цепляет соседние бочки.
+12. У врагов двигаются ноги на ходу и тело заваливается при смерти.
+13. Очередь задирает ствол, а через четыре секунды без огня взгляд
+    возвращается в исходное направление (осевшая отдача обязана таять).
+14. Враг отыгрывает попадание (таймер реакции перезапустился) и на полу
+    появляется пятно крови.
+15. Процедурная анимация не пустая: у бедра в цикле бега есть амплитуда, а
+    в стойке плечи подняты. Нулевые числа означали бы, что ретаргет отдал
+    одну и ту же позу на все кадры.
+16. У каждого живого врага есть оружие в обеих руках, и оно **не дальше
+    0.6 м от его груди**: реквизит ставится по мировым позициям кистей, а
+    хранит локальные координаты, и без перевода улетает на позицию врага от
+    начала координат.
+17. Ствол стреляющего врага смотрит в игрока (`cos > 0.985`), а не мимо него:
+    мокапная стойка бладированная, и разворота тела мало.
+18. Труп: рэгдолл появился, оружие выпало и легло на пол, тело улеглось,
+    осталось у места смерти, не сложилось в комок и уснуло.
+19. 20 секунд боя без `NaN` в трансформах.
+
+Картинку это не проверяет. Позу вьюмодели, руки и эффекты снимает Playwright с
+собранного дистрибутива (`scripts/fps-shots.ts`) — захват мыши в headless
+недоступен, поэтому флаг `isPointerLocked` подменяется на странице.
+
+### Кадр надо ЗАФИКСИРОВАТЬ, иначе снимается не то
+
+Съёмка живой игры — это не «сделай скриншот»: между подготовкой сцены и
+затвором проходят секунды, и за это время игра успевает всё поменять. Каждый
+пункт ниже стоил кадра, снятого впустую, и все они не про рендер, а про то,
+что игра продолжает жить:
+
+* **Игрок на съёмке бессмертен** (`applyDamage` подменяется пустышкой). Иначе
+  ответный огонь доводит HP до нуля, демо перезапускается посреди серии, и
+  кадр снимает свежую арену вместо подготовленной сцены. Выглядит это как
+  «расставленные тела куда-то делись» — то есть как баг в том, что снимаешь.
+* **ИИ отключается на время съёмки** (`moveTowards`/`strafe` — пустышки).
+  Враг, поставленный в пяти метрах, честно отступает от подошедшего вплотную
+  игрока; а стоит одному кадру потерять линию видимости, он заново решает,
+  что делать.
+* **Гасятся ВСЕ таймеры занятости**, а не только перезарядка: недоигранная
+  смена ствола так же отправляет `selectWeapon` в отказ, и кадр подписан
+  одним оружием, а показывает другое. От прогона к прогону это выпадало
+  по-разному — худший вид флака.
+* **Телепорт объекта требует ручного `updateMatrixWorld`**, если снимок позы
+  берётся сразу: рэгдолл читает мировые матрицы в тот же кадр, а они ещё от
+  старой позиции. Тело падало там, где враг был до телепорта.
+* **Паузы считаются в игровом времени, а не в реальном.** Софтверный рендер
+  идёт ~3 fps, и при клампе `dt` в хосте игровое время течёт вчетверо
+  медленнее реального: секунда анимации — это четыре секунды ожидания.
+
+---
+
+## 9. Чек-лист «шутер собран»
+
+- [ ] `forward`/`right` выведены из `yaw` с правильными знаками, покрыты тестом
+- [ ] Прыжок с гравитацией, койот-таймом и буфером нажатия
+- [ ] Опора — луч по геометрии уровня, а не константа пола
+- [ ] Захват мыши запрашивается из обработчика нажатия; горячие клавиши приложения молчат под захватом
+- [ ] Кнопки указателя различаются (ЛКМ ≠ ПКМ)
+- [ ] Полуавтомат читает событие, автомат — удержание
+- [ ] Минимум три ствола, различающихся режимом огня, а не только уроном
+- [ ] Патроны и запас — у каждого ствола свои
+- [ ] Вьюмодель с ДВУМЯ руками: наводка в отдельном узле, хват на видимом борту, оружие с развалом
+- [ ] Геометрия под `lookAt` построена вдоль +Z
+- [ ] Реквизит в руках переведён из мировых координат в локальные
+- [ ] Наводка оружия откалибрована отдельно от разворота тела
+- [ ] Смерть — рэгдолл с импульсом вдоль пули, оружие выпадает из рук
+- [ ] `metalness ≤ 0.4` и `scene.environment` — иначе металл чёрный
+- [ ] Положение вьюмодели «от бедра» и «в прицеле» — своё у каждого ствола
+- [ ] Позы бедро/прицел/бег интерполируются, не переключаются
+- [ ] Анимации перезарядки и смены ствола; подмена модели на дне дуги
+- [ ] Отдача двухуровневой пружиной; подброс камеры оседает не до нуля, но осевшая часть тает
+- [ ] Вспышка, трассер, декаль, искры, гильза, дым, взрыв, хитмаркер
+- [ ] Прицел показывает текущий разброс и убирается в прицеливании
+- [ ] Импульсные эффекты постобработки — через `blendMode.opacity`, без пересборки конвейера
+- [ ] `frustumCulled = false` на всех мешах с мировыми инстансами
+- [ ] Головной прогон и снимки из браузера в `check:all`

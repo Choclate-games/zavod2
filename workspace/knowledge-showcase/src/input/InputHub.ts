@@ -9,6 +9,8 @@ export interface PointerSample {
   /** Смещение с прошлого кадра в пикселях (для pointer lock и свайпов). */
   delta: THREE.Vector2;
   down: boolean;
+  /** Кнопка, которой указатель прижат: 0 — левая, 2 — правая, -1 — ни одной. */
+  button: number;
 }
 
 type KeyHandler = (code: string, ev: KeyboardEvent) => void;
@@ -20,6 +22,8 @@ type KeyHandler = (code: string, ev: KeyboardEvent) => void;
  * удержании» повторялся бы каждый кадр.
  */
 type ButtonHandler = (button: number, ev: PointerEvent) => void;
+/** Прокрутка колеса: -1 — «вверх/от себя», +1 — «вниз/на себя». */
+type WheelHandler = (direction: number, ev: WheelEvent) => void;
 
 /**
  * Единый источник ввода для всех демо стенда.
@@ -37,9 +41,18 @@ export class InputHub {
 
   private readonly keys = new Set<string>();
   private readonly pointers = new Map<number, PointerSample>();
+  /**
+   * Какие кнопки указателя удерживаются ПРЯМО СЕЙЧАС.
+   *
+   * `PointerSample.down` не различает кнопки, и демо, читавшие только его,
+   * стреляли от правой кнопки и от прицеливания одинаково. Множество
+   * кнопок — отдельное состояние, как `keys` для клавиатуры.
+   */
+  private readonly buttons = new Set<number>();
   private keyDownHandlers = new Set<KeyHandler>();
   private keyUpHandlers = new Set<KeyHandler>();
   private buttonHandlers = new Set<ButtonHandler>();
+  private wheelHandlers = new Set<WheelHandler>();
   private locked = false;
   private lockDelta = new THREE.Vector2();
 
@@ -55,6 +68,8 @@ export class InputHub {
     // Без этого правая кнопка открывает системное меню поверх канваса, и
     // «сильный удар» превращается в «Сохранить изображение как…».
     canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    // passive: false — иначе колесо продолжит скроллить страницу под канвасом.
+    canvas.addEventListener('wheel', this.handleWheel, { passive: false });
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('pointercancel', this.onPointerUp);
@@ -97,11 +112,21 @@ export class InputHub {
     return () => { this.buttonHandlers.delete(handler); };
   }
 
+  /**
+   * Подписка на колесо мыши. Смена оружия колесом — то же событие, что и
+   * нажатие клавиши: удержания у колеса не бывает.
+   */
+  onWheel(handler: WheelHandler): () => void {
+    this.wheelHandlers.add(handler);
+    return () => { this.wheelHandlers.delete(handler); };
+  }
+
   /** Снять всех подписчиков — вызывается хостом при смене вкладки. */
   clearSubscribers(): void {
     this.keyDownHandlers.clear();
     this.keyUpHandlers.clear();
     this.buttonHandlers.clear();
+    this.wheelHandlers.clear();
   }
 
   // ───────────────────────────────────────────────────────────── указатель
@@ -111,6 +136,11 @@ export class InputHub {
 
   get primary(): PointerSample | null {
     return this.pointers.values().next().value ?? null;
+  }
+
+  /** Удерживается ли кнопка указателя: 0 — левая, 1 — средняя, 2 — правая. */
+  isButtonDown(button: number): boolean {
+    return this.buttons.has(button);
   }
 
   get isPointerLocked(): boolean {
@@ -140,6 +170,7 @@ export class InputHub {
   releaseAll = (): void => {
     this.keys.clear();
     this.pointers.clear();
+    this.buttons.clear();
     this.lockDelta.set(0, 0);
     this.vehicle.releaseAll();
   };
@@ -160,6 +191,7 @@ export class InputHub {
     // Подписчики — первыми, и захват в try. `setPointerCapture` кидает
     // NotFoundError на любом указателе, которого браузер не считает
     // активным, и тогда весь обработчик обрывался до удара.
+    this.buttons.add(ev.button);
     this.buttonHandlers.forEach((h) => h(ev.button, ev));
     try { this.canvas.setPointerCapture(ev.pointerId); } catch { /* не критично */ }
     this.pointers.set(ev.pointerId, {
@@ -167,7 +199,15 @@ export class InputHub {
       ndc: this.toNdc(ev, new THREE.Vector2()),
       delta: new THREE.Vector2(),
       down: true,
+      button: ev.button,
     });
+  };
+
+  private readonly handleWheel = (ev: WheelEvent): void => {
+    if (this.wheelHandlers.size === 0) return;
+    ev.preventDefault();
+    const dir = Math.sign(ev.deltaY) || 1;
+    this.wheelHandlers.forEach((h) => h(dir, ev));
   };
 
   private readonly onPointerMove = (ev: PointerEvent): void => {
@@ -188,14 +228,16 @@ export class InputHub {
         ndc: this.toNdc(ev, new THREE.Vector2()),
         delta: new THREE.Vector2(ev.movementX, ev.movementY),
         down: false,
+        button: -1,
       });
     }
   };
 
   private readonly onPointerUp = (ev: PointerEvent): void => {
     this.canvas.releasePointerCapture?.(ev.pointerId);
+    this.buttons.delete(ev.button);
     const p = this.pointers.get(ev.pointerId);
-    if (p) p.down = false;
+    if (p) { p.down = this.buttons.size > 0; p.button = -1; }
     if (ev.pointerType !== 'mouse') this.pointers.delete(ev.pointerId);
   };
 

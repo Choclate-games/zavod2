@@ -1,3 +1,10 @@
+"""
+УСТАРЕЛО. Десктопное окно больше не развивается — рабочий интерфейс фабрики
+это веб (`start.bat` / `python run_web.py`). Код оставлен как есть, чтобы
+старые сценарии запуска не сломались, но новые возможности сюда не
+переносятся и расхождения с вебом не считаются багами.
+"""
+
 import os
 import sys
 import threading
@@ -16,7 +23,7 @@ from app.config import config, BASE_DIR
 from app.context import GenerationContext
 from app.models import GameConcept
 from app.pipeline import Pipeline
-from app import sandbox, chat_store, notify
+from app import sandbox, chat_store, notify, project_meta
 from app.game_runner import DevServer, detect_start_command, open_internal_browser
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
@@ -68,6 +75,9 @@ AGENT_LABELS: Dict[str, str] = {
     "opencode": "💎 opencode (OpenCode CLI)",
 }
 AGENT_KEYS = tuple(AGENT_LABELS)
+
+# Пункт выпадающего списка «работать без привязки к игре».
+NO_PROJECT_LABEL = "[Без контекста]"
 
 # У кого остаток квоты живёт только в личном кабинете на сайте: рисовать
 # полосу не из чего, поэтому ведём прямо туда.
@@ -1183,7 +1193,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             self._build_gallery_card(
                 slug=project.name,
                 thumb=thumb,
-                title=data.get("title", project.name),
+                title=self._project_display_title(project.name, data),
                 genre=data.get("genre", "Проект без спецификации"),
                 renderer=str(data.get("renderer", "")).upper() or "—",
                 score=data.get("scores", {}).get("overall_score", "-"),
@@ -2064,7 +2074,7 @@ class GamePromptFactoryGUI(ctk.CTk):
                 except Exception:
                     data = {}
 
-            title = data.get("title", p.name)
+            title = self._project_display_title(p.name, data)
             genre = data.get("genre", "Проект без спецификации")
             renderer = str(data.get("renderer", "")).upper() or "—"
             score = data.get("scores", {}).get("overall_score", "-")
@@ -2276,7 +2286,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         self._show_tab("agy")
         self._populate_agy_projects_dropdown()
-        self.combo_agy_proj.set(self.current_project_slug)
+        self._set_agy_project(self.current_project_slug)
         # Беседу продолжает тот же CLI, который её начал.
         if session.agent in AGENT_KEYS:
             self.combo_agy_agent.set(AGENT_LABELS[session.agent])
@@ -2621,7 +2631,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             return
         self._show_tab("agy")
         self._populate_agy_projects_dropdown()
-        self.combo_agy_proj.set(self.current_project_slug)
+        self._set_agy_project(self.current_project_slug)
         self.txt_agy_prompt.delete("1.0", "end")
 
         has_code = (sandbox.project_dir(self.current_project_slug) / "package.json").exists()
@@ -2722,10 +2732,10 @@ class GamePromptFactoryGUI(ctk.CTk):
         ).pack(side="left", padx=(0, 6))
 
         self.combo_agy_proj = ctk.CTkComboBox(
-            opt_row, values=["[Без контекста]"], width=220,
+            opt_row, values=[NO_PROJECT_LABEL], width=220,
             fg_color="#0e1626", border_color="#1e293b"
         )
-        self.combo_agy_proj.set("[Без контекста]")
+        self.combo_agy_proj.set(NO_PROJECT_LABEL)
         self.combo_agy_proj.pack(side="left", padx=(0, 15))
 
         ctk.CTkLabel(
@@ -3988,10 +3998,10 @@ class GamePromptFactoryGUI(ctk.CTk):
             pass
 
     def _launch_agy_interactive_window(self):
-        selected_proj = self.combo_agy_proj.get()
+        selected_proj = self._selected_agy_slug()
         proj_dir = None
         prompt = self.txt_agy_prompt.get("1.0", "end").strip()
-        if selected_proj and selected_proj != "[Без контекста]":
+        if selected_proj:
             proj_dir = sandbox.project_dir(selected_proj)
 
         yolo_mode = bool(self.chk_agy_yolo.get())
@@ -4002,11 +4012,57 @@ class GamePromptFactoryGUI(ctk.CTk):
                             "text": f"Интерактивный терминал {AGENT_LABELS.get(agent, agent)} "
                                     f"открыт в отдельном окне."})
 
+    def _project_display_title(self, slug: str, data: Optional[dict] = None) -> str:
+        """
+        Название игры для человека: сначала имя, которое дал пользователь,
+        потом title из спеки и лишь в конце имя папки. Спеку переписывают
+        агенты, поэтому переименование игрока главнее.
+        """
+        title = str((project_meta.get(slug).get("title") or "")).strip()
+        if title:
+            return title
+        if data is None:
+            data = {}
+            yaml_path = sandbox.docs_dir(slug) / "GAME_DATA.yaml"
+            if yaml_path.exists():
+                try:
+                    with open(yaml_path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                except Exception:
+                    data = {}
+        return str(data.get("title") or slug)
+
     def _populate_agy_projects_dropdown(self):
-        slugs = ["[Без контекста]"] + [p.name for p in sandbox.list_projects()]
-        self.combo_agy_proj.configure(values=slugs)
-        if self.current_project_slug and self.current_project_slug in slugs:
-            self.combo_agy_proj.set(self.current_project_slug)
+        """
+        В списке стоят названия игр, а не имена папок: игрок выбирает то же
+        имя, что видит в витрине. Слаг остаётся ключом — держим его в карте
+        «подпись → слаг».
+        """
+        self._agy_proj_labels = {NO_PROJECT_LABEL: ""}
+        labels = [NO_PROJECT_LABEL]
+        for path in sandbox.list_projects():
+            label = self._project_display_title(path.name)
+            # Одинаковые названия у разных папок разводим слагом.
+            if label in self._agy_proj_labels:
+                label = f"{label} ({path.name})"
+            self._agy_proj_labels[label] = path.name
+            labels.append(label)
+        self.combo_agy_proj.configure(values=labels)
+        if self.current_project_slug:
+            self._set_agy_project(self.current_project_slug)
+
+    def _set_agy_project(self, slug: str):
+        """Ставит в списке подпись выбранного проекта (если он ещё есть)."""
+        for label, value in (getattr(self, "_agy_proj_labels", None) or {}).items():
+            if value == slug:
+                self.combo_agy_proj.set(label)
+                return
+
+    def _selected_agy_slug(self) -> str:
+        """Слаг выбранного проекта; пусто — работа без контекста игры."""
+        label = self.combo_agy_proj.get()
+        mapping = getattr(self, "_agy_proj_labels", None) or {}
+        return mapping.get(label, "" if label == NO_PROJECT_LABEL else label)
 
     def _agy_history_block(self, slug: str, limit: int = 6) -> Optional[str]:
         """Сжатая выжимка последних сообщений диалога по проекту."""
@@ -4030,8 +4086,8 @@ class GamePromptFactoryGUI(ctk.CTk):
         if not prompt:
             return
 
-        selected_proj = self.combo_agy_proj.get()
-        if not selected_proj or selected_proj == "[Без контекста]":
+        selected_proj = self._selected_agy_slug()
+        if not selected_proj:
             self.chat_agy.push({
                 "kind": "error",
                 "text": "Выберите проект — беседа сохраняется внутри игры, а агент работает "

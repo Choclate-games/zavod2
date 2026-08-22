@@ -46,6 +46,8 @@ interface Script {
 
 /** Куда стенд отдал обработчик клавиш демо — по нему прогон «нажимает». */
 let keyHandler: ((code: string) => void) | null = null;
+/** То же для кнопок мыши: полуавтоматы стреляют по событию, а не по удержанию. */
+let buttonHandler: ((button: number) => void) | null = null;
 /** Номер текущего тика: по нему считается «движение» в сценарии. */
 let tick = 0;
 
@@ -55,6 +57,7 @@ let tick = 0;
 function stubContext(script: Script): DemoContext {
   const noop = (): void => {};
   keyHandler = null;
+  buttonHandler = null;
   return {
     renderer: null as unknown as THREE.WebGLRenderer,
     tier: 'high',
@@ -69,15 +72,21 @@ function stubContext(script: Script): DemoContext {
         : out.set(0, 0)),
       onKey: (down: (code: string) => void) => { keyHandler = down; return noop; },
       // Мышь головным прогонам не нужна: приёмы вызываются клавишами.
-      onPointerButton: () => noop,
+      onPointerButton: (h: (button: number) => void) => { buttonHandler = h; return noop; },
+      isButtonDown: (b: number) => (b === 0 ? !!script.pointerDown : false),
+      onWheel: () => noop,
       clearSubscribers: noop,
       releaseAll: noop,
       endFrame: noop,
       consumeLockDelta: (out = new THREE.Vector2()) => out.set(0, 0),
       requestPointerLock: noop,
-      isPointerLocked: false,
+      isPointerLocked: true,
       primary: script.pointerDown
-        ? { id: 1, ndc: new THREE.Vector2(Math.sin(tick / 60) * 0.5, Math.cos(tick / 60) * 0.5), delta: new THREE.Vector2(), down: true }
+        ? {
+          id: 1, down: true, button: 0,
+          ndc: new THREE.Vector2(Math.sin(tick / 60) * 0.5, Math.cos(tick / 60) * 0.5),
+          delta: new THREE.Vector2(),
+        }
         : null,
       activePointers: [],
       vehicleSnapshot: () => ({ throttle: 0, brake: 0, steer: 0, handbrake: false, pause: false }),
@@ -116,6 +125,7 @@ async function run(name: string, demo: Demo, ticks: number, script: Script = {})
     for (let i = 0; i < ticks; i++) {
       tick = i;
       if (script.key && i % script.key.every === 0) keyHandler?.(script.key.code);
+      if (script.pointerDown && i % 6 === 0) buttonHandler?.(0);
       demo.fixedUpdate?.(1 / 60);
       demo.update(1 / 60, 0);
     }
@@ -137,7 +147,11 @@ await run('файтинг', new FightingDemo(), 600);      // 10 секунд б
 await run('tower defense', new TowerDefenseDemo(), 1800);  // 30 секунд: волна успевает пойти
 await run('yuka', new YukaDemo(), 600);
 await run('recast', new RecastDemo(), 600);
-await run('fps', new FpsDemo(), 900);
+// FPS: держим ЛКМ, переключаем стволы и прыгаем — сценарий трогает все
+// подсистемы вкладки, а не только ИИ.
+await run('fps', new FpsDemo(), 900, { pointerDown: true, move: true, key: { code: 'Space', every: 90 } });
+await run('fps: смена оружия', new FpsDemo(), 600, { pointerDown: true, key: { code: 'KeyQ', every: 45 } });
+await run('fps: перезарядка', new FpsDemo(), 600, { pointerDown: true, key: { code: 'KeyR', every: 60 } });
 await run('слэшер', new MeleeDemo(), 1800, { pointerDown: true, key: { code: 'Tab', every: 30 } });
 await run('рой', new SurvivorDemo(), 3600, { key: { code: 'Digit1', every: 20 }, move: true });
 await run('стелс', new StealthDemo(), 1800, { move: true });

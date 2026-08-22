@@ -245,3 +245,53 @@ watchdog, and Recast is loaded **only** when the game actually needs a navmesh.
     files touched, what was verified, what remains) and in `CHANGELOG.md` under
     `## [Unreleased]` in player-facing language. A change nobody can reconstruct
     later is a change that will be redone from scratch.
+
+## Orientation & pointer lock
+
+69. `Object3D.lookAt` aims the object's **+Z** at the target; −Z is the convention
+    for cameras and lights only. Geometry that will later be aimed with `lookAt`
+    (viewmodel arms, tracers, arrows, turret beams) must be built along **+Z**.
+    Built along −Z it points backwards after aiming, and the bug reads as "broken
+    model" rather than a flipped axis.
+
+70. `requestPointerLock()` is called **from the pointer-down handler**, never from
+    the frame loop: after an Esc exit a request issued inside
+    `requestAnimationFrame` is silently rejected and the game looks dead. While
+    `document.pointerLockElement` is set, application hotkeys (level switch, menu,
+    tabs) must stay silent — otherwise an in-game key throws the player out of the
+    game.
+
+71. A `MeshStandardMaterial` with high `metalness` and **no environment map
+    renders black** — metal has nothing to reflect. Set `scene.environment`
+    (a `RoomEnvironment` PMREM costs no file and no request) **and** keep
+    `metalness ≤ 0.4` in the material: the environment is the first thing a
+    low tier drops, and the asset must not turn into a hole in the frame
+    when it does.
+
+72. A node whose base orientation is not zero — anything aimed with
+    `lookAt`, `setFromUnitVectors` or a baked rest pose — is animated
+    through a **wrapper**, never by writing its own `rotation`. Code that
+    returns a limb to rest with `rotation.x = lerp(rotation.x, 0, k)` reads
+    the Euler of that very quaternion and erases the aim: the part turns
+    away from what it was holding, and the bug reads as "the model is
+    missing a piece".
+
+73. Anything positioned from **world** coordinates — a prop placed by two
+    hand positions, an effect anchored to a bone, a decal following a
+    moving platform — must be converted into the parent's local space
+    before it is written into `position`/`quaternion`. Writing world
+    numbers into a child of a transformed node applies that transform a
+    second time, and the object drifts away by exactly the owner's offset
+    from the origin. It stays invisible while the owner sits at the origin
+    (which is where every unit test and every bake script puts it), and
+    appears only in the game, as "the weapon is flying around the level".
+
+74. Where the character **looks** and where the weapon **points** are two
+    different directions, and gameplay owns the second one. A mocap firing
+    stance is bladed: the axis through the hands is 40–60° away from the
+    model's forward, so turning the body at the target aims the barrel past
+    it. Measure the offset once on the assembled rig, turn the body by
+    `heading − offset`, and take up the remainder by rotating the chest —
+    with an exact quaternion `from barrel to target`, not by tweaking a
+    single Euler axis: a barrel that sits at an angle to the rotation plane
+    turns by only `angle · cos(that angle)`.

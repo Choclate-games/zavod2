@@ -101,6 +101,8 @@ async function boot(): Promise<void> {
 
   await selectDemo(allDemos[0].id);
   host.start();
+  // Точка входа для скриптов-инспекторов (Playwright снимает кадры стенда).
+  (window as unknown as { __host: DemoHost }).__host = host;
 }
 
 function updateHeaderSelector(targetId?: string): void {
@@ -382,6 +384,10 @@ function wireCatalogEvents(): void {
       }
       return;
     }
+
+    // В захвате мыши все буквы принадлежат демо: иначе Q «смена оружия»
+    // выкидывает игрока на соседнюю вкладку стенда.
+    if (document.pointerLockElement) return;
 
     if (!isTyping) {
       if (e.key === 'q' || e.key === 'Q' || e.key === '[') {

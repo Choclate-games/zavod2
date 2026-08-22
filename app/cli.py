@@ -303,10 +303,11 @@ def contracts(
     log_success(f"Все контракты валидны ({report['checked']} файлов).")
 
 
-@app.command(name="gui", help="Launch the native CustomTkinter Desktop GUI.")
+@app.command(name="gui", help="УСТАРЕЛО: десктопное окно. Используйте веб (run_web.py).")
 def launch_gui():
     from app.gui.ctk_app import run_gui
-    console.print("[bold green]🎮 Starting AI Game Prompt Factory (CustomTkinter GUI)...[/bold green]")
+    console.print("[bold yellow]⚠ Десктопное окно устарело и не развивается — "
+                  "рабочий интерфейс фабрики это веб (start.bat / python run_web.py).[/bold yellow]")
     run_gui()
 
 if __name__ == "__main__":

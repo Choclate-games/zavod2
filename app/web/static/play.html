@@ -165,12 +165,13 @@
   var q = new URLSearchParams(location.search);
   var url = q.get("url") || "";
   var slug = q.get("slug") || "";
+  var name = q.get("name") || slug;
   var frame = document.getElementById("frame");
   var stage = document.getElementById("stage");
   var bar = document.getElementById("bar");
 
-  document.title = "🎮 " + (slug || "Игра");
-  document.getElementById("title").textContent = "🎮 " + (slug || "Игра");
+  document.title = "🎮 " + (name || "Игра");
+  document.getElementById("title").textContent = "🎮 " + (name || "Игра");
   document.getElementById("url").textContent = url;
 
   if (!/^https?:\/\//i.test(url)) {
