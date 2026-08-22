@@ -6,6 +6,7 @@
 спецификация молчит, кодовый агент добирает умолчаниями браузера — и добирает
 одинаково в каждой игре.
 """
+import re
 from pathlib import Path
 
 from agents.art_director import ArtDirectorAgent
@@ -67,6 +68,28 @@ def test_critical_rules_cover_interface():
     assert "pointer-events" in rules
     assert "tabular-nums" in rules
     assert "alert" in rules
+
+
+def test_design_system_offers_no_default_palette():
+    """Единственный конкретный набор значений живёт в приложении и помечен как
+    непереносимый. Иначе кодовый агент скопирует его во все игры, и «умолчание
+    браузера» просто сменится на «умолчание базы знаний» — что хуже: выглядит
+    осознанным решением, принятым не для этой игры."""
+    doc = knowledge.read("ux/ui_design_system.md")
+    head, _, appendix = doc.partition("## Приложение")
+
+    assert appendix, "рабочий пример должен быть вынесен в приложение"
+    assert not re.findall(r"#[0-9a-fA-F]{6}", head), "в теле файла не должно быть готовой палитры"
+    assert not re.findall(r"Orbitron|Outfit", head), "в теле файла не должно быть готовых гарнитур"
+    assert "не подлежит переносу" in appendix
+    # Вместо палитры тело файла даёт процедуру вывода значений из мира игры.
+    assert "Процедура: из мира в значения токенов" in head
+
+
+def test_frame_geometry_is_a_choice_not_a_default():
+    doc = knowledge.read("ux/ui_design_system.md")
+    for silhouette in ("фаска", "скругление", "прямой угол"):
+        assert silhouette in doc
 
 
 # --------------------------------------------------------------------------- арт-директор
@@ -145,6 +168,9 @@ def test_ui_contract_reaches_the_master_prompt():
     assert "tabular-nums" in block
     assert "alert" in block
     assert "мокрая черепица" in block
+    # Одинаковыми во всех играх обязаны быть имена токенов, а не значения.
+    assert "Значения выводятся из этого мира" in block
+    assert "раздела 12" in block
 
 
 def test_master_prompt_carries_ui_theme_and_visual_section():

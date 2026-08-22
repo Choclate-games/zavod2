@@ -22,30 +22,43 @@ prevents them.
 ## 1. Tokens first, never raw values
 
 Every colour, font, radius, spacing step and duration is a CSS custom property.
-A screen that hardcodes `#FFD700` is a screen that will not follow the next theme
+A screen that hardcodes a colour is a screen that will not follow the next theme
 change, and a game whose panels are `padding: 13px` in one place and `16px` in
 another looks misaligned without anyone being able to say why.
 
+> **Имена токенов — контракт. Значения — нет.**
+> Всё, что ниже названо `--color-*`, `--font-*`, `--space-*`, `--dur-*`, обязано
+> существовать под этими именами в любой игре: на них опирается весь остальной
+> документ и весь код компонентов. А вот сами значения выводятся из мира
+> конкретной игры по процедуре в разделе 12 — и **скопировать их из этого файла
+> или из другой игры значит сделать ровно ту ошибку, ради которой файл написан.**
+> Один интерфейс по умолчанию хуже, чем никакого: он выглядит осознанным
+> решением, принятым не для этой игры. Рабочий пример полного набора значений
+> вынесен в приложение в конце файла — как образец плотности, а не как заготовка.
+
+Шаг отступов, длительности и порядок слоёв — единственное, что переносится между
+играми без изменений: это эргономика и производительность, а не стиль.
+
 ```css
 :root {
-  /* Surfaces */
-  --color-bg:           #09080C;
-  --color-panel-glass:  rgba(14, 12, 22, 0.92);
-  --color-panel-border: rgba(255, 255, 255, 0.12);
+  /* Поверхности — три ступени глубины, значения из материала мира (раздел 12) */
+  --color-bg:           /* самый дальний фон, за игровой сценой */;
+  --color-panel-glass:  /* поверхность панели, полупрозрачная над сценой */;
+  --color-panel-border: /* граница панели, контраст к её же поверхности */;
 
-  /* Accents — one meaning each, see the allocation table */
-  --color-primary:   #FFD700;   /* hero / progression */
-  --color-danger:    #EF4444;   /* damage, endless, loss */
-  --color-info:      #3B82F6;   /* standard action */
-  --color-neutral:   #94A3B8;   /* utility UI at rest */
+  /* Акценты — по одному смыслу на каждый, см. таблицу распределения в разделе 2 */
+  --color-primary:   /* главный путь игрока */;
+  --color-danger:    /* урон, риск, потеря */;
+  --color-info:      /* нейтральное действие по умолчанию */;
+  --color-neutral:   /* служебный интерфейс в покое */;
 
-  /* Typography */
-  --font-display: 'Orbitron', sans-serif;   /* HUD, headings, numbers */
-  --font-body:    'Outfit', sans-serif;     /* body, subtitles, stats */
+  /* Типографика — две гарнитуры, выбранные под мир, не «шрифт для игр» */
+  --font-display: /* цифры, заголовки, HUD */, system-ui, sans-serif;
+  --font-body:    /* подписи и текст */,      system-ui, sans-serif;
 
-  --color-text-primary:   #FFFFFF;
-  --color-text-secondary: rgba(255, 255, 255, 0.65);
-  --color-text-muted:     rgba(255, 255, 255, 0.45);
+  --color-text-primary:   /* основной текст поверх панели */;
+  --color-text-secondary: /* второстепенный, ~65% непрозрачности */;
+  --color-text-muted:     /* подавленный, ~45% */;
 
   /* Один шаг сетки. Всё остальное — кратные ему. */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
@@ -101,9 +114,24 @@ the screen is doing two jobs and should be split.
 
 ## 3. One frame geometry everywhere
 
-Pick a single silhouette — chamfered, rounded, or hard-edged — and apply it to
-every button, card and modal. Mixing them is what makes a UI look assembled from
-tutorials. Example: an 8-point chamfer with 12 px cuts.
+Pick a single silhouette and apply it to every button, card and modal. Mixing
+them is what makes a UI look assembled from tutorials.
+
+Силуэт — такое же решение под мир игры, как палитра, и выбирается тем же
+вопросом из раздела 12: как в этом мире обрабатывают край? Варианты не
+исчерпываются одним:
+
+| Мир режет край так | Силуэт | Реализация |
+|---|---|---|
+| станок, броня, техника | фаска | `clip-path: polygon(...)` |
+| штамповка, пластик, детская игрушка | крупное скругление | `border-radius` |
+| бумага, чертёж, вывеска | прямой угол + линия | `border` |
+| стекло, вода, органика | асимметричное скругление | разные радиусы по углам |
+| вырубка, наклейка, талон | зубец или перфорация | `mask-image` |
+
+Ниже разобрана фаска — просто потому, что она сложнее остальных в реализации;
+взятая без вопроса «а как режет край мой мир», она даёт всем играм один и тот же
+технический вид. Пример: восьмиточечная фаска со срезом 12 px.
 
 ```css
 clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px),
@@ -313,10 +341,41 @@ the material the interface is made of, and derive the tokens from it:
 | a deep-sea station | scratched acrylic over teal glow, rivets | dark cyan glass, mono display face, rounded viewport frames |
 | a fairground | enamel signs, bulb rows, gold leaf | cream panels, red/gold accents, arched frames |
 
+### Процедура: из мира в значения токенов
+
+Этот раздел — не иллюстрация, а обязательный шаг перед первой строкой
+`theme.css`. Шесть вопросов, шесть ответов, полный набор значений:
+
+1. **Из какого физического предмета сделана панель интерфейса?** Не «тёмная
+   стеклянная панель», а вещь: приборный щиток, эмалированная табличка, лист
+   миллиметровки, кусок брезента. Отсюда `--color-panel-glass` и
+   `--color-panel-border` — цвет самого материала и цвет его края.
+2. **Где этот предмет лежит и при каком свете?** Отсюда `--color-bg`: не
+   абстрактный тёмный, а темнота именно этого места — угольная, синяя от
+   уличного фонаря, бурая от ламп накаливания.
+3. **Каким цветом в этом мире помечают «сюда, это главное»?** Краска на станке,
+   сигнальная лента, начищенная латунь. Отсюда `--color-primary`.
+4. **Каким помечают опасность?** Красный — самый частый ответ, но не
+   единственный: ржавчина, кислотный жёлтый, чёрно-жёлтая штриховка. Отсюда
+   `--color-danger`.
+5. **Чем в этом мире написаны цифры?** Трафарет, шкала прибора, вывеска от руки,
+   кассовый чек. Отсюда `--font-display` — и это же отвечает на вопрос, уместны
+   ли моноширинные цифры и прописные.
+6. **Как в этом мире обрабатывают край?** Ответ выбирает силуэт из таблицы в
+   разделе 3.
+
+Ответы записываются в `UI_UX_SPECIFICATION.md` рядом со значениями: токен без
+названной причины через месяц превращается в «просто цвет» и его меняют наугад.
+
 The check: cover the game canvas and look only at the menu. If it could belong to
 any other game, the theme is decoration rather than direction. This is also the
 hand-off from art direction — the UI theme is decided there and implemented here,
 not invented separately.
+
+Обратная проверка, такая же обязательная: возьмите набор токенов другой игры,
+сделанной по этому же файлу, и приложите к своей. Если разница только в оттенке
+акцента — процедура выше была пропущена, и обе игры получили один интерфейс с
+разными подписями.
 
 ## 13. Anti-patterns — the "generated UI" smell
 
@@ -351,4 +410,40 @@ not invented separately.
 - [ ] `prefers-reduced-motion` drops transforms.
 - [ ] UI text is readable over the brightest scene in the game.
 - [ ] With the canvas hidden, the menu still identifies this specific game.
+- [ ] Ни одно значение токена не совпадает с примером из этого файла и из другой
+      игры фабрики: у каждого есть свой ответ из процедуры в разделе 12.
 - [ ] The longest translated string still fits every button.
+
+---
+
+## Приложение. Один рабочий набор значений — образец, не заготовка
+
+Ниже полный `:root` из одной вышедшей игры: мир — ангар обслуживания
+орбитальных челноков, панели собраны из анодированного алюминия с латунными
+шильдиками, цифры набраны трафаретной акциденцией. Он приложен, чтобы было
+видно, какой плотности решений ждут от раздела 12, — и **не подлежит переносу в
+другую игру**: в игре про пекарню, про дождливый город или про ярмарку каждое из
+этих значений будет другим, включая шрифты и силуэт рамки.
+
+```css
+:root {
+  --color-bg:           #09080C;             /* темнота ангара, почти без синевы */
+  --color-panel-glass:  rgba(14, 12, 22, 0.92);
+  --color-panel-border: rgba(255, 255, 255, 0.12);
+
+  --color-primary:   #FFD700;   /* латунный шильдик: «сюда, это главное» */
+  --color-danger:    #EF4444;   /* аварийная маркировка на переборках */
+  --color-info:      #3B82F6;   /* подсветка служебных консолей */
+  --color-neutral:   #94A3B8;   /* анодированный алюминий в покое */
+
+  --font-display: 'Orbitron', system-ui, sans-serif;   /* трафарет на корпусе */
+  --font-body:    'Outfit',   system-ui, sans-serif;
+
+  --color-text-primary:   #FFFFFF;
+  --color-text-secondary: rgba(255, 255, 255, 0.65);
+  --color-text-muted:     rgba(255, 255, 255, 0.45);
+}
+```
+
+Силуэт этой игры — восьмиточечная фаска со срезом 12 px (раздел 3): в мире,
+собранном из фрезерованных панелей, край снимают именно так.

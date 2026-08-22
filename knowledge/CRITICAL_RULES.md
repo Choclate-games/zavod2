@@ -309,6 +309,12 @@ watchdog, and Recast is loaded **only** when the game actually needs a navmesh.
     one theme file. A literal `#RRGGBB`, `px` padding or `z-index: 9999` written
     inside a screen is the reason the second screen stops matching the first.
     `grep -rE '#[0-9a-fA-F]{3,8}' src/ui` minus the theme file returns nothing.
+    Имена токенов при этом одинаковы во всех играх, а **значения — нет**: палитра,
+    обе гарнитуры и силуэт рамки выводятся из материала мира этой игры по
+    процедуре в `knowledge/ux/ui_design_system.md`, раздел 12. Скопированный из
+    примера или из соседней игры набор значений — такой же дефект, как умолчания
+    браузера, только заметнее: он выглядит осознанным решением, принятым не для
+    этой игры.
 
 77. Browser dialogs (`alert`, `confirm`, `prompt`) and emoji used as icons are
     **banned in shipped UI**. The first blocks the game loop, cannot be styled and
