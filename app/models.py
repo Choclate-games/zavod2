@@ -156,9 +156,16 @@ class ArtSpec(BaseSafeModel):
     color_palette: Dict[str, str] = Field(default_factory=dict)
     vfx_list: List[str] = Field(default_factory=list)
     ui_theme: str = Field(default="")
+    # За меню стоит живая сцена, а не заливка. Без этого поля кодовый агент
+    # закрывает канвас непрозрачным прямоугольником, и первое, что видит игрок,
+    # — плашка с кнопками, по которой невозможно понять, во что он играет.
+    menu_staging: str = Field(default="")
 
 class UIUXSpec(BaseSafeModel):
     hud_elements: List[str] = Field(default_factory=list)
+    # Экран описывается четырьмя ключами: id, desc, composition, primary_action.
+    # Раньше хватало id и desc — и композицию каждого экрана кодовый агент
+    # придумывал сам, одинаково: карточка с колонкой кнопок по центру.
     screens: List[Dict[str, str]] = Field(default_factory=list)
     mobile_controls_layout: str = Field(default="")
     keyboard_controls: Dict[str, str] = Field(default_factory=dict)

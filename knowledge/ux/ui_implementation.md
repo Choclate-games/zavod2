@@ -116,6 +116,34 @@ Rules the router enforces so screens cannot drift apart:
 - The touch layer is visible only on `game` and is **reset** when hidden (see
   `touch_controls.md`): a held throttle otherwise survives into the menu.
 
+### Меню не гасит сцену
+
+Экран меню — это слой над работающим канвасом, а не замена ему. Заливка на весь
+экран (`background` без прозрачности на корне экрана или полноэкранная
+`rgba(...)`) закрывает игру ровно в тот момент, когда игрок решает, играть ли:
+
+```css
+/* Экран меню: сцена видна, подложка только под содержимым */
+.screen            { background: none; }
+.screen__panel     { background: var(--color-panel-glass); }   /* полупрозрачная */
+```
+
+Что делает роутер при входе в меню:
+
+- **не останавливает рендер**: цикл продолжает крутиться, иначе за меню
+  застывший кадр, который выдаёт себя на первом же повороте телефона;
+- **снижает нагрузку**: симуляция и физика на паузе или на пониженной частоте,
+  частицы и тени — на минимум, `renderer.setPixelRatio` на ступень ниже. Меню
+  не должно греть телефон;
+- **ставит свою камеру**: медленный облёт, дрейф или проезд по сцене из
+  `ART_DIRECTION.md` («Сцена за меню»). Камера меню и камера игры — два разных
+  объекта, переключение между ними идёт одним переходом;
+- **возвращает всё обратно** при выходе в игру, включая `setPixelRatio`.
+
+На слабом устройстве (или при `prefers-reduced-motion: reduce`) движение камеры
+меню останавливается — но сцена остаётся видимой. Подменять её статичной
+картинкой не нужно: кадр той же сцены дешевле любого загруженного изображения.
+
 ## 4. HUD: bind once, write on change
 
 The HUD is the only UI touched every frame, so it is the only place where DOM
@@ -323,3 +351,8 @@ project's own check script:
   entry point is absent from the DOM — not merely hidden.
 - A screenshot of each screen at 360×640 and 1280×720 shows no clipped text and
   no scrollbar.
+- На экране меню канвас виден: скриншот меню и скриншот чёрного экрана не
+  совпадают, а у корня экрана меню `getComputedStyle(...).backgroundColor`
+  прозрачен или отсутствует.
+- Ни одна подпись кнопки не содержит эмодзи (`grep -nP '[\x{1F300}-\x{1FAFF}]' src/ui`
+  пуст).

@@ -205,6 +205,31 @@ Rules that follow from that:
 - Touch targets: primary action ≥ 96 px, secondary ≥ 64 px, spacing between
   targets ≥ 12 px. These are absolute, not scaled.
 
+### Меню стоит на живой сцене, а не на заливке
+
+Первое, что видит игрок, — это меню, и обычно оно же решает, будет ли вторая
+минута. Меню, лежащее на непрозрачном прямоугольнике, прячет всё, ради чего игру
+делали: игрок смотрит на список кнопок и не знает, во что ему предлагают играть.
+
+Поэтому меню, пауза и экран итога сессии рисуются **поверх той же сцены**, что и
+игра:
+
+- Тот же рендерер и та же сцена — не картинка, не видео, не скриншот. Камера
+  ставится отдельно: медленный облёт, статичный кадр с лёгким дрейфом, проезд
+  вдоль объекта. Свет и эффекты работают.
+- Игровой цикл в меню продолжает крутиться на сниженной нагрузке: меньше
+  частиц, ниже частота обновления симуляции, тени можно выключить. Кадр не
+  замирает.
+- Подложка — только под текстовым блоком и кнопками, и она частично прозрачна.
+  Полноэкранная заливка (`background: #111` на корне экрана, `rgba(...)` на весь
+  вьюпорт) запрещена: она означает, что сцены за меню нет.
+- Композиция кадра при этом остаётся композицией экрана (три зоны выше). Панель
+  меню занимает свою зону, а не середину поверх всего.
+
+Что именно стоит за меню, решает арт-дирекция проекта — в спецификации это поле
+`menu_staging` («Сцена за меню» в `ART_DIRECTION.md`). Придумывать заново не
+нужно; нужно поставить камеру так, как там написано.
+
 ### No scrolling in menus
 
 Every main screen fits within the viewport height. A scrollbar in a game menu
@@ -386,6 +411,7 @@ not invented separately.
 | Purple/blue gradient + system sans | the default look of generated pages; says nothing about the game | tokens derived from the world (section 12) |
 | A different colour per button | reads as clutter, destroys hierarchy | one accent per meaning (section 2) |
 | Everything centred in one column | no hierarchy, no composition | three zones (section 5) |
+| Меню на непрозрачной заливке поверх канваса | прячет игру ровно в тот момент, когда игрок решает, играть ли; экран запуска перестаёт отличаться от чужого | живая сцена за меню (section 5) |
 | Black plate with "GAME OVER" | generic, and usually wrong for the game's fiction | the session result in the game's own terms |
 | Bare `<input type=range>` / `<select>` | platform-styled, tiny hit targets on mobile | `Slider` / `SegmentedControl` |
 | `z-index: 9999` | the stacking order becomes unknowable | the `--z-*` tokens |
@@ -397,6 +423,7 @@ not invented separately.
 ## 14. Acceptance checklist
 
 - [ ] No hardcoded colour, font, radius or duration outside `theme.css`.
+- [ ] За меню видна живая сцена игры; полноэкранной непрозрачной заливки нет.
 - [ ] Every screen fits the measured viewport; the page itself does not scroll.
 - [ ] One primary action per screen; at most two accents visible at once.
 - [ ] Every button ≥ 64 px, primary ≥ 96 px, gaps ≥ 12 px, insets by safe area.

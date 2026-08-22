@@ -26,7 +26,14 @@ from app.models import BaseSafeModel
 
 class UXLayout(BaseSafeModel):
     hud_elements: List[str] = Field(default_factory=list, description="Элементы HUD с позицией на экране")
-    screens: List[Dict[str, str]] = Field(default_factory=list, description="Экраны: id и описание")
+    screens: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "Экраны. У каждого четыре ключа: id (латиницей), desc (что на экране), "
+            "composition (три зоны экрана: идентичность / главное действие / второстепенный ряд), "
+            "primary_action (единственное главное действие этого экрана)"
+        ),
+    )
     mobile_controls_layout: str = Field(default="", description="Раскладка тач-управления под этот глагол игрока")
     wireframes_ascii: str = Field(default="", description="ASCII-вайрфрейм игрового экрана")
     visual_language: str = Field(
@@ -77,6 +84,11 @@ SYSTEM_PROMPT = (
     "очередной полоской в углу: это и есть diegetic_elements.\n"
     "- Экраны выводятся из формы сессии: если сессия — смена в мастерской, финальный экран "
     "показывает итог смены, а не «Game Over».\n"
+    "- У КАЖДОГО экрана заполнены все четыре ключа: id, desc, composition, primary_action. "
+    "composition — это три зоны: чем экран себя называет, ЧТО на нём главное действие (ровно "
+    "одно, самое крупное), и что лежит вторым рядом одним весом. Экран без composition "
+    "кодовый агент собирает сам, и собирает всегда одинаково: карточка с колонкой кнопок "
+    "по центру. Это и есть тот самый «примитивный интерфейс».\n"
     "- Раскладка тач-управления выводится из глагола игрока: газ и руль нажимаются одновременно, "
     "рисование трассы — это один палец по экрану, а не джойстик.\n"
     "- Кнопки: основная >= 96 px, остальные >= 64 px, отступы через safe-area.\n"
@@ -90,16 +102,73 @@ SYSTEM_PROMPT = (
     "Меняющиеся числа — табличными цифрами в слоте фиксированной ширины.\n"
     "- components: закрытый список того, из чего собран весь интерфейс. Всё на экране обязано "
     "быть одним из этих компонентов.\n"
+    "- Меню и экраны между сессиями лежат ПОВЕРХ живой игровой сцены — той же, что в игре, "
+    "с медленной камерой. Непрозрачная заливка на весь экран запрещена: подложка только под "
+    "текстом и кнопками, остальное поле показывает игру. Постановку сцены задаёт "
+    "ART_DIRECTION.md (menu_staging); в composition экрана меню это учтено.\n"
     "- feedback_moments: интерфейс отвечает на действие в том же кадре, даже если само "
     "действие идёт долго.\n"
     "- state_coverage: у каждого экрана, который ходит в сеть (сохранение, таблица лидеров, "
     "покупки, реклама), описаны загрузка, пустота и ошибка — не только удачный путь.\n"
-    "ЗАПРЕЩЕНО: alert/confirm/prompt, эмодзи вместо иконок, фиолетовый градиент с системным "
+    "ЗАПРЕЩЕНО: alert/confirm/prompt, эмодзи вместо иконок и внутри подписей кнопок "
+    "(«🚀 НАЧАТЬ» — это не иконка, а отсутствие иконки), фиолетовый градиент с системным "
     "шрифтом, чёрная плашка «GAME OVER», серая неактивная кнопка вместо отсутствующей "
-    "возможности, всё по центру в одну колонку.\n"
+    "возможности, непрозрачная заливка поверх игровой сцены, одна карточка с колонкой "
+    "кнопок по центру экрана.\n"
     "- Вайрфрейм рисуй ASCII-рамкой с реальными подписями элементов этой игры."
     + RU_SYSTEM_SUFFIX
 )
+
+
+# Модель называет ключи экрана как ей удобнее: purpose вместо desc, name вместо
+# id, layout вместо composition. Генератор документа читал только `desc` — и
+# раздел «Каталог экранов» в UI_UX_SPECIFICATION.md выходил пустым: имена
+# экранов есть, содержимого нет. Кодовый агент в этом месте додумывал экраны
+# сам. Приводим ответ к четырём ключам, что бы модель ни прислала.
+_SCREEN_ALIASES = {
+    "id": ("id", "screen", "screen_id", "name", "key", "title", "экран"),
+    "desc": ("desc", "description", "purpose", "content", "what", "summary",
+             "описание", "назначение", "содержимое"),
+    "composition": ("composition", "layout", "zones", "structure", "композиция",
+                    "компоновка", "структура"),
+    "primary_action": ("primary_action", "main_action", "primary", "cta", "action",
+                       "главное_действие"),
+}
+
+
+def normalize_screens(screens) -> List[Dict[str, str]]:
+    """Приводит список экранов к ключам id / desc / composition / primary_action.
+
+    Всё, что не удалось разложить по известным ключам, склеивается в desc: терять
+    описание экрана хуже, чем показать его не в той графе."""
+    if not isinstance(screens, list):
+        return []
+
+    result: List[Dict[str, str]] = []
+    for raw in screens:
+        if isinstance(raw, str):
+            result.append({"id": raw.strip(), "desc": "", "composition": "", "primary_action": ""})
+            continue
+        if not isinstance(raw, dict):
+            continue
+
+        lowered = {str(k).strip().lower(): ("" if v is None else str(v).strip())
+                   for k, v in raw.items()}
+        screen = {"id": "", "desc": "", "composition": "", "primary_action": ""}
+        used = set()
+        for field, aliases in _SCREEN_ALIASES.items():
+            for alias in aliases:
+                if lowered.get(alias):
+                    screen[field] = lowered[alias]
+                    used.add(alias)
+                    break
+        extra = [f"{key}: {value}" for key, value in lowered.items()
+                 if value and key not in used]
+        if extra:
+            screen["desc"] = "; ".join([screen["desc"]] + extra) if screen["desc"] else "; ".join(extra)
+        if screen["id"] or screen["desc"]:
+            result.append(screen)
+    return result
 
 
 class UXDesignerAgent:
@@ -122,6 +191,7 @@ class UXDesignerAgent:
         if not all(getattr(ui, field) for field in self._FILLABLE):
             filled = ask_model(ctx, "UXDesigner", SYSTEM_PROMPT, self._brief(ctx), UXLayout)
             if filled:
+                filled.screens = normalize_screens(filled.screens)
                 for field in self._FILLABLE:
                     if not getattr(ui, field) and getattr(filled, field):
                         setattr(ui, field, getattr(filled, field))
@@ -157,13 +227,42 @@ class UXDesignerAgent:
         обязательные для любой игры на площадке, и ни одного жанрового элемента:
         ни волн, ни карт апгрейда, ни золота."""
         ui = concept.ui_ux
+        ui.screens = normalize_screens(ui.screens)
         if not ui.screens:
+            loop = concept.core_loop or "основная петля"
             ui.screens = [
-                {"id": "main_menu", "desc": "Старт, настройки, продолжение сохранённой сессии"},
-                {"id": "gameplay_hud", "desc": f"Игровой экран: {concept.core_loop or 'основная петля'}"},
-                {"id": "session_end", "desc": "Итог сессии в терминах этой игры и повторный запуск"},
-                {"id": "settings", "desc": "Звук, язык, управление"},
+                {"id": "main_menu",
+                 "desc": "Старт, настройки, продолжение сохранённой сессии",
+                 "composition": "Живая сцена игры на весь кадр; название и состояние игрока "
+                                "в верхней зоне; единственная крупная кнопка запуска; "
+                                "остальное — одним второстепенным рядом",
+                 "primary_action": "Начать игру"},
+                {"id": "gameplay_hud",
+                 "desc": f"Игровой экран: {loop}",
+                 "composition": "Сцена без перекрытия; показания по пяти якорям; "
+                                "в середине экрана только временная обратная связь",
+                 "primary_action": "Главное действие петли"},
+                {"id": "session_end",
+                 "desc": "Итог сессии в терминах этой игры и повторный запуск",
+                 "composition": "Сцена остановленной сессии за панелью; итог одной крупной "
+                                "строкой; кнопка повтора — единственная с основным акцентом",
+                 "primary_action": "Повторить"},
+                {"id": "settings",
+                 "desc": "Звук, язык, управление",
+                 "composition": "Список строк одной ширины; заголовок сверху; выход "
+                                "второстепенной кнопкой",
+                 "primary_action": "Закрыть настройки"},
             ]
+        else:
+            # У экранов от модели композиция может отсутствовать. Пустое поле в
+            # спецификации читается как «делай на своё усмотрение» — а на своё
+            # усмотрение получается колонка кнопок по центру.
+            for screen in ui.screens:
+                if not screen.get("composition"):
+                    screen["composition"] = (
+                        "Три зоны: чем экран себя называет, единственное главное действие, "
+                        "второстепенный ряд одним весом. Меню лежит поверх живой сцены."
+                    )
         if not ui.hud_elements:
             ui.hud_elements = [
                 f"Индикатор главного ресурса механики «{m.name}»"

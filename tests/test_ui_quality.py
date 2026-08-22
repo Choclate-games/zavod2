@@ -215,3 +215,136 @@ def test_ui_skill_ships_with_every_package():
 
     assert "ui_skill" in skills
     assert set(UI_DOCS) <= set(skills["ui_skill"].knowledge_refs)
+
+
+# --------------------------------------------------------------------------- сцена за меню
+
+def test_art_director_stages_a_live_scene_behind_the_menu():
+    """Меню на глухой заливке прячет игру ровно там, где игрок решает, играть ли.
+
+    Пустое поле кодовый агент читает как «фон не важен» и закрывает канвас
+    непрозрачным прямоугольником — именно так выглядел «примитивный интерфейс»
+    в готовых пакетах."""
+    concept = snail_concept()
+    concept.direction.signature_scene = "улитка на краю жестяного жёлоба под фонарём"
+    ArtDirectorAgent._ensure_menu_staging(concept)
+
+    staging = concept.art.menu_staging
+    assert "жестяного жёлоба" in staging
+    assert "живая сцена" in staging.lower()
+
+
+def test_menu_staging_survives_the_early_return():
+    """Арт-директор выходит рано, когда стиль и камера уже заданы концепцией."""
+    concept = snail_concept()
+    concept.art.style_name = "жестяная ночь"
+    concept.art.camera_perspective = "камера сбоку вдоль водостока"
+    ArtDirectorAgent().run(make_ctx(concept))
+    assert concept.art.menu_staging
+
+
+def test_master_prompt_forbids_an_opaque_menu_plate():
+    concept = snail_concept()
+    ctx = make_ctx(concept)
+    ArtDirectorAgent().run(ctx)
+    UXDesignerAgent().run(ctx)
+    block = PromptCompilerAgent._ui_block(concept)
+
+    assert "Сцена за меню" in block
+    assert "Непрозрачный слой на весь" in block
+
+
+def test_critical_rules_require_a_live_scene_behind_the_menu():
+    rules = knowledge.read("CRITICAL_RULES.md")
+    assert "поверх живой игровой сцены" in rules
+    assert "три зоны" in rules
+
+
+# --------------------------------------------------------------------------- каталог экранов
+
+def test_screens_normalize_whatever_keys_the_model_returned():
+    """Модель называет ключи как ей удобно; раздел «Каталог экранов» из-за этого
+    выходил списком заголовков без единой строки содержимого."""
+    from agents.ux_designer import normalize_screens
+
+    screens = normalize_screens([
+        {"name": "MainMenuScreen", "purpose": "Запуск операции"},
+        {"id": "hud", "description": "Игровой экран", "layout": "три зоны"},
+        "settings",
+    ])
+    assert screens[0]["id"] == "MainMenuScreen"
+    assert screens[0]["desc"] == "Запуск операции"
+    assert screens[1]["composition"] == "три зоны"
+    assert screens[2]["id"] == "settings"
+
+
+def test_screen_catalogue_is_never_empty_in_the_document():
+    concept = snail_concept()
+    concept.ui_ux.screens = [{"name": "MainMenuScreen", "purpose": "Запуск"}]
+    ctx = make_ctx(concept)
+    UXDesignerAgent().run(ctx)
+    doc = DocumentGenerator()._gen_ui_ux(ctx)
+
+    assert "### Экран: MainMenuScreen" in doc
+    assert "Запуск" in doc
+    # Композиция дописывается, если модель о ней промолчала.
+    assert "Композиция" in doc
+
+
+def test_screen_composition_reaches_the_master_prompt():
+    concept = snail_concept()
+    ctx = make_ctx(concept)
+    UXDesignerAgent().run(ctx)
+    block = PromptCompilerAgent._ui_block(concept)
+
+    assert "Экраны и их композиция" in block
+    assert "main_menu" in block
+
+
+# --------------------------------------------------------------------------- тач-раскладка
+
+def test_touch_layout_follows_the_designed_scheme():
+    """Жанровый шаблон навязывал виртуальный джойстик даже там, где направление
+    проекта его прямо запрещало: кодовый агент получал запрет и требование сразу."""
+    concept = snail_concept()
+    concept.ui_ux.mobile_controls_layout = (
+        "Тап по окну — бросок письма; удержание — разгон по жёлобу. Джойстика нет."
+    )
+    layout = PromptCompilerAgent._touch_layout(concept, "default")
+
+    assert "Джойстика нет" in layout
+    assert "Слева — ДВИЖЕНИЕ" not in layout
+
+
+def test_touch_layout_falls_back_to_the_profile_template():
+    concept = snail_concept()
+    concept.ui_ux.mobile_controls_layout = ""
+    layout = PromptCompilerAgent._touch_layout(concept, "default")
+    assert "Слева — ДВИЖЕНИЕ" in layout
+
+
+# --------------------------------------------------------------------------- GDD без шаблона
+
+def test_gdd_has_no_genre_boilerplate():
+    """Секции «действия игрока» и «прогрессия» были зашиты английским шаблоном
+    про карты апгрейда и волны — в игре, где направление их прямо запрещало."""
+    concept = snail_concept()
+    ctx = make_ctx(concept)
+    UXDesignerAgent().run(ctx)
+    gdd = DocumentGenerator()._gen_gdd(ctx)
+
+    for template in ("card draft", "wave clear", "Highest wave", "keyword tags",
+                     "Smooth 360-degree locomotion"):
+        assert template not in gdd, f"жанровый шаблон в GDD: {template}"
+    # Вместо шаблона — механики и раскладка этой игры.
+    assert "Скольжение по слизи" in gdd
+
+
+def test_gdd_progression_comes_from_the_concept():
+    concept = snail_concept()
+    concept.core_design.meta_progression = ["новые маршруты по крышам района"]
+    concept.difficulty_curve = "рассвет наступает быстрее с каждой сменой"
+    gdd = DocumentGenerator()._gen_gdd(make_ctx(concept))
+
+    assert "новые маршруты по крышам района" in gdd
+    assert "рассвет наступает быстрее" in gdd

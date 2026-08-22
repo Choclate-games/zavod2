@@ -1,4 +1,6 @@
 import re
+
+from agents.ux_designer import normalize_screens
 from app import knowledge
 from app.context import GenerationContext
 from app.logging import log_agent
@@ -80,6 +82,29 @@ class PromptCompilerAgent:
                 return profile
         return "default"
 
+    @classmethod
+    def _touch_layout(cls, concept, profile: str) -> str:
+        """Раскладка тача: сначала спроектированная, потом жанровый шаблон.
+
+        Раньше здесь безусловно печатался шаблон профиля, и заголовок над ним
+        читался как «обязательный контракт». Для игры, где направление проекта
+        прямым текстом запрещало виртуальный джойстик, промпт всё равно требовал
+        джойстик слева — кодовый агент получал одновременно запрет и требование
+        и строил управление, которого никто не проектировал. Раскладку решает
+        UX-дизайнер; шаблон профиля остаётся запасным вариантом для случая,
+        когда её не задали."""
+        designed = (concept.ui_ux.mobile_controls_layout or "").strip()
+        if designed:
+            return (
+                f"- **Раскладка этой игры** (спроектирована в MOBILE_CONTROLS.md, "
+                f"переносить сюда раскладку из другой игры нельзя): {designed}\n"
+                "- Раскладка выводится из главного действия игрока. Виртуальный джойстик "
+                "уместен там, где игрок непрерывно ведёт персонажа; там, где действие "
+                "точечное (тап по цели, свайп, удержание), джойстик — лишний элемент, "
+                "который занимает половину экрана и ничего не делает."
+            )
+        return cls._TOUCH_LAYOUTS[profile]
+
     # ------------------------------------------------------------------
     # Блоки слоя Design OS для мастер-промпта.
     # ------------------------------------------------------------------
@@ -139,6 +164,18 @@ class PromptCompilerAgent:
             parts.append(f"**Визуальный язык**: {ui.visual_language}")
         if ui.typography:
             parts.append(f"**Типографика**: {ui.typography}")
+        parts.append(
+            "**Сцена за меню.** " + (art.menu_staging or
+            "Живая сцена игры на том же рендерере: медленная камера, работающий свет и "
+            "эффекты.") + "\n\n"
+            "Меню, пауза и итог сессии рисуются ПОВЕРХ этой сцены. Непрозрачный слой на весь "
+            "экран (`background: #111` на корне экрана, полноэкранная `rgba(...)`-заливка, "
+            "картинка-заставка) запрещён: подложка допускается только под текстовым блоком и "
+            "кнопками. Игровой цикл в меню продолжает крутиться на сниженной нагрузке — камера "
+            "едет, сцена живёт. Игрок обязан понять, во что он играет, до нажатия «Играть»; "
+            "меню на глухой заливке — самый заметный признак недоделанной игры, и это первое, "
+            "что увидит и игрок, и модератор площадки."
+        )
         if ui.accent_roles:
             rows = "\n".join(f"| `{name}` | {meaning} |" for name, meaning in ui.accent_roles.items())
             parts.append(
@@ -158,6 +195,25 @@ class PromptCompilerAgent:
             parts.append(
                 "**Якоря HUD** — пять и только пять; посередине экрана не висит ничего, кроме "
                 "временной обратной связи:\n\n| Якорь | Что там |\n|---|---|\n" + rows
+            )
+        screens = normalize_screens(ui.screens)
+        if screens:
+            rows = []
+            for screen in screens:
+                name = (screen.get("id") or "screen").strip()
+                cells = [f"**{name}**"]
+                if screen.get("desc"):
+                    cells.append(screen["desc"])
+                if screen.get("primary_action"):
+                    cells.append(f"главное действие — {screen['primary_action']}")
+                if screen.get("composition"):
+                    cells.append(f"композиция: {screen['composition']}")
+                rows.append("- " + " · ".join(cells))
+            parts.append(
+                "**Экраны и их композиция.** У каждого экрана три зоны: чем он себя называет, "
+                "единственное главное действие (самое крупное и единственное с основным "
+                "акцентом) и второстепенный ряд одним весом. Карточка с колонкой кнопок по "
+                "центру — не композиция, а её отсутствие:\n" + "\n".join(rows)
             )
         if ui.diegetic_elements:
             items = "\n".join(f"- {d}" for d in ui.diegetic_elements)
@@ -429,7 +485,7 @@ class PromptCompilerAgent:
         # these platforms. It is injected verbatim so the coding agent never has
         # to rediscover a rule that already cost a production bug.
         profile = self._control_profile(ctx)
-        touch_layout = self._TOUCH_LAYOUTS[profile]
+        touch_layout = self._touch_layout(concept, profile)
         desktop_controls = self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
         log_agent("PromptCompiler", f"Control profile: {profile}")
 
@@ -599,14 +655,15 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 
 {ui_contract}
 
-### Обязательный контракт тач-управления
+### Контракт тач-управления
 {touch_layout}
 
 - **Реализация только на Pointer Events** (`pointerdown/move/up/cancel`) с
   `setPointerCapture` и учётом `pointerId` для каждой кнопки: `touchstart/end`
   теряет палец на границе элемента, а второй палец сбрасывает первый.
-- **Плавающий стик**: зона захвата — вся левая половина экрана, база стика
-  появляется под пальцем. Мёртвая зона 8%, иначе управление дрожит.
+- **Если в раскладке есть стик** — он плавающий: зона захвата — вся левая
+  половина экрана, база появляется под пальцем, мёртвая зона 8%, иначе
+  управление дрожит. Если раскладка обходится без стика — не добавляйте его.
 - **Отмена браузерных жестов**: `touch-action: none`, отмена `contextmenu`,
   `dragstart` и `touchmove` с `{{ passive: false }}`; `-webkit-tap-highlight-color: transparent`.
 - **Видимость по состоянию**: слой управления показан только в игровом процессе,

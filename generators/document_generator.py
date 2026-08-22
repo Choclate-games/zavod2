@@ -183,15 +183,25 @@ workspace/{c.slug}/
 """
 
     def _gen_gdd(self, ctx: GenerationContext) -> str:
+        """Game Design Document.
+
+        Разделы «оценки», «действия игрока» и «прогрессия» раньше были зашиты
+        английским шаблоном: «3-Choice card draft upon wave clear», «Highest wave
+        reached», «Upgrade synergy cascades». Текст печатался в любую игру — и в
+        тактический штурм, где направление проекта прямым текстом запрещало и
+        волны, и карты апгрейда. Кодовый агент читает GDD наравне с мастер-
+        промптом, то есть получал одновременно запрет и требование. Теперь все
+        три раздела собираются из самой концепции, а пустое поле честно
+        отсылает к своему документу, а не подменяется жанровым шаблоном."""
         c = ctx.concept
-        scores_table = f"""| Category | Score / 10 | Rationale |
-| :--- | :--- | :--- |
-| **Fun & Game Feel** | {c.scores.fun}/10 | Immediate tactile feedback from physics impacts and responsive controls |
-| **Originality** | {c.scores.originality}/10 | Unique hybrid twist combining physics with roguelite scaling |
-| **Replayability** | {c.scores.replayability}/10 | Upgrade synergy cascades and persistent meta progression |
-| **Mobile Fit** | {c.scores.mobile_fit}/10 | Ergonomic touch controls and safe area adaptation |
-| **Monetization** | {c.scores.monetization}/10 | High-converting Rewarded Revives and multipliers |
-| **Platform Fit** | {c.scores.platform_fit}/10 | Perfect fit for Yandex Games / CrazyGames fast-loading web ecosystem |
+        scores_table = f"""| Категория | Оценка / 10 |
+| :--- | :--- |
+| Ощущение от игры (fun & game feel) | {c.scores.fun}/10 |
+| Оригинальность | {c.scores.originality}/10 |
+| Реиграбельность | {c.scores.replayability}/10 |
+| Пригодность для телефона | {c.scores.mobile_fit}/10 |
+| Монетизация | {c.scores.monetization}/10 |
+| Соответствие площадкам | {c.scores.platform_fit}/10 |
 """
         return f"""# Game Design Document (GDD): {c.title}
 
@@ -202,9 +212,11 @@ workspace/{c.slug}/
 - **Genre**: {c.genre} ({c.subgenre})
 - **Target Audience**: {c.target_audience}
 
-## 2. Viability & Fun Scores
+## 2. Оценка концепции
 {scores_table}
-*Overall Weighted Score*: **{c.scores.overall_score:.1f} / 10**
+*Взвешенная оценка*: **{c.scores.overall_score:.1f} / 10**
+
+{c.scores.justification or "_Обоснование оценок не задано._"}
 
 ## 3. Player Fantasy & Core Hook
 - **Player Fantasy**: {c.player_fantasy}
@@ -220,17 +232,46 @@ workspace/{c.slug}/
 - **Win Conditions**: {c.win_conditions}
 - **Lose Conditions**: {c.lose_conditions}
 
-## 5. Player Actions & Controls
-- **Movement**: Smooth 360-degree locomotion with responsive controls.
-- **Offense**: Dynamic attack abilities, stance modifiers, and combo chains.
-- **Defense**: Evasion, shielding, and tactical positioning.
-- **Progression Interaction**: 3-Choice card draft upon wave clear or level-up.
+## 5. Что игрок делает руками
+{self._gdd_actions(c)}
 
-## 6. Progression & Retention Drivers
-- **In-Run Escalation**: Upgrades synergize via keyword tags.
-- **Meta-Progression**: Currency earned in run spent permanently to unlock new traits.
-- **Leaderboards**: Highest wave reached and total score submitted to Playgama Leaderboards.
+## 6. Прогрессия и причины вернуться
+{self._gdd_progression(c)}
 """
+
+    @staticmethod
+    def _gdd_actions(c) -> str:
+        """Действия игрока — из механик этой игры, а не из шаблона жанра."""
+        lines = []
+        for mechanic in c.mechanics[:6]:
+            interaction = (mechanic.player_interaction or mechanic.description or "").strip()
+            if mechanic.name and interaction:
+                lines.append(f"- **{mechanic.name}**: {interaction}")
+        if c.ui_ux.mobile_controls_layout:
+            lines.append(f"- **Телефон**: {c.ui_ux.mobile_controls_layout}")
+        keys = c.ui_ux.keyboard_controls or {}
+        if keys:
+            bound = ", ".join(f"`{key}` — {action}" for key, action in list(keys.items())[:8])
+            lines.append(f"- **Клавиатура и мышь**: {bound}")
+        return "\n".join(lines) or (
+            "_Раскладка задаётся в MOBILE_CONTROLS.md, ввод каждой механики — в MECHANICS.md._"
+        )
+
+    @staticmethod
+    def _gdd_progression(c) -> str:
+        """Рост игрока — в терминах этой игры; пустое поле честно отсылает дальше."""
+        lines = []
+        for item in c.core_design.run_progression[:5]:
+            lines.append(f"- **Внутри сессии**: {item}")
+        for item in c.core_design.meta_progression[:5]:
+            lines.append(f"- **Между сессиями**: {item}")
+        if not lines and c.progression_summary:
+            lines.append(f"- {c.progression_summary}")
+        if c.difficulty_curve:
+            lines.append(f"- **Кривая давления**: {c.difficulty_curve}")
+        for board in c.playgama.leaderboards[:3]:
+            lines.append(f"- **Таблица лидеров**: {board}")
+        return "\n".join(lines) or "_Прогрессия задаётся в PROGRESSION.md._"
 
     def _gen_gameplay(self, ctx: GenerationContext) -> str:
         c = ctx.concept
@@ -618,6 +659,15 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
 
 ## 3. Visual Effects (VFX)
 {vfx_md if vfx_md else "- Dynamic particle emitters\n- Screen shake feedback"}
+
+## 4. Сцена за меню
+Первое, что видит игрок, — это меню. За ним стоит живая сцена на том же
+рендерере, а не заливка цветом и не картинка: игрок должен понять, во что он
+играет, ещё до нажатия «Играть».
+
+{art.menu_staging or "Постановка не задана — см. UI_UX_SPECIFICATION.md, раздел «Композиция экрана»."}
+
+- **Интерфейс сделан из**: {art.ui_theme or "материала мира игры (см. раздел 1)"}
 """
 
     def _gen_ui_ux(self, ctx: GenerationContext) -> str:
@@ -633,10 +683,7 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
         art = c.art
 
         hud_md = "\n".join(f"- {h}" for h in ui.hud_elements) if isinstance(ui.hud_elements, list) else str(ui.hud_elements)
-        screens_md = "\n".join([
-            f"### Screen: {str(s.get('id', s.get('name', 'Screen')) if isinstance(s, dict) else s).replace('_', ' ').title()}\n- {s.get('desc', s.get('description', '')) if isinstance(s, dict) else ''}"
-            for s in ui.screens
-        ]) if isinstance(ui.screens, list) else ""
+        screens_md = self._screens_md(ui.screens)
 
         accents_md = "\n".join(
             f"| `{name}` | {meaning} |" for name, meaning in ui.accent_roles.items()
@@ -676,6 +723,12 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
 радиусы, длительности, порядок слоёв `--z-*`. Литерал цвета внутри экрана — баг.
 
 ## 3. Композиция экрана
+Меню и экраны между сессиями лежат ПОВЕРХ живой игровой сцены — той же, что в
+игре, только с медленной камерой. Непрозрачная заливка на весь экран запрещена:
+подложка только под текстом и кнопками.
+
+- **Сцена за меню**: {art.menu_staging or "живая сцена игры на том же рендерере, медленная камера, свет и эффекты работают"}
+
 Экран — не колонка кнопок по центру. Три зоны, и каждый элемент лежит ровно в одной:
 
 1. **Идентичность** — что это за экран: заголовок, режим, состояние игрока.
@@ -743,8 +796,35 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
 - [ ] Возможность, которой нет на площадке, не нарисована вовсе.
 - [ ] Ни `alert`/`confirm`, ни эмодзи вместо иконок, ни `z-index` мимо токенов.
 - [ ] Самая длинная переведённая строка помещается в кнопку.
+- [ ] За меню видна живая сцена игры, а не заливка цветом.
+- [ ] Ни одного эмодзи в подписи кнопки: иконка — инлайновый SVG с `currentColor`.
+- [ ] У каждого экрана расписаны три зоны, а не «карточка по центру».
 - [ ] С закрытым игровым полем меню всё ещё узнаётся как «{c.title}».
 """
+
+    @staticmethod
+    def _screens_md(screens) -> str:
+        """Каталог экранов с композицией.
+
+        Раньше читался единственный ключ `desc`, а модель называла его как
+        придётся (`purpose`, `description`, `content`) — и раздел выходил
+        списком заголовков без единой строки содержимого. Экраны нормализуются
+        в UXDesignerAgent, здесь остаётся печать; ключ, которого нет, просто
+        не печатается."""
+        from agents.ux_designer import normalize_screens
+
+        blocks = []
+        for screen in normalize_screens(screens):
+            name = (screen.get("id") or "Screen").replace("_", " ").strip()
+            lines = [f"### Экран: {name}"]
+            if screen.get("desc"):
+                lines.append(f"- **Что на экране**: {screen['desc']}")
+            if screen.get("primary_action"):
+                lines.append(f"- **Главное действие**: {screen['primary_action']}")
+            if screen.get("composition"):
+                lines.append(f"- **Композиция**: {screen['composition']}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
 
     def _gen_mobile_controls(self, ctx: GenerationContext) -> str:
         c = ctx.concept

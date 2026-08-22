@@ -52,6 +52,8 @@ class SelfCritiqueAgent:
             name for name in ("visual_language", "accent_roles", "typography", "components")
             if not getattr(concept.ui_ux, name, None)
         ]
+        if not concept.art.menu_staging:
+            missing_ui.append("menu_staging (сцена за меню)")
         if missing_ui:
             issues_found.append(
                 "Визуальная часть интерфейса не описана: " + ", ".join(missing_ui)
@@ -119,6 +121,9 @@ class SelfCritiqueAgent:
             "которой нет на площадке, не нарисована вовсе.",
             f"Меню и HUD помещаются в измеренный вьюпорт с учётом safe-area и баннера, а с "
             f"закрытым игровым полем меню узнаётся как «{concept.title}».",
+            "За меню и экраном итога видна живая игровая сцена: полноэкранной непрозрачной "
+            "заливки поверх канваса нет, подложка только под текстом и кнопками.",
+            "Ни одного эмодзи в подписях интерфейса: иконки — инлайновый SVG с `currentColor`.",
             f"Rewarded-реклама выдаёт награду ровно один раз ({rewarded}); interstitial соблюдает паузу 90 с.",
             "Audio and physics automatically pause/resume on tab blur and ad display.",
             "Persistent progress saves and loads from Playgama Cloud Storage.",

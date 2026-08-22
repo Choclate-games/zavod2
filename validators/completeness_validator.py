@@ -52,10 +52,11 @@ class CompletenessValidator:
 
             # Визуальный контракт интерфейса — вторая по частоте дыра после
             # управления: игра собирается, работает и выглядит как заготовка.
-            if "Визуальный контракт интерфейса" in content and "theme.css" in content:
+            if ("Визуальный контракт интерфейса" in content and "theme.css" in content
+                    and "Сцена за меню" in content):
                 results.append({"item": "UI Visual Contract", "status": "PASS", "detail": "Визуальный контракт интерфейса дошёл до мастер-промпта"})
             else:
-                results.append({"item": "UI Visual Contract", "status": "FAIL", "detail": "В мастер-промпте нет визуального контракта интерфейса"})
+                results.append({"item": "UI Visual Contract", "status": "FAIL", "detail": "В мастер-промпте нет визуального контракта интерфейса или сцены за меню"})
                 all_passed = False
 
         # 4. Инструкция агенту от фабрики
