@@ -36,7 +36,7 @@ from app.logging import register_log_listener
 from app.pipeline import Pipeline
 from app.web.bus import bus
 
-from providers.agent_usage import AgentUsageTracker
+from providers.agent_usage import AgentUsageTracker, human_tokens
 from providers.agy import AGYProvider, AGYQuotaTracker
 from providers.fish_audio import FishAudioClient, FishAudioError, FORMATS as TTS_FORMATS, \
     FREE_MODEL as TTS_FREE_MODEL, MODELS as TTS_MODELS
@@ -72,8 +72,16 @@ AGENT_LABELS: Dict[str, str] = {
     "agy": "⚡ agy (Antigravity CLI)",
     "claude": "🟣 claude (Claude Code CLI)",
     "codex": "⚫ codex (OpenAI Codex CLI)",
-    "kimi": "🌙 kimi (Kimi CLI)",
+    # Kimi отключён: подпиской больше не пользуемся. Чтобы вернуть агента —
+    # раскомментировать здесь и в providers/cli_agents.AGENT_CLASSES.
+    # "kimi": "🌙 kimi (Kimi CLI)",
     "opencode": "💎 opencode (OpenCode CLI)",
+}
+
+# У кого остаток квоты живёт только в личном кабинете на сайте: полосы
+# рисовать не из чего, поэтому показываем расход фабрики и ссылку туда.
+AGENT_CONSOLE_URLS: Dict[str, str] = {
+    "opencode": os.getenv("OPENCODE_CONSOLE_URL", "https://opencode.ai/auth"),
 }
 AGENT_KEYS = tuple(AGENT_LABELS)
 
@@ -337,6 +345,10 @@ class FactoryService:
                           mode: str, image_provider: str, label: str = "") -> Path:
         """Полный прогон агентов спецификации (синхронно, в рабочем потоке)."""
         tag = f"{label} " if label else ""
+        # Метка времени старта: каталог игры появится только в конце пайплайна,
+        # а токены агенты жгут с первой минуты. По этой метке расход потом
+        # переписывается на слаг проекта (reassign_project).
+        pipeline_started = time.time()
         self.update_progress(5, f"{tag}Инициализация контекста генерации...")
         self.append_log(
             f"{tag}Запуск пайплайна спецификаций | Провайдер: {provider} | "
@@ -404,6 +416,15 @@ class FactoryService:
         OutputValidator().run_all(game_dir)
 
         sandbox.ensure_project_docs(game_dir, ctx.concept.title)
+
+        moved = self.agent_usage_tracker.reassign_project(pipeline_started, game_dir.name)
+        spent = self.agent_usage_tracker.project_status(game_dir.name)
+        self.append_log(
+            f"{tag}📊 Расход на спецификацию: {spent['tokens_human']} токенов "
+            f"за {spent['runs']} запусков агентов (записано на проект {game_dir.name}"
+            f"{f', перенесено записей: {moved}' if moved else ''})."
+        )
+        bus.publish("quota.changed")
         return game_dir
 
     def start_spec_generation(self, opts: Dict[str, Any]) -> Dict[str, Any]:
@@ -663,6 +684,9 @@ class FactoryService:
         место и «сначала новые» переставало работать.
         """
         projects: List[Dict[str, Any]] = []
+        # Расход по всем проектам читается один раз: на карточке нужна только
+        # итоговая цифра, а перечитывать журнал на каждую игру — впустую.
+        spend = {row["project"]: row for row in self.agent_usage_tracker.project_stats()}
         for path in sandbox.list_projects():
             slug = path.name
             docs = sandbox.docs_dir(slug)
@@ -693,6 +717,9 @@ class FactoryService:
                 "rating": int(meta.get("rating") or 0),
                 "archived": bool(meta.get("archived")),
                 "chats": len(chat_store.list_sessions(slug)),
+                "tokens": spend.get(slug, {}).get("tokens", 0),
+                "tokens_human": spend.get(slug, {}).get("tokens_human", "0"),
+                "agent_runs": spend.get(slug, {}).get("runs", 0),
             })
         projects.sort(key=lambda p: (p["created_at"], p["updated_ts"]), reverse=True)
         return projects
@@ -1472,7 +1499,7 @@ class FactoryService:
             "agy": config.agy_cli_path,
             "claude": config.claude_cli_path,
             "codex": config.codex_cli_path,
-            "kimi": config.kimi_cli_path,
+            # "kimi": config.kimi_cli_path,   # агент отключён, см. AGENT_LABELS
             "opencode": config.opencode_cli_path,
         }.get(key)
         return make_cli_agent(
@@ -1772,21 +1799,28 @@ class FactoryService:
         families = {f["family"]: f for f in status.get("families", [])}
         live = self._live_quota
 
+        stale = bool(live) and not live.get("fresh", True)
         agy_cards: List[Dict[str, Any]] = []
+
         for family in AGYQuotaTracker.FAMILIES:
             title = AGYQuotaTracker.FAMILY_TITLES.get(family, family)
             group = (live or {}).get("groups", {}).get(family) if live else None
             if group:
+                # Строки карточки — окна лимита (5 часов и неделя), ровно как
+                # в /usage самого agy. Раньше здесь был список моделей, и
+                # недельного лимита в интерфейсе не было видно вообще.
                 rows = [
-                    {"title": model["label"],
-                     "percent": model["percent"],
-                     "note": (f"осталось {model['percent']:.0f}% · обновится через {model['reset_in']}"
-                              f" ({model['reset_at']})" if model["reset_seconds"]
-                              else f"осталось {model['percent']:.0f}% · квота доступна")}
-                    for model in sorted(group["models"], key=lambda m: m["percent"])
+                    {"title": bucket["label"],
+                     "percent": bucket["percent"],
+                     "note": (f"обновится через {bucket['reset_in']} ({bucket['reset_at']})"
+                              if bucket["reset_seconds"] else "квота доступна")}
+                    for bucket in group["buckets"]
                 ]
                 agy_cards.append({
-                    "key": family, "title": title, "live": True,
+                    "key": family, "title": group.get("title") or title, "live": True,
+                    "state": "snapshot" if stale else "live",
+                    "badge": (f"снимок · {live.get('age_str', '')}" if stale
+                              else f"живые данные · {live.get('source', '')}"),
                     "subtitle": f"Модели группы: {group['model_names']}", "rows": rows,
                 })
                 continue
@@ -1794,18 +1828,38 @@ class FactoryService:
             data = families.get(family)
             if not data:
                 continue
+
+            # Без ответа сервера настоящего остатка нет. Полосы рисуем, только
+            # если лимит тарифа задан руками: иначе это была бы шкала по
+            # выдуманному числу запросов — из-за неё проценты в фабрике и
+            # расходились с тем, что показывает сам Antigravity.
+            manual = AGYQuotaTracker.has_manual_limits(family)
+            if manual:
+                rows = [
+                    {"title": "5 часов — остаток", "percent": data["pct_left_5h"],
+                     "note": f"{data['remaining_5h']} из {data['limit_5h']} запросов "
+                             f"(лимит задан в .env) · сброс через {data['reset_5h_str']}"},
+                    {"title": "Неделя — остаток", "percent": data["pct_left_weekly"],
+                     "note": f"{data['remaining_weekly']} из {data['limit_weekly']} запросов "
+                             f"(лимит задан в .env) · сброс через {data['reset_weekly_str']}"},
+                ]
+            else:
+                rows = [
+                    {"title": "5 часов — остаток неизвестен", "percent": None,
+                     "note": f"{data['used_5h']} запросов из фабрики · "
+                             f"окно сбросится через {data['reset_5h_str']}"},
+                    {"title": "Неделя — остаток неизвестен", "percent": None,
+                     "note": f"{data['used_weekly']} запросов из фабрики · "
+                             f"окно сбросится через {data['reset_weekly_str']}"},
+                ]
+
             agy_cards.append({
                 "key": family, "title": title, "live": False,
-                "subtitle": (f"последняя модель: {data['last_model']}" if data["last_model"]
-                             else "запросов из фабрики пока не было"),
-                "rows": [
-                    {"title": "Weekly Limit Remaining", "percent": data["pct_left_weekly"],
-                     "note": f"{data['remaining_weekly']} из {data['limit_weekly']} запросов · "
-                             f"сброс через {data['reset_weekly_str']}"},
-                    {"title": "Five Hour Limit Remaining", "percent": data["pct_left_5h"],
-                     "note": f"{data['remaining_5h']} из {data['limit_5h']} запросов · "
-                             f"сброс через {data['reset_5h_str']}"},
-                ],
+                "state": "local" if manual else "unknown",
+                "badge": "лимит из .env" if manual else "остаток неизвестен",
+                "subtitle": ("запустите agy или Antigravity IDE — фабрика подхватит "
+                             "реальные проценты автоматически"),
+                "rows": rows,
             })
 
         agent_cards = [self._agent_quota_card(key) for key in AGENT_CLASSES]
@@ -1813,33 +1867,99 @@ class FactoryService:
         return {
             "agy": agy_cards,
             "agents": agent_cards,
+            "usage": self.usage_payload(),
             "live": bool(live),
-            "source": ("Данные Antigravity language server — реальный остаток квот по группам моделей."
-                       if live else
-                       "Antigravity IDE не запущена — показан локальный счётчик запросов фабрики "
-                       "(проценты приблизительные). Запустите IDE, чтобы видеть реальные квоты."),
+            "source": (
+                f"Живые данные Antigravity ({live.get('source')}) — то же, что показывает "
+                f"/usage: недельное и пятичасовое окно по каждой группе моделей."
+                if live and live.get("fresh", True) else
+                f"Antigravity сейчас не запущен: показан последний снимок ({live.get('age_str', '')}). "
+                f"Запустите agy или IDE — цифры обновятся сами."
+                if live else
+                "Antigravity не запущен и снимка нет: остаток квот неизвестен. "
+                "Запустите agy (или IDE) — фабрика прочитает реальные проценты у него же."
+            ),
             "updated_at": datetime.now().strftime("%H:%M:%S"),
             "last_agy_request": status["last_used_at"],
             "summary": self._quota_summary(families, live),
-            "meta": ("Claude Code — реальные проценты из кэша его команды /usage (~/.claude.json), "
-                     "Codex — из файлов сессий ~/.codex/sessions. Обновляются, когда работает сам CLI. "
-                     "Kimi остаток нигде не сохраняет: показан факт расхода фабрикой. "
-                     "Чтобы вместо счётчика запусков появились полосы, задайте лимиты в .env "
-                     "(например KIMI_LIMIT_5H, KIMI_LIMIT_WEEKLY)."),
+            "meta": ("Откуда берутся цифры:\n"
+                     "• Antigravity — язык-сервер IDE, реальные проценты по группам моделей.\n"
+                     "• Claude Code — кэш его команды /usage (~/.claude.json).\n"
+                     "• Codex — файлы сессий ~/.codex/sessions.\n"
+                     "• OpenCode — остаток отдаёт только личный кабинет на сайте, "
+                     "в CLI его нет: показан расход фабрики и ссылка в кабинет "
+                     "(адрес меняется переменной OPENCODE_CONSOLE_URL).\n"
+                     "• Antigravity токенов по проектам не скрывает: они берутся из "
+                     "конверта его же ответа (usage.total_tokens).\n"
+                     "• Codex считается по своим файлам сессий "
+                     "(~/.codex/sessions → total_token_usage) — вместе с запусками "
+                     "мимо фабрики, зато точно.\n"
+                     "Kimi отключён — агент убран из списка, его история расхода "
+                     "сохранена в статистике ниже.\n"
+                     "Полосы вместо счётчика запусков появляются, когда лимит тарифа "
+                     "задан в .env: <АГЕНТ>_LIMIT_5H и <АГЕНТ>_LIMIT_WEEKLY."),
         }
+
+    # ── Статистика токенов ────────────────────────────────────────────
+
+    def usage_payload(self, projects_limit: int = 30) -> Dict[str, Any]:
+        """
+        Расход токенов: итог по фабрике и разбивка по проектам.
+
+        Названия проектов берём из их же документации, а не из слага: в списке
+        «звёздный курьер» узнаётся, а `star-courier-9f21` — нет.
+        """
+        overall = self.agent_usage_tracker.overall_stats()
+        overall["agents"] = [
+            {**row, "label": AGENT_LABELS.get(row["agent"], row["agent"])}
+            for row in overall["agents"]
+        ]
+
+        projects = []
+        for row in self.agent_usage_tracker.project_stats(limit=projects_limit):
+            slug = row["project"]
+            projects.append({
+                **row,
+                "label": self._project_title(slug) if slug else row["title"],
+                "tokens_5h_human": human_tokens(row["tokens_5h"]),
+                "tokens_weekly_human": human_tokens(row["tokens_weekly"]),
+                "agents": [{**a, "label": AGENT_LABELS.get(a["agent"], a["agent"])}
+                           for a in row["agents"]],
+                "exists": bool(slug) and sandbox.project_dir(slug).is_dir() if slug else False,
+            })
+
+        return {
+            "overall": {**overall,
+                        "tokens_today_human": human_tokens(overall["tokens_today"]),
+                        "tokens_5h_human": human_tokens(overall["tokens_5h"]),
+                        "tokens_weekly_human": human_tokens(overall["tokens_weekly"]),
+                        "avg_per_run_human": human_tokens(overall["avg_per_run"])},
+            "projects": projects,
+        }
+
+    def _project_title(self, slug: str) -> str:
+        """Читаемое имя проекта по слагу (слаг, если названия нет)."""
+        try:
+            data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
+        except Exception:
+            return slug
+        title = str((data or {}).get("title") or "").strip()
+        return f"{title} · {slug}" if title else slug
 
     def _quota_summary(self, families: Dict[str, Any], live: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Короткая сводка для боковой панели: остаток по AGY и активному агенту."""
         if live:
-            parts = [f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {grp['percent']:.0f}%"
+            mark = "" if live.get("fresh", True) else "~"   # ~ = снимок, не живые данные
+            parts = [f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {mark}{grp['percent']:.0f}%"
                      for key, grp in live["groups"].items()]
             worst = min((g["percent"] for g in live["groups"].values()), default=100.0)
         else:
-            parts = [f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} "
-                     f"{families.get(key, {}).get('pct_left_5h', 100):.0f}%"
-                     for key in AGYQuotaTracker.FAMILIES]
-            worst = min((families.get(key, {}).get("pct_left_5h", 100.0)
-                         for key in AGYQuotaTracker.FAMILIES), default=100.0)
+            # Antigravity не отвечает — показываем объём работы, а не процент,
+            # посчитанный по выдуманному лимиту запросов.
+            used = sum(families.get(key, {}).get("used_5h", 0)
+                       for key in AGYQuotaTracker.FAMILIES)
+            parts = [f"AGY: {used} зап./5ч"]
+            worst = 100.0
 
         active = self.default_agent()
         if active in AGENT_CLASSES:
@@ -1855,25 +1975,59 @@ class FactoryService:
                 parts.append(f"{active} {left:.0f}%")
                 worst = min(worst, left)
 
-        return {"text": "Остаток: " + "  ·  ".join(parts), "critical": worst <= 10}
+        # Расход рядом с остатком: одна цифра на видном месте лучше, чем
+        # вкладка, в которую заглядывают раз в неделю.
+        overall = self.agent_usage_tracker.overall_stats()
+        parts.append(f"сегодня {human_tokens(overall['tokens_today'])} токенов")
+
+        return {"text": "Остаток: " + "  ·  ".join(parts), "critical": worst <= 10,
+                "tokens_today": overall["tokens_today"],
+                "tokens_total": overall["tokens"]}
 
     def _agent_quota_card(self, agent_key: str) -> Dict[str, Any]:
         data = self.agent_usage_tracker.status(agent_key)
         live = self.agent_usage_tracker.live_status(agent_key)
 
+        spend = self.agent_usage_tracker.overall_stats()
+        agent_tokens = next(
+            (row for row in spend["agents"] if row["agent"] == agent_key),
+            {"tokens_human": "0", "runs": 0},
+        )
+        spent_note = (f"фабрика потратила {agent_tokens['tokens_human']} токенов "
+                      f"за {agent_tokens['runs']} {plural_runs(agent_tokens['runs'])}")
+
         if live and live.get("windows"):
             plan = f" · тариф {live['plan']}" if live.get("plan") else ""
+            stale = bool(live.get("stale"))
+            rows = []
+            for window in live["windows"]:
+                if window.get("expired"):
+                    # Окно уже сбросилось, а цифра в кэше осталась прежней:
+                    # показывать её как текущий остаток нельзя.
+                    rows.append({
+                        "title": f"{window['label'].capitalize()} — данные устарели",
+                        "percent": None,
+                        "note": (f"в кэше от {live.get('updated_at', '—')}: израсходовано "
+                                 f"{window['used_percent']:.1f}%, но окно сбросилось "
+                                 f"{window['reset_at']} · выполните /usage в CLI"),
+                    })
+                    continue
+                rows.append({
+                    "title": f"{window['label'].capitalize()} — остаток",
+                    "percent": window["pct_left"],
+                    "note": f"израсходовано {window['used_percent']:.1f}% · "
+                            f"сброс {window['reset_at']}",
+                })
             return {
                 "key": agent_key,
                 "title": AGENT_LABELS.get(agent_key, agent_key),
                 "live": True,
+                "state": "snapshot" if stale else "live",
+                "badge": ("часть данных устарела" if stale else "живые данные CLI"),
+                "spent": spent_note,
+                "supports_usage_command": agent_key in ("claude", "codex"),
                 "subtitle": f"реальные данные CLI{plan} · обновлены {live.get('updated_at', '—')}",
-                "rows": [
-                    {"title": f"{window['label'].capitalize()} — остаток",
-                     "percent": window["pct_left"],
-                     "note": f"израсходовано {window['used_percent']:.1f}% · сброс {window['reset_at']}"}
-                    for window in live["windows"]
-                ],
+                "rows": rows,
             }
 
         try:
@@ -1888,12 +2042,13 @@ class FactoryService:
             subtitle = ("CLI установлен, запусков из фабрики ещё не было" if available
                         else "CLI не найден — укажите путь в настройках")
 
+        # Порядок тот же, что у живых карточек: сначала короткое окно.
         rows: List[Dict[str, Any]] = []
         for title, used, limit, pct_left, reset, tokens in (
-            ("Неделя", data["used_weekly"], data["limit_weekly"], data["pct_left_weekly"],
-             data["reset_weekly_str"], data["tokens_weekly"]),
             ("5 часов", data["used_5h"], data["limit_5h"], data["pct_left_5h"],
              data["reset_5h_str"], data["tokens_5h"]),
+            ("Неделя", data["used_weekly"], data["limit_weekly"], data["pct_left_weekly"],
+             data["reset_weekly_str"], data["tokens_weekly"]),
         ):
             token_note = f" · {tokens} токенов" if tokens else ""
             if pct_left is None:
@@ -1910,8 +2065,21 @@ class FactoryService:
                             f"сброс через {reset}",
                 })
 
+        console_url = AGENT_CONSOLE_URLS.get(agent_key)
+        if console_url:
+            # Полосу рисовать не из чего: у CLI нет ни файла с остатком, ни
+            # команды. Врать процентами хуже, чем честно отправить в кабинет.
+            subtitle = f"{subtitle} · остаток смотрится только в личном кабинете"
+
         return {"key": agent_key, "title": AGENT_LABELS.get(agent_key, agent_key),
-                "live": False, "subtitle": subtitle, "rows": rows}
+                "live": False,
+                "state": "external" if console_url else "local",
+                "badge": ("остаток только на сайте" if console_url
+                          else "счётчик фабрики"),
+                "spent": spent_note,
+                "console_url": console_url,
+                "supports_usage_command": agent_key in ("claude", "codex"),
+                "subtitle": subtitle, "rows": rows}
 
     def _probe_live_quota_async(self) -> None:
         """Опрос language server Antigravity в фоне — вызовы там блокирующие."""

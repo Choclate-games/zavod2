@@ -69,7 +69,9 @@ class AppConfig:
         # ("invalid model selection: --effort is not supported for the current model")
         self.agy_effort = os.getenv("AGY_EFFORT", "")
 
-        # Терминальные кодовые агенты кроме AGY: Claude Code, Codex, Kimi, OpenCode.
+        # Терминальные кодовые агенты кроме AGY: Claude Code, Codex, OpenCode.
+        # Kimi отключён (providers/cli_agents.AGENT_CLASSES); его настройки
+        # ниже оставлены, чтобы возврат агента был правкой одной строки.
         # Пути к CLI и модели читаются провайдерами из этих же переменных.
         self.default_agent = os.getenv("DEFAULT_AGENT", "agy")
         self.claude_cli_path = os.getenv("CLAUDE_CLI_PATH", "claude")
@@ -79,7 +81,7 @@ class AppConfig:
         self.kimi_cli_path = os.getenv("KIMI_CLI_PATH", "kimi")
         self.kimi_model = os.getenv("KIMI_MODEL", "")
         self.opencode_cli_path = os.getenv("OPENCODE_CLI_PATH", "opencode")
-        # Уровень рассуждений там, где CLI его понимает (kimi — не понимает).
+        # Уровень рассуждений там, где CLI его понимает.
         self.claude_effort = os.getenv("CLAUDE_EFFORT", "")
         self.codex_effort = os.getenv("CODEX_EFFORT", "")
         self.kimi_effort = os.getenv("KIMI_EFFORT", "")

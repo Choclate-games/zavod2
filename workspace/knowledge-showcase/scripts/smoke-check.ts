@@ -68,6 +68,8 @@ function stubContext(script: Script): DemoContext {
         ? out.set(Math.cos(tick / 90), Math.sin(tick / 90))
         : out.set(0, 0)),
       onKey: (down: (code: string) => void) => { keyHandler = down; return noop; },
+      // Мышь головным прогонам не нужна: приёмы вызываются клавишами.
+      onPointerButton: () => noop,
       clearSubscribers: noop,
       releaseAll: noop,
       endFrame: noop,

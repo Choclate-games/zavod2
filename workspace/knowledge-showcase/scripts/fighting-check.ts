@@ -6,7 +6,8 @@
  */
 import {
   MOVES, canCancel, comboScaling, frameAdvantageOnBlock, frameAdvantageOnHit,
-  punisherFor, staminaScale, whiffsAgainst, type MoveId,
+  punisherFor, reach, resolveCancel, resolveInput, staminaScale, whiffsAgainst,
+  type Limb, type MoveId, type Stance, type Strength,
 } from '../src/game/fightingMoves';
 
 let failed = 0;

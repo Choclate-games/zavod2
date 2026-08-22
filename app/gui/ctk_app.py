@@ -21,7 +21,7 @@ from app.game_runner import DevServer, detect_start_command, open_internal_brows
 from providers.factory import ProviderFactory
 from providers.agy import AGYProvider, AGYImageProvider, AGYQuotaTracker
 from providers.cli_agents import AGENT_CLASSES, make_cli_agent
-from providers.agent_usage import AgentUsageTracker
+from providers.agent_usage import AgentUsageTracker, human_tokens
 from providers.quota_probe import read_live_quota
 from app.chat_jobs import ChatJobManager
 from app.gui.chat_terminal import ChatTerminal
@@ -62,10 +62,18 @@ AGENT_LABELS: Dict[str, str] = {
     "agy": "⚡ agy (Antigravity CLI)",
     "claude": "🟣 claude (Claude Code CLI)",
     "codex": "⚫ codex (OpenAI Codex CLI)",
-    "kimi": "🌙 kimi (Kimi CLI)",
+    # Kimi отключён: подпиской больше не пользуемся. Чтобы вернуть агента —
+    # раскомментировать здесь и в providers/cli_agents.AGENT_CLASSES.
+    # "kimi": "🌙 kimi (Kimi CLI)",
     "opencode": "💎 opencode (OpenCode CLI)",
 }
 AGENT_KEYS = tuple(AGENT_LABELS)
+
+# У кого остаток квоты живёт только в личном кабинете на сайте: рисовать
+# полосу не из чего, поэтому ведём прямо туда.
+AGENT_CONSOLE_URLS: Dict[str, str] = {
+    "opencode": os.getenv("OPENCODE_CONSOLE_URL", "https://opencode.ai/auth"),
+}
 
 
 def _plural_runs(count: int) -> str:
@@ -276,7 +284,7 @@ class BrainstormIdeasWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             top_frame,
-            text="💡 Генератор идей от ИИ (AGY / Claude / Codex / Kimi / OpenCode / Local)",
+            text="💡 Генератор идей от ИИ (AGY / Claude / Codex / OpenCode / Local)",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color="#00f0ff"
         ).pack(anchor="w", padx=15, pady=(10, 2))
@@ -1316,7 +1324,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
     def _get_selected_provider_key(self) -> str:
         val = self.combo_provider.get().lower()
-        for key in ("agy", "opencode", "codex", "kimi", "claude", "local"):
+        for key in ("agy", "opencode", "codex", "claude", "local"):
             if key in val:
                 return key
         return "agy"
@@ -1333,7 +1341,7 @@ class GamePromptFactoryGUI(ctk.CTk):
             "agy": config.agy_cli_path,
             "claude": config.claude_cli_path,
             "codex": config.codex_cli_path,
-            "kimi": config.kimi_cli_path,
+            # "kimi": config.kimi_cli_path,   # агент отключён, см. AGENT_LABELS
             "opencode": config.opencode_cli_path,
         }.get(key)
         return make_cli_agent(
@@ -2673,7 +2681,7 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="💬 Чат разработки (AGY · Claude · Codex · Kimi · OpenCode)",
+            text="💬 Чат разработки (AGY · Claude · Codex · OpenCode)",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color="#e2e8f0"
         ).pack(side="left")
@@ -3400,16 +3408,15 @@ class GamePromptFactoryGUI(ctk.CTk):
 
         # ── Карточки остальных терминальных агентов ──
         ctk.CTkLabel(
-            head, text="🖥 Claude Code · Codex · Kimi · OpenCode — локальный счётчик запусков фабрики",
+            head, text="🖥 Терминальные агенты — остаток квоты и расход фабрики",
             font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8"
-        ).grid(row=3, column=0, sticky="w", padx=15, pady=(0, 4))
+        ).grid(row=4, column=0, sticky="w", padx=15, pady=(0, 4))
 
         agent_cards = ctk.CTkFrame(head, fg_color="transparent")
-        agent_cards.grid(row=4, column=0, sticky="ew", padx=15, pady=(0, 14))
+        agent_cards.grid(row=5, column=0, sticky="ew", padx=15, pady=(0, 14))
 
         self.agent_quota_widgets: Dict[str, Dict[str, Any]] = {}
-        agent_accents = {"claude": "#c084fc", "codex": "#94a3b8", "kimi": "#38bdf8",
-                         "opencode": "#00f0ff"}
+        agent_accents = {"claude": "#c084fc", "codex": "#94a3b8", "opencode": "#00f0ff"}
         agent_keys = list(AGENT_CLASSES)
 
         for col, agent_key in enumerate(agent_keys):
@@ -3435,6 +3442,24 @@ class GamePromptFactoryGUI(ctk.CTk):
             rows.pack(fill="x", padx=14, pady=(0, 14))
 
             self.agent_quota_widgets[agent_key] = {"accent": accent, "model": lbl_model, "rows": rows}
+
+        # ── Расход токенов: фабрика целиком и каждый проект ──
+        ctk.CTkLabel(
+            head, text="🎟 Расход токенов по проектам",
+            font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8"
+        ).grid(row=6, column=0, sticky="w", padx=15, pady=(0, 4))
+
+        self.lbl_usage_overall = ctk.CTkLabel(
+            head, text="", font=ctk.CTkFont(size=11), text_color="#cbd5e1",
+            justify="left", wraplength=1000
+        )
+        self.lbl_usage_overall.grid(row=7, column=0, sticky="w", padx=15, pady=(0, 6))
+
+        # Строки проектов пересобираются на каждом обновлении: список проектов
+        # меняется, а держать пустые виджеты «про запас» смысла нет.
+        self.usage_projects_box = ctk.CTkFrame(head, fg_color="transparent")
+        self.usage_projects_box.grid(row=8, column=0, sticky="ew", padx=15, pady=(0, 14))
+        self.usage_projects_box.grid_columnconfigure(0, weight=1)
 
         # Подпись под карточками: откуда берутся цифры и как задать лимиты вручную.
         self.lbl_quota_meta = ctk.CTkLabel(
@@ -3525,20 +3550,16 @@ class GamePromptFactoryGUI(ctk.CTk):
         # Сводка в боковой панели — в процентах остатка по обеим группам.
         if getattr(self, "lbl_sidebar_quota", None):
             if live:
+                mark = "" if live.get("fresh", True) else "~"   # ~ = снимок, не живые данные
                 parts = [
-                    f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {grp['percent']:.0f}%"
+                    f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {mark}{grp['percent']:.0f}%"
                     for key, grp in live["groups"].items()
                 ]
                 worst_left = min((g["percent"] for g in live["groups"].values()), default=100.0)
             else:
-                parts = [
-                    f"AGY·{'Gemini' if key == 'gemini' else 'Claude'} {families.get(key, {}).get('pct_left_5h', 100):.0f}%"
-                    for key in AGYQuotaTracker.FAMILIES
-                ]
-                worst_left = min(
-                    (families.get(key, {}).get("pct_left_5h", 100.0) for key in AGYQuotaTracker.FAMILIES),
-                    default=100.0,
-                )
+                # Остатка нет — показываем объём работы, а не выдуманный процент.
+                parts = [f"AGY: {sum(families.get(key, {}).get('used_5h', 0) for key in AGYQuotaTracker.FAMILIES)} зап./5ч"]
+                worst_left = 100.0
             # Активный агент чата тоже виден в сайдбаре — иначе остаток показывался
             # только для AGY, даже когда работа идёт через Claude/Codex/Kimi.
             active_agent = self._selected_agent_key()
@@ -3565,13 +3586,20 @@ class GamePromptFactoryGUI(ctk.CTk):
         if not getattr(self, "quota_widgets", None):
             return
 
+        fresh = bool(live) and live.get("fresh", True)
         if getattr(self, "lbl_quota_source", None):
+            if fresh:
+                source_text = (f"Живые данные Antigravity ({live.get('source', '')}) — то же, "
+                               f"что показывает /usage: недельное и пятичасовое окно по группам.")
+            elif live:
+                source_text = (f"Antigravity сейчас не запущен: показан последний снимок "
+                               f"({live.get('age_str', '')}). Запустите agy или IDE — обновится само.")
+            else:
+                source_text = ("Antigravity не запущен и снимка нет: остаток квот неизвестен. "
+                               "Запустите agy (или IDE) — фабрика прочитает проценты у него же.")
             self.lbl_quota_source.configure(
-                text=("Данные Antigravity language server — реальный остаток квот по группам моделей."
-                      if live else
-                      "Antigravity IDE не запущена — показан локальный счётчик запросов фабрики "
-                      "(проценты приблизительные). Запустите IDE, чтобы видеть реальные квоты."),
-                text_color="#00ff88" if live else "#fbbf24"
+                text=source_text,
+                text_color="#00ff88" if fresh else "#fbbf24"
             )
 
         for family, widgets in self.quota_widgets.items():
@@ -3582,14 +3610,14 @@ class GamePromptFactoryGUI(ctk.CTk):
             group = (live or {}).get("groups", {}).get(family) if live else None
             if group:
                 widgets["model"].configure(text=f"Модели группы: {group['model_names']}")
-                for model in sorted(group["models"], key=lambda m: m["percent"]):
+                # Строки — окна лимита (5 часов и неделя), как в /usage самого agy.
+                for bucket in group["buckets"]:
                     self._render_quota_row(
                         rows,
-                        model["label"],
-                        model["percent"],
-                        (f"осталось {model['percent']:.0f}% · обновится через {model['reset_in']}"
-                         f" ({model['reset_at']})" if model["reset_seconds"] else
-                         f"осталось {model['percent']:.0f}% · квота доступна"),
+                        bucket["label"],
+                        bucket["percent"],
+                        (f"обновится через {bucket['reset_in']} ({bucket['reset_at']})"
+                         if bucket["reset_seconds"] else "квота доступна"),
                     )
                 continue
 
@@ -3600,20 +3628,37 @@ class GamePromptFactoryGUI(ctk.CTk):
                 text=(f"последняя модель: {data['last_model']}" if data["last_model"]
                       else "запросов из фабрики пока не было")
             )
-            self._render_quota_row(
-                rows, "Weekly Limit Remaining", data["pct_left_weekly"],
-                f"{data['remaining_weekly']} из {data['limit_weekly']} запросов · "
-                f"сброс через {data['reset_weekly_str']}",
-            )
-            self._render_quota_row(
-                rows, "Five Hour Limit Remaining", data["pct_left_5h"],
-                f"{data['remaining_5h']} из {data['limit_5h']} запросов · "
-                f"сброс через {data['reset_5h_str']}",
-            )
+            # Полосу рисуем, только если лимит задан руками в .env. Иначе это
+            # шкала по выдуманному числу запросов — из-за неё проценты фабрики
+            # и расходились с тем, что показывает сам Antigravity.
+            if AGYQuotaTracker.has_manual_limits(family):
+                self._render_quota_row(
+                    rows, "5 часов — остаток", data["pct_left_5h"],
+                    f"{data['remaining_5h']} из {data['limit_5h']} запросов "
+                    f"(лимит из .env) · сброс через {data['reset_5h_str']}",
+                )
+                self._render_quota_row(
+                    rows, "Неделя — остаток", data["pct_left_weekly"],
+                    f"{data['remaining_weekly']} из {data['limit_weekly']} запросов "
+                    f"(лимит из .env) · сброс через {data['reset_weekly_str']}",
+                )
+            else:
+                self._render_quota_note(
+                    rows, "5 часов — остаток неизвестен",
+                    f"{data['used_5h']} запросов из фабрики · "
+                    f"окно сбросится через {data['reset_5h_str']}",
+                )
+                self._render_quota_note(
+                    rows, "Неделя — остаток неизвестен",
+                    f"{data['used_weekly']} запросов из фабрики · "
+                    f"окно сбросится через {data['reset_weekly_str']}",
+                )
 
-        # ── Карточки Claude Code / Codex / Kimi ──
+        # ── Карточки Claude Code / Codex / OpenCode ──
         for agent_key, widgets in getattr(self, "agent_quota_widgets", {}).items():
             self._render_agent_quota_card(agent_key, widgets)
+
+        self._render_usage_stats()
 
         self.lbl_quota_updated.configure(
             text=f"обновлено {datetime.now().strftime('%H:%M:%S')} · последний запрос AGY: {status['last_used_at']}"
@@ -3621,11 +3666,63 @@ class GamePromptFactoryGUI(ctk.CTk):
         self.lbl_quota_meta.configure(
             text=("Claude Code — реальные проценты из кэша его команды /usage (~/.claude.json), "
                   "Codex — из файлов сессий ~/.codex/sessions. Обновляются, когда работает сам CLI.\n"
-                  "Kimi остаток нигде не сохраняет — /usage у него есть только внутри TUI, поэтому "
-                  "показан факт расхода фабрикой; кнопка под карточкой откроет терминал Kimi.\n"
+                  "OpenCode остаток отдаёт только в личном кабинете на сайте — кнопка под "
+                  "карточкой открывает его (адрес меняется переменной OPENCODE_CONSOLE_URL).\n"
+                  "Kimi отключён; его история расхода сохранена в статистике токенов.\n"
                   "Чтобы вместо счётчика запусков появились полосы, задайте лимит своего тарифа "
-                  "в .env: KIMI_LIMIT_5H, KIMI_LIMIT_WEEKLY.")
+                  "в .env: <АГЕНТ>_LIMIT_5H и <АГЕНТ>_LIMIT_WEEKLY.")
         )
+
+    def _render_usage_stats(self, top: int = 8):
+        """
+        Расход токенов: строка итога по фабрике и самые «дорогие» проекты.
+
+        Показываем ограниченный список: важно, куда уходит основная масса
+        токенов, а не полная выписка за месяц — она есть в /api/usage.
+        """
+        box = getattr(self, "usage_projects_box", None)
+        if box is None:
+            return
+        for widget in box.winfo_children():
+            widget.destroy()
+
+        overall = self.agent_usage_tracker.overall_stats()
+        by_agent = " · ".join(
+            f"{row['agent']} {row['tokens_human']}" for row in overall["agents"] if row["tokens"]
+        )
+        self.lbl_usage_overall.configure(
+            text=(f"Всего {overall['tokens_human']} токенов за {overall['runs']} "
+                  f"{_plural_runs(overall['runs'])} · сегодня "
+                  f"{human_tokens(overall['tokens_today'])} · за неделю "
+                  f"{human_tokens(overall['tokens_weekly'])} · в среднем "
+                  f"{human_tokens(overall['avg_per_run'])} за запуск · проектов "
+                  f"{overall['projects_count']} · учёт с {overall['since']}"
+                  + (f"\n{by_agent}" if by_agent else ""))
+        )
+
+        projects = self.agent_usage_tracker.project_stats(limit=top)
+        if not projects:
+            ctk.CTkLabel(
+                box, text="Запусков агентов ещё не было — считать нечего.",
+                font=ctk.CTkFont(size=10), text_color="#475569"
+            ).pack(anchor="w")
+            return
+
+        for row in projects:
+            line = ctk.CTkFrame(box, fg_color="#0b111e", corner_radius=8)
+            line.pack(fill="x", pady=2)
+            ctk.CTkLabel(
+                line, text=f"{row['title']} — {row['tokens_human']} токенов ({row['share']}%)",
+                font=ctk.CTkFont(size=11, weight="bold"), text_color="#cbd5e1"
+            ).pack(anchor="w", padx=10, pady=(6, 0))
+            agents = " · ".join(f"{a['agent']}: {a['tokens_human']}" for a in row["agents"])
+            ctk.CTkLabel(
+                line,
+                text=(f"{row['runs']} {_plural_runs(row['runs'])} · неделя "
+                      f"{human_tokens(row['tokens_weekly'])} · {row['first_at']} → {row['last_at']}"
+                      + (f" · {agents}" if agents else "")),
+                font=ctk.CTkFont(size=9), text_color="#475569", justify="left"
+            ).pack(anchor="w", padx=10, pady=(0, 6))
 
     def _render_agent_quota_card(self, agent_key: str, widgets: Dict[str, Any]):
         """
@@ -3642,12 +3739,31 @@ class GamePromptFactoryGUI(ctk.CTk):
         data = self.agent_usage_tracker.status(agent_key)
         live = self.agent_usage_tracker.live_status(agent_key)
 
+        spend = next((row for row in self.agent_usage_tracker.overall_stats()["agents"]
+                      if row["agent"] == agent_key), None)
+        if spend:
+            ctk.CTkLabel(
+                rows, text=f"🎟 фабрика потратила {spend['tokens_human']} токенов "
+                           f"за {spend['runs']} {_plural_runs(spend['runs'])}",
+                font=ctk.CTkFont(size=10), text_color="#94a3b8", justify="left",
+            ).pack(anchor="w", pady=(4, 0))
+
         if live and live.get("windows"):
             plan = f" · тариф {live['plan']}" if live.get("plan") else ""
             widgets["model"].configure(
                 text=f"реальные данные CLI{plan} · обновлены {live.get('updated_at', '—')}"
             )
             for window in live["windows"]:
+                if window.get("expired"):
+                    # Окно сбросилось, а цифра в кэше осталась прежней.
+                    self._render_quota_note(
+                        rows,
+                        f"{window['label'].capitalize()} — данные устарели",
+                        f"в кэше от {live.get('updated_at', '—')}: израсходовано "
+                        f"{window['used_percent']:.1f}%, но окно сбросилось "
+                        f"{window['reset_at']} · выполните /usage в CLI",
+                    )
+                    continue
                 self._render_quota_row(
                     rows,
                     f"{window['label'].capitalize()} — остаток",
@@ -3668,11 +3784,12 @@ class GamePromptFactoryGUI(ctk.CTk):
                       else "CLI не найден — укажите путь в настройках")
             )
 
+        # Порядок тот же, что у живых карточек: сначала короткое окно.
         for title, used, limit, pct_left, reset, tokens in (
-            ("Неделя", data["used_weekly"], data["limit_weekly"], data["pct_left_weekly"],
-             data["reset_weekly_str"], data["tokens_weekly"]),
             ("5 часов", data["used_5h"], data["limit_5h"], data["pct_left_5h"],
              data["reset_5h_str"], data["tokens_5h"]),
+            ("Неделя", data["used_weekly"], data["limit_weekly"], data["pct_left_weekly"],
+             data["reset_weekly_str"], data["tokens_weekly"]),
         ):
             token_note = f" · {tokens} токенов" if tokens else ""
             if pct_left is None:
@@ -3687,7 +3804,20 @@ class GamePromptFactoryGUI(ctk.CTk):
                     f"{left} из {limit} {_plural_runs(limit)}{token_note} · сброс через {reset}",
                 )
 
-        # У Kimi остаток живёт только в его собственном TUI — даём туда короткий путь.
+        console_url = AGENT_CONSOLE_URLS.get(agent_key)
+        if console_url:
+            # У OpenCode команды /usage нет вовсе: остаток показывает только
+            # личный кабинет, туда и ведём вместо бесполезного терминала.
+            ctk.CTkButton(
+                rows,
+                text="🌐 Открыть личный кабинет и посмотреть лимиты",
+                height=26,
+                fg_color="#1e293b", hover_color="#334155",
+                font=ctk.CTkFont(size=10),
+                command=lambda url=console_url: webbrowser.open(url),
+            ).pack(fill="x", pady=(10, 0))
+            return
+
         ctk.CTkButton(
             rows,
             text="▶ Открыть терминал и выполнить /usage",
@@ -4130,7 +4260,7 @@ class GamePromptFactoryGUI(ctk.CTk):
         card_agents.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=15, pady=8)
 
         ctk.CTkLabel(
-            card_agents, text="🖥 Терминальные агенты: Claude Code · Codex · Kimi · OpenCode",
+            card_agents, text="🖥 Терминальные агенты: Claude Code · Codex · OpenCode",
             font=ctk.CTkFont(size=13, weight="bold"), text_color="#00f0ff"
         ).pack(anchor="w", padx=12, pady=(10, 4))
         ctk.CTkLabel(

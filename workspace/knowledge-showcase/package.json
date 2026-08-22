@@ -23,7 +23,12 @@
     "check:vfx": "tsx scripts/vfx-check.ts",
     "check:audio-rhythm": "tsx scripts/audio-rhythm-check.ts",
     "check:smoke": "tsx scripts/smoke-check.ts",
-    "check:all": "tsc --noEmit && tsx scripts/fighting-check.ts && tsx scripts/fighting-sim-check.ts && tsx scripts/racing-check.ts && tsx scripts/td-check.ts && tsx scripts/rts-check.ts && tsx scripts/melee-check.ts && tsx scripts/survivor-check.ts && tsx scripts/stealth-check.ts && tsx scripts/building-check.ts && tsx scripts/buoyancy-check.ts && tsx scripts/procedural-check.ts && tsx scripts/ortho2d-check.ts && tsx scripts/vfx-check.ts && tsx scripts/audio-rhythm-check.ts && tsx scripts/smoke-check.ts"
+    "check:all": "tsc --noEmit && tsx scripts/fighting-check.ts && tsx scripts/fighting-sim-check.ts && tsx scripts/fight-anim-check.ts && tsx scripts/racing-check.ts && tsx scripts/td-check.ts && tsx scripts/rts-check.ts && tsx scripts/melee-check.ts && tsx scripts/survivor-check.ts && tsx scripts/stealth-check.ts && tsx scripts/building-check.ts && tsx scripts/buoyancy-check.ts && tsx scripts/procedural-check.ts && tsx scripts/ortho2d-check.ts && tsx scripts/vfx-check.ts && tsx scripts/audio-rhythm-check.ts && tsx scripts/smoke-check.ts",
+    "bake:fight-anim": "tsx scripts/bake-fight-anim.ts",
+    "check:fight-anim": "tsx scripts/fight-anim-check.ts",
+    "make:proc-anim": "tsx scripts/make-proc-anim.ts",
+    "check:fight-input": "vite build && tsx scripts/fight-input-check.ts",
+    "shots:anim": "vite build && tsx scripts/anim-sheet.ts"
   },
   "devDependencies": {
     "@types/three": "^0.185.4",

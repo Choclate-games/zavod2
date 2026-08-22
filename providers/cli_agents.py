@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
 from app.logging import log_warning
-from providers.agent_usage import AgentUsageTracker
+from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
 from providers.base import AIProvider, T
 from providers.local import LocalAIProvider
 from providers.proc_stream import (
@@ -402,7 +402,10 @@ class CodingCLIAgent(AIProvider):
         except OSError as exc:
             raise RuntimeError(f"Не удалось запустить {self.title} ({cli}): {exc}") from exc
 
-        usage_key = self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
+        project = project_from_path(work_dir)
+        usage_key = self.usage_tracker.record(
+            self.key, model=self.model, prompt_len=len(prompt), project=project
+        )
         self.reset_stream_state()
 
         collected: List[str] = []
@@ -487,7 +490,15 @@ class CodingCLIAgent(AIProvider):
             ):
                 emit(event)
 
+        # Машинный отчёт CLI — основной источник. Если его не было (агент
+        # напечатал расход только текстом), достаём число из самой консоли.
+        if not spent_tokens:
+            spent_tokens = sniff_tokens("".join(collected))
+
         self.usage_tracker.add_tokens(usage_key, spent_tokens)
+        if not stopped:
+            emit({"kind": "meta",
+                  "text": self.usage_tracker.spend_report(self.key, project, spent_tokens)})
         shutil.rmtree(staged_dir, ignore_errors=True)
 
         if proc.returncode not in (0, None) and not stopped and not hung and not reported_error:
@@ -533,7 +544,8 @@ class CodingCLIAgent(AIProvider):
             raise RuntimeError(f"Не удалось запустить {self.title} ('{cmd[0]}'): {exc}") from exc
         finally:
             shutil.rmtree(staged_dir, ignore_errors=True)
-            self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt))
+            self.usage_tracker.record(self.key, model=self.model, prompt_len=len(prompt),
+                                      project=project_from_path(work_dir))
 
         if result.returncode != 0:
             err = (result.stderr or "").strip() or (result.stdout or "").strip()[-500:]
@@ -1321,8 +1333,18 @@ class OpenCodeCLIAgent(CodingCLIAgent):
 AGENT_CLASSES: Dict[str, Type[CodingCLIAgent]] = {
     ClaudeCodeAgent.key: ClaudeCodeAgent,
     CodexAgent.key: CodexAgent,
-    KimiAgent.key: KimiAgent,
+    # Kimi отключён по решению пользователя: подпиской больше не пользуемся.
+    # Класс KimiAgent намеренно оставлен рабочим — чтобы вернуть агента,
+    # достаточно раскомментировать эту строку (и строку в AGENT_LABELS
+    # в app/web/service.py и app/gui/ctk_app.py).
+    # KimiAgent.key: KimiAgent,
     OpenCodeCLIAgent.key: OpenCodeCLIAgent,
+}
+
+# Агенты, выключенные вручную: ключ ещё встречается в старых чатах и истории
+# расхода, поэтому ошибка про них должна объяснять причину, а не «неизвестный».
+DISABLED_AGENTS: Dict[str, str] = {
+    KimiAgent.key: "Kimi CLI отключён в фабрике (providers/cli_agents.AGENT_CLASSES).",
 }
 
 # Ключи, которые GUI и фабрика провайдеров считают «терминальными агентами».
@@ -1348,6 +1370,9 @@ def make_cli_agent(
     if key in ("agy", "antigravity", "gemini-cli"):
         from providers.agy import AGYProvider  # локальный импорт: избегаем цикла
         return AGYProvider(cli_path=cli_path, model=model, effort=effort, yolo=yolo)
+
+    if key in DISABLED_AGENTS:
+        raise ValueError(DISABLED_AGENTS[key])
 
     agent_cls = AGENT_CLASSES.get(key)
     if not agent_cls:

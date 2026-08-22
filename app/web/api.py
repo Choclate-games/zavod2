@@ -50,6 +50,15 @@ def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
+@app.get("/play", response_class=HTMLResponse)
+def play_view() -> HTMLResponse:
+    """
+    Обёртка вокруг игры: сама игра в iframe, сверху полоска с пресетами
+    размера вьюпорта. Открывается как /play?url=<адрес игры>&slug=<проект>.
+    """
+    return HTMLResponse((STATIC_DIR / "play.html").read_text(encoding="utf-8"))
+
+
 @app.get("/api/bootstrap")
 def bootstrap() -> Dict[str, Any]:
     return service.bootstrap()
@@ -530,6 +539,12 @@ async def play_window(slug: str, request: Request) -> Dict[str, Any]:
 @app.get("/api/quota")
 def quota() -> Dict[str, Any]:
     return service.quota_payload()
+
+
+@app.get("/api/usage")
+def usage() -> Dict[str, Any]:
+    """Расход токенов: итог по фабрике и разбивка по проектам."""
+    return service.usage_payload()
 
 
 @app.post("/api/quota/{key}/terminal")

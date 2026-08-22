@@ -45,8 +45,9 @@ and the tasks each one owns instead of hand-written code, are in `stack/README.m
 | `stack/bitecs.md` | ECS 0.4 API, mass entities, instanced rendering, system order |
 | `stack/postprocessing.md` | `EffectComposer`, effect budget per device tier, sRGB/AA traps |
 | `threejs/orthographic_2d_and_pointer_input.md` | 2D as an orthographic Three.js scene: pointer→world, splines, drag |
-| `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, reach & advance, stamina/guard break, the physics boundary, live-match check |
-| `threejs/procedural_character_rig.md` | Humanoid built from boxes: hierarchy, seeded faces, wear decals, pose-target animation, ragdoll from the real meshes |
+| `threejs/fighting_game_core.md` | Frame data, hit/hurt/push boxes, reach & advance, stamina/guard break, the physics boundary, live-match check; раскладка «две кнопки + модификатор» рядом с балансом, окно мокап-клипа по кадру попадания |
+| `threejs/skinned_character_models.md` | Готовые FBX из `assets/`: нормализация и перепривязка, свои оси поверх чужого скелета, рэгдолл из костей (разбитых по суставам), ретаргет мокапа по направлениям и его четыре ловушки — включая ту, из-за которой удар уходит вбок, — плюс размер дописанных аксессуаров |
+| `threejs/procedural_character_rig.md` | Humanoid built from boxes: hierarchy, seeded faces, wear decals, pose-target animation, ragdoll from the real meshes (шарниры с пределами, тонус связками, бросок тела целиком), leg-rotation sign, фазы удара ногой и граница между мокапом и позой, and how to prove an animation is not broken (Playwright sheet + headless pose measurements) |
 | `threejs/racing_track_and_opponents.md` | Track from one curve, checkpoints and laps, racing line, fair rubber-banding |
 | `threejs/game_map_and_world_design.md` | Procedural game maps, terrain recessed corridors, anti-z-fighting, prop grounding |
 | `threejs/tower_defense_core.md` | Fixed path vs. maze, target priority, projectiles, wave contract |

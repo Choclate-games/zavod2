@@ -49,6 +49,29 @@ export interface RagdollBone {
   mass: number;
   /** С кем соединён суставом (имя ранее объявленной кости). */
   parent: string | null;
+  /**
+   * Габариты кости в мировых координатах. Нужны, когда подграф кости не
+   * содержит геометрии и `Box3.setFromObject` пустой, — так устроен любой
+   * скиненный риг (`mixamoRig.ts`): меш один, а костей сотня.
+   */
+  worldBox?: (target: THREE.Box3) => void;
+  /**
+   * Шарнир вместо шара. Колено и локоть — это одна ось и одна сторона: без
+   * этого рэгдолл складывается в кучу, потому что шаровой сустав разрешает
+   * голени уехать вперёд через бедро, а предплечью — сквозь плечо.
+   *
+   * Пределы сустава отсчитываются от позы В МОМЕНТ НОКДАУНА, а не от нуля:
+   * тела рэгдолла создаются без поворота, поэтому «угол ноль» у сустава —
+   * это то, как боец стоял, когда его сбили. Отсюда `now()`.
+   */
+  hinge?: {
+    /** Анатомический предел сгиба, рад. Колено ~2.4, локоть ~2.6. */
+    max: number;
+    /** Знак сгиба вокруг оси X персонажа: +1 колено, −1 локоть. */
+    sign: 1 | -1;
+    /** Текущий сгиб в позе, рад (всегда ≥ 0). */
+    now(): number;
+  };
 }
 
 export interface BoxerRig {
@@ -80,6 +103,21 @@ export interface BoxerRig {
   /** Кости для рэгдолла в порядке «листья → корень». */
   ragdollBones(): RagdollBone[];
 }
+
+/**
+ * Шарниры колена и локтя одинаковы у обоих ригов, поэтому описаны здесь.
+ *
+ * Знак берётся из той же алгебры, что и поза (§6 документа о риге): по осям
+ * персонажа поворот вокруг +X уводит «вниз» назад, значит сгиб колена (пятка
+ * к ягодице) — это плюс, а сгиб локтя (кисть вперёд, к плечу) — минус.
+ * Драйвер хранит поворот с обратным знаком, отсюда `-rotation.x` у локтя.
+ */
+export const KNEE = (shin: THREE.Object3D): RagdollBone['hinge'] => ({
+  max: 2.4, sign: 1, now: () => Math.max(0, shin.rotation.x),
+});
+export const ELBOW = (elbow: THREE.Object3D): RagdollBone['hinge'] => ({
+  max: 2.6, sign: -1, now: () => Math.max(0, -elbow.rotation.x),
+});
 
 /** Снимок локального трансформа кости — чтобы вернуть её после рэгдолла. */
 interface BoneRest {
@@ -369,10 +407,14 @@ export function buildBoxer(opts: BoxerOptions): BoxerRig {
       // отцеплены, включает их габариты — и грудь получает капсулу с головой.
       return [
         { name: 'head', object: head, mass: 5, parent: null },
-        { name: 'armL', object: left.shoulder, mass: 3.5, parent: 'chest' },
-        { name: 'armR', object: right.shoulder, mass: 3.5, parent: 'chest' },
-        { name: 'legL', object: legs[0].thigh, mass: 9, parent: 'hips' },
-        { name: 'legR', object: legs[1].thigh, mass: 9, parent: 'hips' },
+        { name: 'foreL', object: left.elbow, mass: 1.8, parent: 'armL', hinge: ELBOW(left.elbow) },
+        { name: 'foreR', object: right.elbow, mass: 1.8, parent: 'armR', hinge: ELBOW(right.elbow) },
+        { name: 'armL', object: left.shoulder, mass: 2.2, parent: 'chest' },
+        { name: 'armR', object: right.shoulder, mass: 2.2, parent: 'chest' },
+        { name: 'shinL', object: legs[0].shin, mass: 4, parent: 'legL', hinge: KNEE(legs[0].shin) },
+        { name: 'shinR', object: legs[1].shin, mass: 4, parent: 'legR', hinge: KNEE(legs[1].shin) },
+        { name: 'legL', object: legs[0].thigh, mass: 7, parent: 'hips' },
+        { name: 'legR', object: legs[1].thigh, mass: 7, parent: 'hips' },
         { name: 'chest', object: chest, mass: 17, parent: 'head' },
         { name: 'waist', object: waist, mass: 12, parent: 'chest' },
         { name: 'hips', object: hips, mass: 10, parent: 'waist' },

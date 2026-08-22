@@ -7,8 +7,14 @@ import {
 } from '../world/boxerRig';
 import { BoxerRagdoll } from '../world/boxerRagdoll';
 import {
-  MOVES, canCancel, comboScaling, frameAdvantageOnBlock, reach, staminaScale, whiffsAgainst,
-  type Defense, type Move, type MoveId,
+  HIT_CLIPS, MOVE_CLIPS, STATE_CLIPS, applyFightClip, loadFightClips,
+  type ClipUse, type FightClips,
+} from '../world/fightClips';
+import { BOXER_MODELS, buildMixamoBoxer, loadBoxerModel } from '../world/mixamoRig';
+import {
+  MOVES, canCancel, comboScaling, frameAdvantageOnBlock, reach, resolveCancel, resolveInput,
+  staminaScale, whiffsAgainst,
+  type Defense, type Limb, type Move, type MoveId, type Stance, type Strength,
 } from '../game/fightingMoves';
 
 /**
@@ -61,6 +67,8 @@ const JUMPSQUAT = 4;
 /** Кадры приземления: прыжок обязан быть наказуем. */
 const LANDING = 6;
 /** Шаги: вперёд быстрее, чем назад — отступать стоит темпа. */
+/** Сколько метров настила проезжает боец за один шаг: длина шага. */
+const STEP_LENGTH = 0.9;
 const WALK_FWD = 0.085;
 const WALK_BACK = 0.062;
 /** Рывок: двойное нажатие в сторону. Метров за кадр и сколько кадров. */
@@ -116,6 +124,8 @@ class Fighter {
   move: Move | null = null;
   /** Кадров прошло с начала приёма — по ним анимируется удар. */
   moveElapsed = 0;
+  /** Вес мокапа: нарастает на входе в клип, гаснет на выходе. */
+  mocap = 0;
   moveTotal = 1;
   hasHitThisMove = false;
   hp = MAX_HP;
@@ -155,7 +165,7 @@ class Fighter {
    */
   poseSnap = false;
   knockdowns = 0;
-  buffered: { id: MoveId; frame: number } | null = null;
+  buffered: { intent: Intent; frame: number } | null = null;
   /** Приём, из которого разрешена отмена прямо сейчас (окно после попадания). */
   cancelFrom: Move | null = null;
   cancelWindow = 0;
@@ -174,6 +184,10 @@ class Fighter {
   flash = 0;
   headSnap = 0;
   weave = Math.random() * 10;
+  /** Фаза шага. Крутится не временем, а пройденным по рингу расстоянием. */
+  stepPhase = 0;
+  /** X на прошлом кадре отрисовки — из него берётся пройденный путь. */
+  poseX = 0;
 
   constructor(readonly rig: BoxerRig, readonly isPlayer: boolean) {}
 
@@ -195,10 +209,17 @@ class Fighter {
       || (this.move?.air === true && this.state !== 'landing');
   }
 
-  /** Свободен ли боец на земле: новый ввод либо идёт в дело, либо в буфер. */
+  /**
+   * Свободен ли боец на земле: новый ввод либо идёт в дело, либо в буфер.
+   *
+   * Уклон сюда входит, и это не мелочь. Пока он считался «свободным»,
+   * обработчик движения в том же кадре уводил бойца обратно в `idle` — то
+   * есть уклон жил один кадр вместо тринадцати. На экране его не было видно
+   * совсем, а в бою он не успевал ничего увести: `defense === 'slip'`
+   * действовало ровно один кадр из тринадцати заявленных.
+   */
   get busy(): boolean {
-    return this.state !== 'idle' && this.state !== 'walk'
-      && this.state !== 'crouch' && this.state !== 'slip';
+    return this.state !== 'idle' && this.state !== 'walk' && this.state !== 'crouch';
   }
 
   /** В полёте можно ударить ровно один раз. */
@@ -246,20 +267,39 @@ class Fighter {
   }
 }
 
+/**
+ * Что игрок попросил, а не какой приём выйдет.
+ *
+ * Буфер хранит именно намерение, и это не педантизм. Приём выбирается из
+ * стойки и из того, открыто ли окно отмены, — а эти два условия меняются
+ * между нажатием и моментом, когда буфер прочитают. Если положить в буфер
+ * готовый `MoveId`, «ПКМ во время джеба» превращается в оверхенд, которого
+ * из джеба не бывает, и связка молча не собирается.
+ *
+ * Два вида намерения — это две раскладки на одной игре: мышь говорит
+ * «слабый рукой», клавиатура называет приём по имени. Второе нужно витрине
+ * анимаций (кликать она не умеет) и тем, кому две кнопки тесноваты.
+ */
+type Intent =
+  | { kind: 'move'; id: MoveId }
+  | { kind: 'button'; strength: Strength; limb: Limb };
+
 export class FightingDemo implements Demo {
   readonly id = 'fighting';
   readonly title = ['🥊 Файтинг: фрейм-дата', '🥊 Fighting: frame data'] as const;
   readonly hint = [
-    '<b>A</b>/<b>D</b> шаги (назад = блок, двойное нажатие — рывок) · <b>Space</b> прыжок (в прыжке можно'
-    + ' перескочить соперника) · <b>S</b> присед · <b>Z</b>/<b>C</b> уклон<br>'
-    + '<b>J</b> джеб · <b>K</b> хук · <b>L</b> оверхенд · <b>I</b> апперкот (анти-эйр) · <b>U</b> по корпусу'
-    + ' · <b>O</b> подсечка. В прыжке те же кнопки дают удар и ногу с воздуха<br>'
-    + 'Связки — отменой по попаданию: джеб → хук → оверхенд. <b>H</b> хитбоксы · <b>R</b> заново',
-    '<b>A</b>/<b>D</b> walk (back = block, double tap = dash) · <b>Space</b> jump (you can cross over)'
+    '<b>A</b>/<b>D</b> шаги (назад = блок, двойное нажатие — рывок) · <b>Space</b> прыжок'
+    + ' · <b>S</b> присед · <b>Z</b>/<b>C</b> уклон<br>'
+    + '<b>ЛКМ</b> слабый удар · <b>ПКМ</b> сильный · с <b>Ctrl</b> те же кнопки бьют ногами.'
+    + ' Из приседа выходят другие приёмы, в прыжке — удар и нога с воздуха<br>'
+    + 'Связки — той же кнопкой по попаданию: ЛКМ, ПКМ, ПКМ = джеб → хук → оверхенд.'
+    + ' <b>H</b> хитбоксы · <b>R</b> заново',
+    '<b>A</b>/<b>D</b> walk (back = block, double tap = dash) · <b>Space</b> jump'
     + ' · <b>S</b> crouch · <b>Z</b>/<b>C</b> slip<br>'
-    + '<b>J</b> jab · <b>K</b> hook · <b>L</b> overhand · <b>I</b> uppercut (anti-air) · <b>U</b> body shot'
-    + ' · <b>O</b> sweep. In the air the same keys give an air punch and an air kick<br>'
-    + 'Chain by cancelling on hit: jab → hook → overhand. <b>H</b> hitboxes · <b>R</b> restart',
+    + '<b>LMB</b> light attack · <b>RMB</b> heavy · hold <b>Ctrl</b> and the same buttons kick.'
+    + ' Crouching gives different moves, in the air a punch and a kick<br>'
+    + 'Chain with the same button on hit: LMB, RMB, RMB = jab → hook → overhand.'
+    + ' <b>H</b> hitboxes · <b>R</b> restart',
   ] as const;
   readonly category = ['⚔️ Экшен и боёвка', '⚔️ Action & Combat'] as const;
   readonly tags = [
@@ -281,6 +321,7 @@ export class FightingDemo implements Demo {
   private boxHelpers: THREE.LineSegments[] = [];
   private readonly boxGroup = new THREE.Group();
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeMouse: (() => void) | null = null;
 
   // Реквизит и мелкая физика
   private props: Array<{ body: RAPIER.RigidBody; mesh: THREE.Object3D }> = [];
@@ -309,6 +350,8 @@ export class FightingDemo implements Demo {
 
   /** Замедление на нокдауне: 1 — обычная скорость. */
   private timeScale = 1;
+  /** Запечённый мокап. Пустая карта — играем на одной позе-цели. */
+  private clips: FightClips = new Map();
   private readonly tmp = new THREE.Vector3();
 
   async init(ctx: DemoContext): Promise<void> {
@@ -331,14 +374,14 @@ export class FightingDemo implements Demo {
     this.scene.add(this.boxGroup);
     this.boxGroup.visible = false;
 
-    this.player = this.spawnFighter({
-      skin: 0xd9a271, trunks: 0x2f7fd6, gloves: 0x2a5ea8, hair: 0x2c1f18,
-      build: 0.45, face: 3, hairStyle: 0, lowDetail: ctx.tier === 'low',
-    }, true);
-    this.bot = this.spawnFighter({
-      skin: 0x8a5a3b, trunks: 0xc0392b, gloves: 0x8e2f26, hair: 0x120d0a,
-      build: 0.75, face: 7, hairStyle: 4, lowDetail: ctx.tier === 'low',
-    }, false);
+    // Мокап не обязателен: без него боец двигается позой-целью, как раньше.
+    this.clips = await loadFightClips().catch((err) => {
+      console.warn('[fighting] клипы не загрузились, анимация на позе-цели:', err);
+      return new Map();
+    });
+    const [blue, red] = await this.loadRigs(ctx);
+    this.player = this.spawnFighter(blue, true);
+    this.bot = this.spawnFighter(red, false);
 
     this.buildProps();
     this.buildSweatPool(ctx.tier === 'low' ? 8 : 20);
@@ -360,14 +403,50 @@ export class FightingDemo implements Demo {
       const id = KEY_TO_MOVE[code];
       // Буферизуем ВСЕГДА: нажатие чуть раньше выхода из recovery должно
       // засчитаться, иначе связка физически не собирается (§6 документа).
-      if (id) this.player.buffered = { id, frame: this.frame };
+      if (id) this.buffer({ kind: 'move', id });
+    });
+
+    // Мышь: левая — слабый удар, правая — сильный, Ctrl переводит удар на
+    // ноги. Модификатор читается из самого события, а не из `isDown`:
+    // браузер отдаёт состояние Ctrl вместе с нажатием, и это единственный
+    // способ не разъехаться, если клавишу отпустили в том же кадре.
+    this.unsubscribeMouse = this.ctx.input.onPointerButton((button, ev) => {
+      if (button !== 0 && button !== 2) return;
+      this.buffer({
+        kind: 'button',
+        strength: button === 2 ? 'heavy' : 'light',
+        limb: ev.ctrlKey || this.ctx.input.isDown('ControlLeft')
+          || this.ctx.input.isDown('ControlRight') ? 'kick' : 'punch',
+      });
     });
     this.pushStatus();
+  }
+
+  private buffer(intent: Intent): void {
+    this.player.buffered = { intent, frame: this.frame };
+  }
+
+  /**
+   * Намерение → приём в нейтрали. Клавиша называет приём сама, мышь — нет,
+   * и за неё решает таблица раскладки из фрейм-даты (`resolveInput`).
+   */
+  private neutralMove(f: Fighter, intent: Intent): MoveId | null {
+    const stance: Stance = f.airborne ? 'air' : (f.crouching ? 'crouch' : 'stand');
+    if (intent.kind === 'button') return resolveInput(intent.strength, intent.limb, stance);
+    return stance === 'air' ? (AIR_VERSION[intent.id] ?? null) : intent.id;
+  }
+
+  /** То же, но внутри окна отмены: продолжение берётся из `cancelInto`. */
+  private cancelMove(from: Move, intent: Intent): MoveId | null {
+    if (intent.kind === 'button') return resolveCancel(from, intent.strength, intent.limb);
+    return canCancel(from, intent.id) ? intent.id : null;
   }
 
   exit(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribeMouse?.();
+    this.unsubscribeMouse = null;
   }
 
   fixedUpdate(): void {
@@ -461,7 +540,7 @@ export class FightingDemo implements Demo {
 
     // Воздух: ровно один удар за прыжок, и он выбирается из наземной кнопки.
     if (f.canAirAttack && f.buffered) {
-      const airId = AIR_VERSION[f.buffered.id];
+      const airId = this.neutralMove(f, f.buffered.intent);
       f.buffered = null;
       if (airId && f.stamina >= MOVES[airId].stamina) {
         f.airAttackUsed = true;
@@ -473,23 +552,24 @@ export class FightingDemo implements Demo {
     if (f.airborne || f.state === 'jumpsquat' || f.state === 'landing' || f.state === 'dash') return;
 
     // Отмена в связку: приём можно прервать сразу после попадания.
-    if (f.buffered && f.cancelWindow > 0 && f.cancelFrom
-      && canCancel(f.cancelFrom, f.buffered.id) && f.stamina >= MOVES[f.buffered.id].stamina) {
-      this.startMove(f, f.buffered.id);
-      f.buffered = null;
-      return;
+    if (f.buffered && f.cancelWindow > 0 && f.cancelFrom) {
+      const next = this.cancelMove(f.cancelFrom, f.buffered.intent);
+      if (next && f.stamina >= MOVES[next].stamina) {
+        this.startMove(f, next);
+        f.buffered = null;
+        return;
+      }
     }
 
     if (f.busy) return;
 
     if (f.buffered) {
-      const move = MOVES[f.buffered.id];
-      if (f.stamina >= move.stamina) {
-        this.startMove(f, f.buffered.id);
-        f.buffered = null;
+      const id = this.neutralMove(f, f.buffered.intent);
+      f.buffered = null;
+      if (id && f.stamina >= MOVES[id].stamina) {
+        this.startMove(f, id);
         return;
       }
-      f.buffered = null;
     }
 
     // Прыжок читается из буфера, а не из удержания: иначе зажатый Space
@@ -608,11 +688,15 @@ export class FightingDemo implements Demo {
     let intent: MoveId;
     if (p.state === 'recovery') intent = 'hook';                 // окно наказания
     else if (p.state === 'crouch') intent = 'sweep';
-    else if (p.holdingBack) intent = Math.random() < 0.45 ? 'body' : (Math.random() < 0.5 ? 'sweep' : 'overhand');
+    // Против гарда бот бьёт по выносливости, и ноги здесь — лучший
+    // инструмент: фронт-кик снимает гарда втрое больше джеба.
+    else if (p.holdingBack) intent = pick(['body', 'frontKick', 'frontKick', 'sweep', 'overhand']);
     else if (gap < jabRange * 0.8) intent = Math.random() < 0.35 ? 'uppercut' : 'jab';
-    else intent = Math.random() < 0.5 ? 'jab' : 'hook';
+    // Дальняя нога достаёт оттуда, откуда рука уже не дотягивается, — но
+    // стоит 15 кадров замаха, так что видно её издалека.
+    else intent = pick(['jab', 'hook', 'frontKick', 'roundhouse']);
 
-    if (reach(MOVES[intent]) < gap) intent = 'overhand';
+    if (reach(MOVES[intent]) < gap) intent = reach(MOVES.roundhouse) >= gap ? 'roundhouse' : 'overhand';
     if (b.stamina < MOVES[intent].stamina) intent = 'jab';
     if (b.stamina >= MOVES[intent].stamina) this.startMove(b, intent);
     // Устал — реагирует медленнее: усталость видно по поведению, не только по полосе.
@@ -887,6 +971,9 @@ export class FightingDemo implements Demo {
     // Первый кадр подъёма ставится без интерполяции: иначе боец на глазах
     // «всплывает» из настила в стойку и обратно вниз.
     f.poseSnap = true;
+    // Боец встаёт там, куда упал, — путь «из старого X в новый» шагом не был.
+    f.poseX = f.x;
+    f.stepPhase = 0;
 
     // Три нокдауна — технический нокаут. Иначе раунд не кончается никогда.
     if (f.knockdowns >= 3 || f.hp <= 0) {
@@ -1003,12 +1090,25 @@ export class FightingDemo implements Demo {
     const elR = d.elbowR.clone();
     let thighL = 0;
     let thighR = 0;
-    let shinBend = 0;
+    // Голени раздельные: в шаге сгибается только та нога, что идёт вперёд.
+    let shinL = 0;
+    let shinR = 0;
 
     // Постоянное покачивание: боксёр не стоит столбом ни одного кадра.
     // В воздухе и на подъёме его нет — там телом распоряжается не боец.
     f.weave += dt * (f.state === 'idle' ? 1.7 : 0.9);
     const w = f.weave;
+
+    // Путь, пройденный по настилу с прошлого кадра, — единственный честный
+    // источник темпа шага: стопа обязана уходить назад ровно с той
+    // скоростью, с какой едет тело, иначе она скользит по рингу. Знак берём
+    // относительно взгляда, чтобы отход назад крутил цикл в обратную сторону.
+    const travel = (f.x - f.poseX) * f.facing;
+    f.poseX = f.x;
+    if (f.state === 'walk') f.stepPhase += (Math.PI * travel) / STEP_LENGTH;
+    // Вне шага фаза возвращается к нулю, а не замирает: следующий шаг иначе
+    // начинался бы с занесённой ноги, и первый кадр прыгал.
+    else f.stepPhase *= Math.exp(-6 * dt);
     const sway = f.airborne || f.state === 'getup' ? 0 : 1;
     bodyRotZ += Math.sin(w) * 0.055 * sway;
     bodyRotX += Math.sin(w * 2) * 0.028 * sway;
@@ -1023,11 +1123,51 @@ export class FightingDemo implements Demo {
     bodyRotX += tired * 0.12;
 
     switch (f.state) {
+      case 'crouch': {
+        // Своей позы у приседа не было вообще: он опирался на клип блока,
+        // который опускает голову всего на 14 см. По силуэту присед не
+        // отличался от стойки — а от него зависит, пройдёт удар в голову
+        // или нет, и игрок обязан видеть разницу.
+        bodyRotX = 0.3;
+        bodyPosY -= 0.24;
+        hipsY -= 0.3;
+        thighL = thighR = 1.05;
+        shinL = shinR = -1.5;
+        headRotX = -0.12;
+        shL.set(-1.15, 0.3, -0.15);
+        shR.set(-1.15, -0.3, 0.15);
+        elL.set(-2.05, 0, 0.25);
+        elR.set(-2.05, 0, -0.25);
+        break;
+      }
       case 'walk': {
-        const stride = Math.sin(w * 5) * 0.4;
-        thighL = stride;
-        thighR = -stride;
-        bodyPosY -= 0.02;
+        // Шаг — это не «ноги-ножницы»: без сгиба колена и подъёма стопы
+        // прямые ноги просто разъезжаются, и движение читается как скольжение.
+        // Колено сгибает та нога, что идёт вперёд, вторая толкает и почти
+        // прямая; таз при этом подпрыгивает вдвое чаще шага.
+        //
+        // Темп задаёт `stepPhase` — он крутится пройденным расстоянием, а не
+        // временем. Раньше фаза шла от `weave` со скоростью 4.5 рад/с, то
+        // есть полный цикл за 1.4 с, а боец за это время проезжал семь
+        // метров: ноги переступали раз, пока тело пролетало через весь ринг.
+        // Именно это и выглядит как «еле-еле передвигает ноги» — не малая
+        // амплитуда, а разошедшиеся темп ног и скорость движения.
+        const phase = f.stepPhase;
+        const swing = Math.sin(phase);
+        // Колено сгибается не тогда, когда нога впереди, а когда она
+        // проносится ПОД телом, и распрямляется к постановке на настил —
+        // это и есть разница между шагом и болтанием ноги. Раньше сгиб
+        // совпадал по фазе с выносом бедра, нога поджималась в крайней
+        // передней точке и стопа вообще не уезжала вперёд: в замере обе
+        // стопы всё время висели позади таза.
+        const pass = Math.cos(phase);   // +1 — нога проходит под корпусом
+        thighL = swing * 0.55;
+        thighR = -swing * 0.55;
+        shinL = -0.1 - Math.max(0, pass) * 0.9;
+        shinR = -0.1 - Math.max(0, -pass) * 0.9;
+        bodyPosY -= 0.02 + Math.abs(swing) * 0.035;
+        hipsY -= Math.abs(swing) * 0.03;
+        bodyRotY += swing * 0.06;
         break;
       }
       case 'dash':
@@ -1043,7 +1183,7 @@ export class FightingDemo implements Demo {
         bodyPosY -= 0.2;
         hipsY -= 0.24;
         thighL = thighR = 0.8;
-        shinBend = -0.9;
+        shinL = shinR = -0.9;
         break;
       case 'air': {
         // В полёте ноги поджаты, гард поднят. Ноги разводятся к вершине и
@@ -1052,7 +1192,7 @@ export class FightingDemo implements Demo {
         bodyRotX = 0.2 - up * 0.25;
         thighL = 1.15 - up * 0.35;
         thighR = 0.75 + up * 0.25;
-        shinBend = -1.35 + up * 0.4;
+        shinL = shinR = -1.35 + up * 0.4;
         hipsY -= 0.05;
         shL.x -= 0.15;
         shR.x -= 0.15;
@@ -1064,7 +1204,7 @@ export class FightingDemo implements Demo {
         bodyPosY -= 0.24;
         hipsY -= 0.26;
         thighL = thighR = 0.95;
-        shinBend = -1.05;
+        shinL = shinR = -1.05;
         break;
       case 'airhit':
         // Сбит в воздухе: тело раскрыто, руки в стороны — «потерял контроль».
@@ -1073,7 +1213,7 @@ export class FightingDemo implements Demo {
         headRotX = -0.5;
         thighL = -0.5;
         thighR = -0.2;
-        shinBend = -0.3;
+        shinL = shinR = -0.3;
         shL.set(-2.2, 0.6, 0.7);
         shR.set(-2.2, -0.6, -0.7);
         elL.set(-0.4, 0, 0);
@@ -1085,20 +1225,29 @@ export class FightingDemo implements Demo {
         hipsY -= 0.26;
         headRotX = -0.35;
         thighL = thighR = 0.85;
-        shinBend = -0.95;
+        shinL = shinR = -0.95;
         shL.set(-1.0, 0.3, 0.4);
         elL.set(-2.0, 0, 0.4);
         shR.set(-1.0, -0.3, -0.4);
         elR.set(-2.0, 0, -0.4);
         break;
       case 'slip': {
+        // Уклон длится 13 кадров, а поза доезжает до цели экспоненциально —
+        // за это время она успевает пройти чуть больше половины пути. Значит
+        // цель обязана быть с запасом: со «спокойными» числами боец на
+        // экране едва качался, и было непонятно, почему удар прошёл мимо.
         const s = f.slip || 1;
-        bodyRotZ = 0.45 * s;
-        bodyRotY = d.bodyRot.y + 0.25 * s;
-        bodyRotX = 0.14;
-        bodyPosX = -0.14 * s;
-        bodyPosY -= 0.12;
-        headRotZ = -0.35 * s;
+        bodyRotZ = 0.8 * s;
+        bodyRotY = d.bodyRot.y + 0.3 * s;
+        bodyRotX = 0.2;
+        bodyPosX = -0.24 * s;
+        bodyPosY -= 0.2;
+        hipsY -= 0.12;
+        thighL = 0.35;
+        thighR = 0.2;
+        shinL = shinR = -0.5;
+        headRotZ = -0.55 * s;
+        headRotX = 0.1;
         break;
       }
       case 'blockstun':
@@ -1120,7 +1269,7 @@ export class FightingDemo implements Demo {
           bodyPosY -= 0.14;
           hipsY -= 0.1;
           thighL = thighR = 0.5;
-          shinBend = -0.5;
+          shinL = shinR = -0.5;
           shL.set(-1.1, 0.5, 0.5);
           shR.set(-1.1, -0.5, -0.5);
         } else {
@@ -1144,12 +1293,38 @@ export class FightingDemo implements Demo {
           const t = THREE.MathUtils.clamp((f.moveElapsed - move.startup) / move.active, 0, 1);
           thighL = lerp(1.2, move.id === 'airKick' ? -0.5 : 0.9, t);
           thighR = 0.9;
-          shinBend = lerp(-1.3, move.id === 'airKick' ? -0.15 : -1.0, t);
+          shinL = shinR = lerp(-1.3, move.id === 'airKick' ? -0.15 : -1.0, t);
           hipsY -= 0.05;
+          // Руки в воздухе всё равно бьют: у удара с воздуха они и есть приём,
+          // у ноги — противовес, и обе роли рисует один и тот же выпад.
+          this.posePunch(move, f.moveElapsed, { shL, elL, shR, elR }, (rx, ry, py) => {
+            bodyRotX += rx; bodyRotY = d.bodyRot.y + ry; bodyPosY += py;
+          });
+        } else if (move.limb === 'kick') {
+          // Удар ногой рисует поза-цель целиком. Мокапную ногу сюда взять
+          // нельзя — актёр в клипе уезжает корпусом и опирается на руки
+          // (см. `fightClips.ts`), а боец привязан к своей точке и «лёг» бы
+          // в воздухе. Из клипа берётся только верх, и то вполсилы.
+          const legs = this.poseKick(move, f.moveElapsed);
+          thighL = legs.thighL; shinL = legs.shinL;
+          thighR = legs.thighR; shinR = legs.shinR;
+          hipsY += legs.hipsY;
+          bodyPosY += legs.bodyPosY;
+          bodyRotX = legs.bodyRotX;
+          bodyRotY = d.bodyRot.y + legs.bodyRotY;
+          // Руки в ударе ногой не бьют, а держат равновесие: гард поднят,
+          // дальняя рука уходит в сторону противовесом. Без этого боец машет
+          // ногой, сохраняя стойку боксёра, и кадр читается как ошибка.
+          const g = legs.swing;
+          shL.set(shL.x - 0.5 * g, shL.y + 0.5 * g, shL.z + 0.3 * g);
+          shR.set(shR.x - 0.5 * g, shR.y - 0.5 * g, shR.z - 0.3 * g);
+          elL.set(elL.x - 0.5 * g, 0, elL.z);
+          elR.set(elR.x - 0.5 * g, 0, elR.z);
+        } else {
+          this.posePunch(move, f.moveElapsed, { shL, elL, shR, elR }, (rx, ry, py) => {
+            bodyRotX += rx; bodyRotY = d.bodyRot.y + ry; bodyPosY += py;
+          });
         }
-        this.posePunch(move, f.moveElapsed, { shL, elL, shR, elR }, (rx, ry, py) => {
-          bodyRotX += rx; bodyRotY = d.bodyRot.y + ry; bodyPosY += py;
-        });
         break;
       }
       case 'getup': {
@@ -1163,7 +1338,7 @@ export class FightingDemo implements Demo {
         hipsY -= lerp(0.7, 0.0, rise);
         thighL = lerp(1.7, 0, rise);
         thighR = lerp(1.35, 0, rise);
-        shinBend = lerp(-1.9, 0, rise);
+        shinL = shinR = lerp(-1.9, 0, rise);
         headRotX = lerp(-0.5, 0, rise);
         shL.set(lerp(-0.15, d.shoulderL.x, rise), 0.35, lerp(0.9, d.shoulderL.z, rise));
         shR.set(lerp(-0.15, d.shoulderR.x, rise), -0.35, lerp(-0.9, d.shoulderR.z, rise));
@@ -1183,16 +1358,28 @@ export class FightingDemo implements Demo {
     rig.body.position.x += (bodyPosX - rig.body.position.x) * k;
     rig.body.position.y += (bodyPosY - rig.body.position.y) * k;
     rig.hips.position.y += (hipsY - rig.hips.position.y) * k;
-    rig.head.rotation.x += (headRotX - rig.head.rotation.x) * k;
-    rig.head.rotation.z += (headRotZ - rig.head.rotation.z) * k;
+    // Каждый сустав возвращается по ВСЕМ трём осям, а не только по тем, что
+    // меняет поза. Мокап оставляет повороты по y и z, и если их не тянуть к
+    // нулю, остаток живёт вечно: после первого же удара таз оказывался
+    // повёрнут на 0.23 рад навсегда, бёдра — на 0.8, и боец шёл боком с
+    // вывернутыми назад коленями, а шаги переставали читаться вообще.
+    lerpAxes(rig.hips.rotation, 0, 0, 0, k);
+    lerpAxes(rig.head.rotation, headRotX, 0, headRotZ, k);
     lerpEuler(rig.shoulderL.rotation, shL, k);
     lerpEuler(rig.elbowL.rotation, elL, k);
     lerpEuler(rig.shoulderR.rotation, shR, k);
     lerpEuler(rig.elbowR.rotation, elR, k);
-    rig.thighL.rotation.x += (thighL - rig.thighL.rotation.x) * k;
-    rig.thighR.rotation.x += (thighR - rig.thighR.rotation.x) * k;
-    rig.shinL.rotation.x += (shinBend - rig.shinL.rotation.x) * k;
-    rig.shinR.rotation.x += (shinBend - rig.shinR.rotation.x) * k;
+    // Знак ног инвертируется здесь, и это не косметика. По осям персонажа
+    // поворот вокруг +X тянет «вниз» к «назад» (-Y → -Z), то есть плюс на
+    // бедре уводит колено ЗА спину. Позы же во всём switch выше написаны в
+    // человеческом смысле: у бедра плюс — колено вперёд, у голени минус —
+    // пятка к ягодице. Без инверсии присед садился на колени, вывернутые
+    // назад, а в шаге нога заносилась не в ту сторону — на коробках это
+    // читалось как «странная походка», на скиненной модели видно сразу.
+    lerpAxes(rig.thighL.rotation, -thighL, 0, 0, k);
+    lerpAxes(rig.thighR.rotation, -thighR, 0, 0, k);
+    lerpAxes(rig.shinL.rotation, -shinL, 0, 0, k);
+    lerpAxes(rig.shinR.rotation, -shinR, 0, 0, k);
 
     // Squash & stretch: перчатка растягивается на выпаде, грудь — на замахе.
     const restore = 1 - Math.exp(-10 * dt);
@@ -1206,6 +1393,64 @@ export class FightingDemo implements Demo {
     }
     const chestTarget = punching ? 1.14 : 1;
     rig.chest.scale.z += (chestTarget - rig.chest.scale.z) * restore;
+
+    // Мокап поверх собранной позы — последним, потому что он её перетягивает,
+    // а не складывается с ней.
+    this.applyMocap(f, dt);
+  }
+
+  /**
+   * Домешать запечённый клип к позе бойца.
+   *
+   * Прогресс берётся из фрейм-даты, а не из длительности клипа: мокапный джеб
+   * идёт 0.93 с, игровой — 0.27 с, и растягивать надо игру по клипу, а не
+   * наоборот. Вход в клип за три кадра — иначе на первом кадре приёма поза
+   * прыгает из стойки в мокапную.
+   */
+  private applyMocap(f: Fighter, dt: number): void {
+    if (this.clips.size === 0) return;
+    let use: ClipUse | undefined;
+    let progress = 0;
+
+    switch (f.state) {
+      case 'startup':
+      case 'active':
+      case 'recovery':
+        use = f.move ? MOVE_CLIPS[f.move.id] : undefined;
+        progress = f.moveTotal > 0 ? f.moveElapsed / f.moveTotal : 0;
+        break;
+      case 'hitstun':
+        use = HIT_CLIPS[f.lastHitZone === 'body' ? 'body' : 'head'];
+        progress = 1 - f.stateFrame / Math.max(1, f.move?.hitstun ?? 16);
+        break;
+      case 'getup':
+        use = STATE_CLIPS.getup;
+        progress = 1 - f.stateFrame / GETUP_FRAMES;
+        break;
+      case 'blockstun':
+        use = STATE_CLIPS.blockstun;
+        progress = 1 - f.stateFrame / Math.max(1, f.move?.blockstun ?? 12);
+        break;
+      case 'guardbreak':
+        use = STATE_CLIPS.guardbreak;
+        progress = 1 - f.stateFrame / 26;
+        break;
+      case 'crouch':
+        use = STATE_CLIPS.crouch;
+        break;
+      default:
+        // Блок — не отдельное состояние, а шаг назад: боец идёт спиной
+        // вперёд и тем самым закрывается (см. `holdingBack`).
+        if (f.holdingBack && !f.airborne && !f.busy) use = STATE_CLIPS.block;
+        break;
+    }
+
+    if (!use) {
+      f.mocap = Math.max(0, f.mocap - dt * 9);
+      return;
+    }
+    f.mocap = Math.min(1, f.mocap + dt * 20);
+    applyFightClip(f.rig, this.clips, use, progress, f.mocap);
   }
 
   /**
@@ -1213,6 +1458,99 @@ export class FightingDemo implements Demo {
    * кадров, выпад — `active`, возврат — `recovery`. Поменяли число в
    * `fightingMoves.ts` — анимация поехала за ним, рассинхрона не бывает.
    */
+  /**
+   * Поза удара ногой: занос, выхлест, возврат — три фазы, а не одна дуга.
+   *
+   * Первая версия вела всю ногу одной полуволной синуса: бедро поднималось
+   * и голень выпрямлялась одновременно. На бумаге это «нога махнула», в
+   * кадре — выпад: прямая нога выносится вперёд низом, и фронт-кик не
+   * отличить от шага. Настоящий удар ногой устроен иначе, и разница ровно
+   * в том, что колено и голень живут в РАЗНЫХ фазах:
+   *
+   * 1. **Занос** (кадры `startup`): колено идёт вверх, голень при этом
+   *    ПОДЖИМАЕТСЯ — пятка к ягодице. Стопа остаётся у тела.
+   * 2. **Выхлест** (кадры `active`): бедро стоит, голень выстреливает.
+   *    Именно здесь стопа доходит до хитбокса, и это не совпадение —
+   *    активные кадры и есть кадры попадания.
+   * 3. **Возврат** (кадры `recovery`): сначала складывается голень (быстро,
+   *    за первые 40 % фазы), и только потом опускается бедро.
+   *
+   * Из этого же выводится и «вес»: опорная нога сгибается по мере заноса,
+   * корпус отклоняется назад противовесом, таз доворачивается в удар.
+   */
+  private poseKick(move: Move, elapsed: number): {
+    thighL: number; shinL: number; thighR: number; shinR: number;
+    hipsY: number; bodyPosY: number; bodyRotX: number; bodyRotY: number; swing: number;
+  } {
+    const s = Math.max(1, move.startup);
+    const a = Math.max(1, move.active);
+    const r = Math.max(1, move.recovery);
+    /** Занос: колено поднято. Держится всю активную фазу. */
+    let lift: number;
+    /** Выхлест: доля распрямления голени из поджатого положения. */
+    let snap: number;
+    // Обе фазы — ВНУТРИ замаха: к первому активному кадру нога обязана быть
+    // уже выпрямлена, потому что активные кадры и есть кадры попадания.
+    // Пока выхлест шёл по активным кадрам, стопа доезжала до цели уже на
+    // возврате, то есть попадал хитбокс, а нога — нет.
+    const chamberEnd = s * 0.55;
+    if (elapsed <= chamberEnd) {
+      lift = THREE.MathUtils.smoothstep(elapsed / chamberEnd, 0, 1);
+      snap = 0;
+    } else if (elapsed <= s + a) {
+      lift = 1;
+      snap = THREE.MathUtils.smoothstep((elapsed - chamberEnd) / (s - chamberEnd), 0, 1);
+    } else {
+      const p = THREE.MathUtils.clamp((elapsed - s - a) / r, 0, 1);
+      lift = 1 - THREE.MathUtils.smoothstep(p, 0, 1);
+      snap = Math.max(0, 1 - p * 2.5);
+    }
+
+    const lead = move.hand === 'lead';
+    // Передняя нога — сторона −X, как и передняя рука; таз доворачивается в
+    // ту же сторону, куда уходит нога.
+    const sign = lead ? 1 : -1;
+
+    // Насколько высоко идёт колено и насколько голень выпрямляется в пике.
+    // Хайкик бьёт в голову, фронт-кик — по бедру, подсечка — по настилу.
+    const height = move.id === 'roundhouse' ? 2.3 : (move.id === 'frontKick' ? 1.65 : 1.15);
+    const extend = move.id === 'roundhouse' ? 1 : (move.id === 'frontKick' ? 0.9 : 0.75);
+    const high = move.id === 'roundhouse';
+
+    // Поджим голени растёт вместе с заносом: чем выше колено, тем сильнее
+    // сложена нога. Голень при этом НИКОГДА не переходит через ноль — плюс
+    // на ней означает колено, вывернутое назад.
+    // Глубина заноса. У фронт-кика она БОЛЬШЕ, чем у хайкика, и это не
+    // ошибка: у него шесть кадров замаха против пятнадцати, а поза едет к
+    // цели экспоненциально и за шесть кадров проходит чуть больше половины
+    // пути. Чтобы занос читался, цель обязана быть с запасом — та же
+    // поправка, что и у уклона (см. `case 'slip'`).
+    const chamber = move.id === 'frontKick' ? 1.55 : 1;
+    const fold = (0.25 + 1.05 * lift) * chamber;
+    const kickThigh = -0.15 + lift * height;
+    const kickShin = -fold + snap * fold * extend;
+    // Опорная нога подседает по мере заноса: без этого боец машет ногой,
+    // стоя на прямой второй, и вес не читается вообще.
+    const baseThigh = -0.1 - lift * 0.15;
+    const baseShin = -0.3 - lift * 0.5;
+
+    return {
+      thighL: lead ? kickThigh : baseThigh,
+      shinL: lead ? kickShin : baseShin,
+      thighR: lead ? baseThigh : kickThigh,
+      shinR: lead ? baseShin : kickShin,
+      // Таз опускается умеренно: с вынесенной вперёд ногой глубокий присед
+      // загонял стопу на 9 см под настил.
+      // Хайкик — исключение: он бьёт в голову, и приседать под него нельзя.
+      // Каждый сантиметр приседа снимается с высоты стопы один к одному.
+      hipsY: high ? -0.02 : -0.08 - lift * 0.1,
+      bodyPosY: high ? lift * 0.06 : -lift * 0.1,
+      bodyRotX: -0.12 - lift * (0.2 + height * 0.16),
+      bodyRotY: -sign * lift * (high ? 0.62 : 0.42),
+      swing: lift,
+    };
+  }
+
   private posePunch(
     move: Move,
     elapsed: number,
@@ -1256,9 +1594,19 @@ export class FightingDemo implements Demo {
         break;
       case 'body':
         // По корпусу: тот же выпад, но ниже и с подседом.
-        sh.set(lerp(sh.x, -1.0, t), lerp(sh.y, sign * 0.2, t), lerp(sh.z, -sign * 0.12, t));
-        el.set(lerp(el.x, -0.45, t), 0, el.z);
-        body(0.34 * t, -sign * 0.35 * t, -0.12 * t);
+        //
+        // Разворот корпуса здесь вдвое меньше, чем у хука, и это замер, а не
+        // вкус: на −0.35 рад плечо уезжало вбок вместе с корпусом, и в кадре
+        // попадания перчатка уходила на 30 см вбок при 40 см вперёд —
+        // боец бил мимо соперника. Прямой в корпус — это подсед и выпад,
+        // а не скручивание.
+        sh.set(lerp(sh.x, -1.15, t), lerp(sh.y, sign * 0.04, t), lerp(sh.z, -sign * 0.04, t));
+        // Локоть выпрямляется почти полностью. В первой версии он оставался
+        // согнут на 0.45 рад, и это, а не разворот корпуса, держало руку у
+        // тела: в кадре попадания перчатка была на 11 см впереди стойки —
+        // то есть удар по корпусу физически не доставал никуда.
+        el.set(lerp(el.x, -0.15, t), 0, el.z);
+        body(0.34 * t, -sign * 0.2 * t, -0.12 * t);
         break;
       default:
         // Прямой: плечо вперёд, локоть распрямляется в ноль.
@@ -1442,8 +1790,39 @@ export class FightingDemo implements Demo {
     return g;
   }
 
-  private spawnFighter(look: Parameters<typeof buildBoxer>[0], isPlayer: boolean): Fighter {
-    const rig = buildBoxer(look);
+  /**
+   * Два бойца — это X Bot и Y Bot из общей библиотеки `assets/`.
+   *
+   * Модели заменяют процедурного боксёра целиком, но не заменяют анимацию:
+   * клипов в этих FBX нет (внутри одна техническая дорожка `mixamo.com`
+   * длиной в кадр), поэтому позы по-прежнему собирает `poseRig()` — см.
+   * `mixamoRig.ts` о том, как боевая поза надевается на чужой скелет.
+   *
+   * Если модель не загрузилась (нет файла, оффлайн-сборка стенда), демо не
+   * падает, а собирает боксёра из коробок: вкладка стенда должна открываться
+   * всегда, даже без ассетов.
+   */
+  private async loadRigs(ctx: DemoContext): Promise<[BoxerRig, BoxerRig]> {
+    const blue = { skin: 0xd9a271, trunks: 0x2f7fd6, gloves: 0x2a5ea8, hair: 0x2c1f18,
+      build: 0.45, face: 3, hairStyle: 0, lowDetail: ctx.tier === 'low' };
+    const red = { skin: 0x8a5a3b, trunks: 0xc0392b, gloves: 0x8e2f26, hair: 0x120d0a,
+      build: 0.75, face: 7, hairStyle: 4, lowDetail: ctx.tier === 'low' };
+    try {
+      const [x, y] = await Promise.all([
+        loadBoxerModel(BOXER_MODELS.x),
+        loadBoxerModel(BOXER_MODELS.y),
+      ]);
+      return [
+        buildMixamoBoxer({ source: x, ...blue }),
+        buildMixamoBoxer({ source: y, ...red }),
+      ];
+    } catch (err) {
+      console.warn('[fighting] модели не загрузились, боксёры из коробок:', err);
+      return [buildBoxer(blue), buildBoxer(red)];
+    }
+  }
+
+  private spawnFighter(rig: BoxerRig, isPlayer: boolean): Fighter {
     this.scene.add(rig.root);
     const f = new Fighter(rig, isPlayer);
 
@@ -1671,6 +2050,16 @@ export class FightingDemo implements Demo {
   }
 }
 
+/**
+ * Вторая раскладка: клавиша называет приём по имени.
+ *
+ * Основная — мышь (см. `resolveInput`), и она умышленно короче: две кнопки
+ * и Ctrl. Клавиатурная остаётся по двум причинам, и обе не про удобство.
+ * Витрина анимаций и генератор библиотеки кормят игру нажатиями клавиш —
+ * кликать они не умеют, а снять надо каждый приём поимённо, включая хук,
+ * которого в мышиной таблице нет. И у мыши нет способа попросить конкретный
+ * приём: там его выбирают стойка и сила.
+ */
 const KEY_TO_MOVE: Record<string, MoveId | undefined> = {
   KeyJ: 'jab',
   KeyK: 'hook',
@@ -1678,6 +2067,8 @@ const KEY_TO_MOVE: Record<string, MoveId | undefined> = {
   KeyI: 'uppercut',
   KeyU: 'body',
   KeyO: 'sweep',
+  KeyN: 'frontKick',
+  KeyM: 'roundhouse',
 };
 
 /**
@@ -1688,10 +2079,12 @@ const KEY_TO_MOVE: Record<string, MoveId | undefined> = {
 const AIR_VERSION: Partial<Record<MoveId, MoveId>> = {
   jab: 'airPunch',
   body: 'airPunch',
-  hook: 'airKick',
-  overhand: 'airKick',
-  uppercut: 'airKick',
+  hook: 'airPunch',
+  overhand: 'airPunch',
+  uppercut: 'airPunch',
   sweep: 'airKick',
+  frontKick: 'airKick',
+  roundhouse: 'airKick',
 };
 
 interface WorldBox { minX: number; maxX: number; minY: number; maxY: number }
@@ -1706,8 +2099,20 @@ function overlaps(a: WorldBox, b: WorldBox): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
+/** Равновероятный выбор из списка: у бота решения случайные, но не мутные. */
+function pick<T>(options: readonly T[]): T {
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * t;
+}
+
+/** То же, но по числам: у поворотов, где своя ось только одна, нулей больше. */
+function lerpAxes(target: THREE.Euler, x: number, y: number, z: number, k: number): void {
+  target.x += (x - target.x) * k;
+  target.y += (y - target.y) * k;
+  target.z += (z - target.z) * k;
 }
 
 function lerpEuler(target: THREE.Euler, goal: THREE.Euler, k: number): void {

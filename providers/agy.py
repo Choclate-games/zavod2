@@ -14,6 +14,8 @@ from PIL import Image, ImageDraw
 from providers.base import AIProvider, ImageProvider, NoneImageProvider, T
 from providers.local import LocalImageProvider
 
+from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
+
 class AGYQuotaTracker:
     """
     Отслеживает использование Antigravity CLI (AGY): скользящий 5-часовой лимит
@@ -57,6 +59,19 @@ class AGYQuotaTracker:
         self.limit_5h = int(os.getenv("AGY_LIMIT_5H", "50"))
         self.limit_weekly = int(os.getenv("AGY_LIMIT_WEEKLY", "500"))
         self._migrate_legacy_history()
+
+    @staticmethod
+    def has_manual_limits(family: str) -> bool:
+        """
+        Задан ли лимит семейства руками в .env.
+
+        Значения по умолчанию (50 запросов за 5 часов, 500 за неделю) — это
+        догадка, а не тариф. Рисовать по ним полосу остатка нельзя: именно
+        такие «проценты» и расходились с тем, что показывает сам Antigravity.
+        """
+        suffix = family.upper()
+        return any((os.getenv(name) or "").strip()
+                   for name in (f"AGY_LIMIT_5H_{suffix}", f"AGY_LIMIT_WEEKLY_{suffix}"))
 
     def family_limits(self, family: str) -> tuple[int, int]:
         """Лимиты (5ч, неделя) для семейства моделей."""
@@ -215,6 +230,44 @@ class AGYQuotaTracker:
             pass
 
 
+def _envelope_response(raw: str) -> str:
+    """
+    Текст ответа из конверта `--output-format json`.
+
+    Если конверта нет (старая версия CLI, ошибка разбора) — возвращаем вывод
+    как есть: потерять ответ из-за учёта токенов было бы дороже, чем не
+    посчитать токены.
+    """
+    try:
+        data = json.loads(raw or "")
+    except ValueError:
+        return raw
+    if not isinstance(data, dict):
+        return raw
+    response = data.get("response")
+    return response.strip() if isinstance(response, str) and response.strip() else raw
+
+
+def _envelope_tokens(raw: str) -> int:
+    """Расход из конверта `--output-format json` (0 — конверта нет)."""
+    try:
+        data = json.loads(raw or "")
+    except ValueError:
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    usage = data.get("usage") or (data.get("result") or {}).get("usage") or {}
+    if not isinstance(usage, dict):
+        return 0
+    total = usage.get("total_tokens")
+    if total is None:
+        total = (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
+    try:
+        return max(0, int(total or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 class AGYSession:
     """Управление активной двухсторонней сессией с процессом agy CLI."""
 
@@ -292,6 +345,8 @@ class AGYProvider(AIProvider):
         # раньше --print-timeout нельзя, иначе задача умрёт на середине.
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else self._blocking_timeout()
         self.quota_tracker = AGYQuotaTracker()
+        # Общий с остальными агентами журнал расхода токенов по проектам.
+        self.usage_tracker = AgentUsageTracker()
 
     def resolve_cli(self) -> Optional[str]:
         """Возвращает абсолютный путь к исполняемому файлу agy или None."""
@@ -574,9 +629,16 @@ class AGYProvider(AIProvider):
         work_dir = str(Path(cwd).resolve()) if cwd and Path(cwd).is_dir() else None
         instruction, tmpdir, schema_file = self._stage_prompt(prompt, schema_json)
 
+        # Простой текст CLI отдаёт без единой цифры расхода, а конверт json —
+        # с блоком usage. Просим конверт всегда, ответ достаём из поля response:
+        # иначе весь пайплайн спецификаций (два десятка вызовов) в статистике
+        # выглядел бы бесплатным.
+        plain_text = output_format == "text"
+        wire_format = "json" if plain_text else output_format
+
         def attempt(with_effort: bool):
             cmd = self._build_command(
-                instruction, output_format=output_format, yolo=yolo, with_effort=with_effort,
+                instruction, output_format=wire_format, yolo=yolo, with_effort=with_effort,
                 extra_dir=tmpdir, schema_file=schema_file
             )
             try:
@@ -603,13 +665,23 @@ class AGYProvider(AIProvider):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
+        # Расход по проектам считается для всех агентов одинаково, включая AGY:
+        # иначе в статистике фабрики зияла бы дыра размером с основной агент.
+        usage_key = self.usage_tracker.record(
+            "agy", model=self.model, prompt_len=len(prompt),
+            project=project_from_path(cwd),
+        )
+        # В режиме --output-format json CLI возвращает конверт с блоком usage —
+        # это точная цифра расхода, гадать по тексту ответа не нужно.
+        self.usage_tracker.add_tokens(usage_key, _envelope_tokens(result.stdout))
 
         if result.returncode != 0:
             err_msg = (result.stderr or "").strip() or (result.stdout or "").strip()[-500:] \
                 or f"Процесс завершился с кодом {result.returncode}"
             raise RuntimeError(f"AGY CLI ошибка выполнения: {err_msg}")
 
-        return result.stdout.strip()
+        raw = result.stdout.strip()
+        return _envelope_response(raw) if plain_text else raw
 
     def stream_run(
         self,
@@ -671,6 +743,12 @@ class AGYProvider(AIProvider):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+
+        project = project_from_path(work_dir)
+        usage_key = self.usage_tracker.record(
+            "agy", model=self.model, prompt_len=len(prompt), project=project
+        )
+        spent = {"tokens": 0}
 
         seen_conversation: Dict[str, str] = {}
 
@@ -781,6 +859,7 @@ class AGYProvider(AIProvider):
                             effort_rejected = True
                             continue
                         reported_error = True
+                    spent["tokens"] += int(event.get("tokens") or 0)
                     emit(event)
             finally:
                 if proc.stdout and not proc.stdout.closed:
@@ -823,6 +902,13 @@ class AGYProvider(AIProvider):
             shutil.rmtree(staged_dir, ignore_errors=True)
 
         self.quota_tracker.record_usage(prompt_len=len(prompt), model=self.model or "default")
+
+        # Отчёт CLI — основной источник; если его не было, достаём число из консоли.
+        tokens = spent["tokens"] or sniff_tokens(raw)
+        self.usage_tracker.add_tokens(usage_key, tokens)
+        if not stopped:
+            emit({"kind": "meta",
+                  "text": self.usage_tracker.spend_report("agy", project, tokens)})
         return code, raw
 
     def list_models(self, timeout_seconds: int = 60) -> Dict[str, Any]:

@@ -12,6 +12,14 @@ export interface PointerSample {
 }
 
 type KeyHandler = (code: string, ev: KeyboardEvent) => void;
+/**
+ * Нажатие кнопки указателя как СОБЫТИЕ: 0 — левая, 2 — правая.
+ *
+ * Отдельно от `activePointers` по той же причине, по какой клавиши отдаются
+ * событием: `down: true` в снимке живёт, пока кнопку держат, и удар «на
+ * удержании» повторялся бы каждый кадр.
+ */
+type ButtonHandler = (button: number, ev: PointerEvent) => void;
 
 /**
  * Единый источник ввода для всех демо стенда.
@@ -31,6 +39,7 @@ export class InputHub {
   private readonly pointers = new Map<number, PointerSample>();
   private keyDownHandlers = new Set<KeyHandler>();
   private keyUpHandlers = new Set<KeyHandler>();
+  private buttonHandlers = new Set<ButtonHandler>();
   private locked = false;
   private lockDelta = new THREE.Vector2();
 
@@ -43,6 +52,9 @@ export class InputHub {
     document.addEventListener('visibilitychange', this.releaseAll);
 
     canvas.addEventListener('pointerdown', this.onPointerDown);
+    // Без этого правая кнопка открывает системное меню поверх канваса, и
+    // «сильный удар» превращается в «Сохранить изображение как…».
+    canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('pointercancel', this.onPointerUp);
@@ -76,10 +88,20 @@ export class InputHub {
     };
   }
 
+  /**
+   * Подписка на нажатие кнопки указателя. Возвращает функцию отписки — как
+   * `onKey`, и снимается тем же `clearSubscribers` при смене вкладки.
+   */
+  onPointerButton(handler: ButtonHandler): () => void {
+    this.buttonHandlers.add(handler);
+    return () => { this.buttonHandlers.delete(handler); };
+  }
+
   /** Снять всех подписчиков — вызывается хостом при смене вкладки. */
   clearSubscribers(): void {
     this.keyDownHandlers.clear();
     this.keyUpHandlers.clear();
+    this.buttonHandlers.clear();
   }
 
   // ───────────────────────────────────────────────────────────── указатель
@@ -135,7 +157,11 @@ export class InputHub {
   }
 
   private readonly onPointerDown = (ev: PointerEvent): void => {
-    this.canvas.setPointerCapture(ev.pointerId);
+    // Подписчики — первыми, и захват в try. `setPointerCapture` кидает
+    // NotFoundError на любом указателе, которого браузер не считает
+    // активным, и тогда весь обработчик обрывался до удара.
+    this.buttonHandlers.forEach((h) => h(ev.button, ev));
+    try { this.canvas.setPointerCapture(ev.pointerId); } catch { /* не критично */ }
     this.pointers.set(ev.pointerId, {
       id: ev.pointerId,
       ndc: this.toNdc(ev, new THREE.Vector2()),

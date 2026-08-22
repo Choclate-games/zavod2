@@ -366,7 +366,8 @@ async function loadGallery() {
     const body = el("div", "body");
     body.appendChild(el("div", "name", `🎮 ${esc(p.title)}`));
     body.appendChild(el("div", "meta",
-      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`));
+      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`
+      + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)} токенов` : "")));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p));
     line.appendChild(el("span", "dim", p.created_label ? `создана ${esc(p.created_label)}` : ""));
@@ -499,7 +500,8 @@ async function loadProjects() {
     }
     item.appendChild(el("div", "name", `${p.archived ? "📦 " : "🎮 "}${esc(p.title)}`));
     item.appendChild(el("div", "meta",
-      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код" : "📄 только ТЗ"}`));
+      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
+      + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p, "tiny"));
     line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
@@ -1677,8 +1679,17 @@ function freshUrl(url) {
   return url + (url.includes("?") ? "&" : "?") + "factory_fresh=" + Date.now();
 }
 
-function navigateGameTab(tab, url) {
-  const target = freshUrl(url);
+/**
+ * Игра всегда открывается через обёртку фабрики `/play`: сверху остаётся
+ * полоска с пресетами размера вьюпорта, сама игра живёт в iframe под ней.
+ */
+function viewerUrl(url, slug) {
+  if (!url) return url;
+  return `/play?url=${encodeURIComponent(freshUrl(url))}&slug=${encodeURIComponent(slug || "")}`;
+}
+
+function navigateGameTab(tab, url, slug) {
+  const target = viewerUrl(url, slug);
   if (!tab || tab.closed) { window.open(target, "_blank", "noopener"); return; }
   try { tab.location.replace(target); } catch { tab.location = target; }
   try { tab.focus(); } catch { /* фокус не обязателен */ }
@@ -1690,7 +1701,7 @@ function resolveGameTab(slug, url) {
   if (!pending || !url) return;
   delete state.gameTabs[slug];
   if (pending.timer) clearTimeout(pending.timer);
-  navigateGameTab(pending.tab, url);
+  navigateGameTab(pending.tab, url, slug);
 }
 
 function dropGameTab(slug, message) {
@@ -1738,14 +1749,6 @@ async function loadPlayState() {
   $("play-log").scrollTop = $("play-log").scrollHeight;
   $("play-url").value = st.url || "";
   setPlayStatus(st.running, st.starting, st.url);
-  const frame = $("play-frame");
-  if (frame) {
-    if (st.running && st.url) {
-      if (!frame.src.startsWith(st.url)) frame.src = st.url;
-    } else if (!st.running) {
-      frame.src = "about:blank";
-    }
-  }
 }
 
 function setPlayStatus(running, starting, url) {
@@ -1864,8 +1867,15 @@ function quotaColor(percent) {
 
 function quotaCard(card) {
   const node = el("div", "quota-card");
-  node.appendChild(el("h3", "", esc(card.title)));
+  const head = el("div", "row spread");
+  head.appendChild(el("h3", "", esc(card.title)));
+  if (card.badge) {
+    const badge = el("span", `quota-badge ${card.state || "local"}`, esc(card.badge));
+    head.appendChild(badge);
+  }
+  node.appendChild(head);
   node.appendChild(el("div", "sub", esc(card.subtitle || "")));
+  if (card.spent) node.appendChild(el("div", "quota-spent", `🎟 ${esc(card.spent)}`));
   card.rows.forEach((row) => {
     const wrap = el("div", "quota-row");
     wrap.appendChild(el("div", "title", esc(row.title)));
@@ -1887,7 +1897,20 @@ function quotaCard(card) {
     }
     node.appendChild(wrap);
   });
-  if (!card.live && card.key && card.key !== "gemini" && card.key !== "claude_family") {
+  // У OpenCode остаток доступен только в личном кабинете: вместо кнопки
+  // «/usage», которой у него нет, даём прямую ссылку туда.
+  if (card.console_url) {
+    const link = el("a", "btn small", "🌐 Открыть личный кабинет и посмотреть лимиты");
+    link.href = card.console_url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.style.marginTop = "10px";
+    link.style.display = "inline-block";
+    node.appendChild(link);
+  }
+  if (!card.live && card.supports_usage_command !== false
+      && card.key && card.key !== "gemini" && card.key !== "claude_family"
+      && !card.console_url) {
     const btn = el("button", "btn small", "▶ Открыть терминал и выполнить /usage");
     btn.style.marginTop = "10px";
     btn.onclick = async () => {
@@ -1913,6 +1936,81 @@ async function loadQuota() {
   const agentsBox = $("quota-agents");
   agentsBox.innerHTML = "";
   data.agents.forEach((card) => agentsBox.appendChild(quotaCard(card)));
+
+  renderUsage(data.usage);
+}
+
+/* ── Расход токенов: фабрика целиком и каждый проект ──────────────────── */
+
+function usageTile(label, value, note) {
+  const tile = el("div", "usage-tile");
+  tile.appendChild(el("div", "u-label", esc(label)));
+  tile.appendChild(el("div", "u-value", esc(value)));
+  if (note) tile.appendChild(el("div", "u-note", esc(note)));
+  return tile;
+}
+
+function renderUsage(usage) {
+  if (!usage) return;
+  const { overall, projects } = usage;
+
+  $("usage-since").textContent =
+    `учёт с ${overall.since} · обновлено ${overall.updated_at}`;
+
+  const tiles = $("usage-tiles");
+  tiles.innerHTML = "";
+  tiles.append(
+    usageTile("Всего токенов", overall.tokens_human, `${overall.runs} запусков агентов`),
+    usageTile("Сегодня", overall.tokens_today_human, "с полуночи"),
+    usageTile("За 5 часов", overall.tokens_5h_human, "текущее окно лимита"),
+    usageTile("За неделю", overall.tokens_weekly_human, "скользящие 7 суток"),
+    usageTile("В среднем за запуск", overall.avg_per_run_human,
+              `проектов в учёте: ${overall.projects_count}`),
+  );
+
+  const agentsBox = $("usage-agents");
+  agentsBox.innerHTML = "";
+  overall.agents.forEach((row) => {
+    const line = el("div", "usage-agent");
+    line.appendChild(el("div", "u-name", esc(row.label || row.agent)));
+    const bar = el("div", "u-bar");
+    const fill = el("div");
+    fill.style.width = `${Math.max(2, Math.min(100, row.share))}%`;
+    bar.appendChild(fill);
+    line.appendChild(bar);
+    line.appendChild(el("div", "u-num",
+      `${esc(row.tokens_human)} · ${row.share}% · ${row.runs} зап.`));
+    agentsBox.appendChild(line);
+  });
+
+  const box = $("usage-projects");
+  box.innerHTML = "";
+  if (!projects.length) {
+    box.appendChild(el("p", "dim", "Запусков агентов ещё не было — считать нечего."));
+    return;
+  }
+  projects.forEach((row) => {
+    const line = el("div", "usage-project");
+    const head = el("div", "row spread");
+    const name = el("div", "u-name", esc(row.label));
+    if (!row.exists && row.project) name.classList.add("gone");
+    head.appendChild(name);
+    head.appendChild(el("div", "u-num", `${esc(row.tokens_human)} токенов`));
+    line.appendChild(head);
+
+    const bar = el("div", "u-bar");
+    const fill = el("div");
+    fill.style.width = `${Math.max(2, Math.min(100, row.share))}%`;
+    bar.appendChild(fill);
+    line.appendChild(bar);
+
+    const by = row.agents.map((a) => `${a.label || a.agent}: ${a.tokens_human}`).join(" · ");
+    line.appendChild(el("div", "u-note", esc(
+      `${row.share}% расхода · ${row.runs} запусков · неделя: ${row.tokens_weekly_human} · `
+      + `${row.first_at} → ${row.last_at}${by ? " · " + by : ""}`
+      + (row.project && !row.exists ? " · каталог проекта удалён" : ""))));
+    box.appendChild(line);
+  });
 }
 
 function startQuotaTimer() {
@@ -2117,7 +2215,7 @@ function handleEvent(topic, data) {
       if (data.slug === state.playSlug) {
         $("play-url").value = data.url;
         setPlayStatus(true, false, data.url);
-        toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(freshUrl(data.url), "_blank", "noopener")]]);
+        toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(viewerUrl(data.url, data.slug), "_blank", "noopener")]]);
       }
       loadServers();
       break;
@@ -2394,12 +2492,14 @@ function bindPlay() {
   $("btn-play-start").onclick = startPlay;
   $("btn-play-open").onclick = () => {
     const url = $("play-url").value.trim();
-    if (url) window.open(freshUrl(url), "_blank", "noopener");
+    if (url) window.open(viewerUrl(url, $("play-project").value), "_blank", "noopener");
     else toast("Игра", "URL неизвестен — сначала запустите dev-сервер.", "warn");
   };
   $("btn-play-window").onclick = async () => {
-    const res = await api(`/api/play/${encodeURIComponent($("play-project").value)}/window`,
-      { body: { url: $("play-url").value.trim() } });
+    const slug = $("play-project").value;
+    const url = $("play-url").value.trim();
+    const res = await api(`/api/play/${encodeURIComponent(slug)}/window`,
+      { body: { url: url ? location.origin + viewerUrl(url, slug) : "" } });
     if (res.status === "error") toast("Окно предпросмотра", res.message, "err");
   };
   $("btn-play-build").onclick = () => api(`/api/play/${encodeURIComponent($("play-project").value)}/build`, { method: "POST" });
@@ -2418,41 +2518,6 @@ function bindPlay() {
     await loadServers();
     loadPlayState();
   };
-
-  const frameModeBtn = $("btn-play-mode-frame");
-  const logModeBtn = $("btn-play-mode-log");
-  const frameContainer = $("play-iframe-container");
-  const logContainer = $("play-log");
-  const frameControls = $("play-frame-controls");
-  const clearBtn = $("btn-play-clear");
-
-  if (frameModeBtn && logModeBtn) {
-    frameModeBtn.onclick = () => {
-      frameModeBtn.classList.add("primary");
-      logModeBtn.classList.remove("primary");
-      frameContainer.classList.remove("hidden");
-      logContainer.classList.add("hidden");
-      frameControls.classList.remove("hidden");
-      clearBtn.classList.add("hidden");
-    };
-    logModeBtn.onclick = () => {
-      logModeBtn.classList.add("primary");
-      frameModeBtn.classList.remove("primary");
-      logContainer.classList.remove("hidden");
-      frameContainer.classList.add("hidden");
-      frameControls.classList.add("hidden");
-      clearBtn.classList.remove("hidden");
-    };
-  }
-  if ($("btn-frame-desktop")) {
-    $("btn-frame-desktop").onclick = () => { $("play-frame").className = "play-iframe"; };
-    $("btn-frame-tablet").onclick = () => { $("play-frame").className = "play-iframe tablet"; };
-    $("btn-frame-mobile").onclick = () => { $("play-frame").className = "play-iframe mobile"; };
-    $("btn-frame-reload").onclick = () => {
-      const f = $("play-frame");
-      if (f && f.src && f.src !== "about:blank") f.src = f.src;
-    };
-  }
 }
 
 function applyTheme(theme) {

@@ -42,6 +42,8 @@ const ctx = {
     isDown: (code: string) => code === 'KeyD' && (tick % 240) < 60,
     moveVector: (out = new THREE.Vector2()) => out.set(0, 0),
     onKey: (down: (code: string) => void) => { keyHandler = down; return noop; },
+    // Мышь головным прогонам не нужна: приёмы вызываются клавишами.
+    onPointerButton: () => noop,
     clearSubscribers: noop,
     releaseAll: noop,
     endFrame: noop,
@@ -64,6 +66,53 @@ const longest = Math.max(...Object.values(MOVES).map((m) => reach(m)));
 const demo = new FightingDemo();
 await demo.init(ctx);
 demo.enter();
+
+// ───────────────────────────────────────────── модели вместо коробок
+// Демо умеет собрать боксёра процедурно, если FBX не загрузился, — и тогда
+// матч ниже прошёл бы «зелёным», проверив риг, которого в игре нет.
+{
+  const p0 = (demo as unknown as { player: { rig: { root: THREE.Object3D } } }).player;
+  let skinned = 0;
+  p0.rig.root.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned++; });
+  console.log('');
+  console.log('Модель бойца:');
+  check('боец собран из скиненной модели, а не из запасных коробок', skinned > 0, `мешей ${skinned}`);
+
+  p0.rig.root.updateWorldMatrix(true, true);
+  const rig = (demo as unknown as { player: { rig: Record<string, THREE.Object3D> } }).player.rig;
+  const headP = new THREE.Vector3();
+  const gloveP = new THREE.Vector3();
+  rig.head.getWorldPosition(headP);
+  rig.gloveL.getWorldPosition(gloveP);
+  const box = new THREE.Box3().setFromObject(rig.root);
+  check('рост модели ≈ 1.78 м', Math.abs(box.max.y - box.min.y - 1.78) < 0.06,
+    `= ${(box.max.y - box.min.y).toFixed(2)}`);
+  // Перчатка у подбородка — единственный дешёвый способ поймать перепутанные
+  // оси драйвера: при них гард уезжает к животу, а матч всё равно идёт.
+  check('гард поднят: перчатка не ниже 25 см от головы', headP.y - gloveP.y < 0.25,
+    `= ${(headP.y - gloveP.y).toFixed(2)} м`);
+  check('перчатка вынесена вперёд', gloveP.z > 0.1, `= ${gloveP.z.toFixed(2)}`);
+}
+
+// ───────────────────────────────────────── уклон обязан длиться свои кадры
+// Уклон не «занимал» бойца, и обработчик движения в том же кадре возвращал
+// его в стойку: заявленные 13 кадров неуязвимости превращались в один, и
+// заметить это можно было только счётом кадров — на глаз уклона просто не
+// было видно.
+{
+  const p0 = (demo as unknown as { player: Record<string, any> }).player;
+  keyHandler?.('KeyZ');
+  let slipFrames = 0;
+  for (let i = 0; i < 20; i++) {
+    demo.fixedUpdate(1 / 60);
+    demo.update(1 / 60, 0);
+    if (p0.state === 'slip') slipFrames++;
+  }
+  console.log('');
+  console.log('Уклон:');
+  check('уклон живёт больше 8 кадров', slipFrames > 8, `= ${slipFrames}`);
+  check('уклон всё-таки заканчивается', slipFrames < 20, `= ${slipFrames}`);
+}
 
 const KEYS = ['KeyJ', 'KeyK', 'KeyL', 'KeyI', 'KeyU', 'KeyO'];
 let hits = 0;
@@ -109,7 +158,11 @@ for (tick = 0; tick < TICKS; tick++) {
   knockdowns += Math.max(0, p.knockdowns - prevKd[0]) + Math.max(0, b.knockdowns - prevKd[1]);
   prevKd = [p.knockdowns, b.knockdowns];
 
-  if (b.state === 'active' && !b.move?.air) {
+  // Замер только по «живой» цели: улетающего от нокдауна соперника бот
+  // догнать не может, и такой кадр говорит не о дистанции удара, а о том,
+  // что жертву унесло. Раз в несколько прогонов это давало ложный провал.
+  const victimSteady = !p.ragdoll && !p.airborne && p.state !== 'knockdown' && p.state !== 'airhit';
+  if (b.state === 'active' && !b.move?.air && victimSteady) {
     maxGapWhileAttacking = Math.max(maxGapWhileAttacking, Math.abs(p.x - b.x));
   }
 
