@@ -477,9 +477,12 @@ async function runGate(slug) {
  * картинку сам, пропорции расходились, а под кадром висели три строки
  * подписей — в колонке шириной 268 пикселей они и съедали карточку. */
 function coverBox(project, opts = {}) {
-  const box = el("div",
-    ["cover16", project.has_preview ? "" : "empty", opts.title ? "titled" : ""]
-      .filter(Boolean).join(" "));
+  const box = el("div", [
+    "cover16",
+    project.has_preview ? "" : "empty",
+    opts.title ? "titled" : "",
+    opts.gate ? `gate-${esc(project.gate_state || "none")}` : "",
+  ].filter(Boolean).join(" "));
   if (project.has_preview) {
     const img = el("img");
     img.src = `/api/projects/${encodeURIComponent(project.slug)}/preview.png?v=${project.preview_mtime}`;
@@ -733,18 +736,19 @@ async function loadProjects() {
   }
   shown.forEach((p) => {
     const item = el("div", `list-item ${p.slug === state.project ? "active" : ""} ${p.archived ? "archived" : ""}`);
-    item.appendChild(coverBox(p, {
-      title: true,
-      gate: true,
-      mark: p.archived ? "📦 " : (p.favorite ? "⭐ " : "🎮 "),
-    }));
-    item.appendChild(el("div", "meta",
-      `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
+    item.appendChild(coverBox(p, { gate: true }));
+
+    const info = el("div", "info");
+    info.appendChild(el("div", "name",
+      `${p.archived ? "📦 " : (p.favorite ? "⭐ " : "🎮 ")}${esc(p.title)}`));
+    info.appendChild(el("div", "meta",
+      `${esc(p.genre)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p, "tiny"));
     line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
-    item.appendChild(line);
+    info.appendChild(line);
+    item.appendChild(info);
     item.onclick = () => selectProject(p.slug);
     box.appendChild(item);
   });
