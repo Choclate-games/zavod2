@@ -430,6 +430,36 @@ function visibleProjects(showArchived, mode, query = "") {
 }
 
 /* Оценка игры: пять звёзд, повторный клик по той же звезде снимает оценку. */
+// Строка приёмки на карточке. Оценка «⭐ 8.6/10» ставится моделью до того, как
+// написана первая строка кода, и об игре не говорит ничего. Эти числа получены
+// запуском: сборка, кадры, вес, ошибки в консоли.
+// Запуск приёмки из витрины. Долгая операция — уходит заданием студии, а
+// результат прилетает обратно в карточку через projects.changed.
+async function runGate(slug) {
+  const answer = await api(`/api/projects/${encodeURIComponent(slug)}/gate`, { body: {} });
+  if (answer && answer.status === "error") {
+    toast("Приёмка", answer.message || "Запустить не удалось", "error");
+    return;
+  }
+  toast("Приёмка пошла", "Сборка, запуск в браузере, проверки — смотрите журнал студии");
+}
+
+function gateBadge(p) {
+  const m = p.gate_metrics || {};
+  if (p.gate_state === "pass") {
+    const parts = [];
+    if (m.fps != null) parts.push(`${m.fps} FPS`);
+    if (m.bundle_mb != null) parts.push(`${m.bundle_mb} МБ`);
+    if (m.first_frame_ms != null) parts.push(`кадр ${m.first_frame_ms} мс`);
+    return `✅ приёмка${parts.length ? " · " + parts.join(" · ") : ""}`;
+  }
+  if (p.gate_state === "fail") {
+    const failed = (p.gate_failed || []).slice(0, 4).join(", ");
+    return `❌ приёмка${failed ? ": " + failed : ""}`;
+  }
+  return "◌ приёмка не гонялась";
+}
+
 function starWidget(project, size = "") {
   const box = el("span", `stars ${size}`);
   for (let i = 1; i <= 5; i += 1) {
@@ -539,8 +569,9 @@ async function loadGallery() {
     const body = el("div", "body");
     body.appendChild(el("div", "name", `🎮 ${esc(p.title)}`));
     body.appendChild(el("div", "meta",
-      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`
+      `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)} токенов` : "")));
+    body.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p));
     line.appendChild(el("span", "dim", p.created_label ? `создана ${esc(p.created_label)}` : ""));
@@ -553,6 +584,10 @@ async function loadGallery() {
     play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
     const open = el("button", "btn small", "📄 ТЗ");
     open.onclick = (e) => { e.stopPropagation(); selectProject(p.slug); };
+    const gate = el("button", "btn small icon-only", "🧪");
+    gate.title = "Прогнать приёмку: собрать, открыть в браузере, проверить";
+    gate.disabled = !p.playable;
+    gate.onclick = (e) => { e.stopPropagation(); runGate(p.slug); };
     const rename = el("button", "btn small icon-only", "✏️");
     rename.title = "Переименовать игру";
     rename.onclick = (e) => { e.stopPropagation(); renameProject(p); };
@@ -562,7 +597,7 @@ async function loadGallery() {
     const remove = el("button", "btn small danger", "🗑");
     remove.title = "Удалить игру безвозвратно";
     remove.onclick = (e) => { e.stopPropagation(); deleteProject(p); };
-    actions.append(play, open, rename, archive, remove);
+    actions.append(play, gate, open, rename, archive, remove);
     card.appendChild(actions);
 
     card.onclick = () => selectProject(p.slug);
@@ -673,8 +708,9 @@ async function loadProjects() {
     }
     item.appendChild(el("div", "name", `${p.archived ? "📦 " : "🎮 "}${esc(p.title)}`));
     item.appendChild(el("div", "meta",
-      `${esc(p.genre)} · ${esc(p.renderer)} · ⭐ ${esc(p.score)}/10 · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
+      `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
+    item.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p, "tiny"));
     line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));

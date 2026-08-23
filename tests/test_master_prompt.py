@@ -205,11 +205,30 @@ def test_deferred_rules_keep_a_working_address():
         assert title in block, f"раздел {title} потерялся совсем"
 
 
-def test_mechanic_feedback_is_printed_once():
+def test_mechanic_is_a_digest_with_an_address_not_a_second_copy():
+    """Промпт не переписывает в себя `MECHANICS.md`.
+
+    Раньше механика печаталась здесь целиком — со слоями отклика, синергиями,
+    числовыми параметрами и псевдокодом тика, — и одна эта секция занимала треть
+    мастер-промпта рядом с документом, где лежало ровно то же самое. Агент
+    читает промпт целиком и до середины уже не помнит начала; подробности он
+    открывает тогда, когда пишет соответствующий код.
+
+    Остаться в промпте обязано то, без чего нельзя начать: что за механика, что
+    делает игрок и чем это не жанровый шаблон. Остальное — по адресу.
+    """
     concept = shooter_concept()
     prompt = PromptCompilerAgent().compile(make_ctx(concept))
-    assert prompt.count("Hit & Sensory Feedback") == 0, "подробный отклик уже есть, короткий дублирует"
-    assert "Слои отклика" in prompt
+    mechanic = concept.mechanics[0].name
+
+    assert mechanic in prompt, "без названия механики промпт бесполезен"
+    assert "**Вход игрока**" in prompt, "чем игрок управляет — остаётся в промпте"
+    assert f"раздел «Механика: {mechanic}»" in prompt, "адрес подробностей обязателен"
+
+    # Подробности живут в документе рядом и не дублируются здесь.
+    for moved in ("Слои отклика", "Псевдокод тика", "Синергии", "Числовые параметры"):
+        assert moved not in prompt, f"«{moved}» дублирует MECHANICS.md"
+    assert prompt.count("Hit & Sensory Feedback") == 0, "старый короткий отклик убран совсем"
 
 
 # --------------------------------------------------------------------------- приёмка

@@ -350,3 +350,6 @@ class GenerationMetadata(BaseSafeModel):
     scores: Dict[str, Any] = Field(default_factory=dict)
     generated_files: List[str] = Field(default_factory=list)
     validation_status: Dict[str, Any] = Field(default_factory=dict)
+    # Приёмка: то, что фабрика проверила запуском игры. Поле scores рядом —
+    # самооценка модели, выставленная до написания кода; путать их нельзя.
+    gate: Dict[str, Any] = Field(default_factory=dict)

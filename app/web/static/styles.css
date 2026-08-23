@@ -1881,3 +1881,11 @@ textarea {
 }
 .tts-row audio { height: 32px; max-width: 280px; }
 
+
+
+/* Приёмка на карточке проекта: зелёная — проверена запуском, красная —
+   провалена запуском, серая — не гонялась. Промежуточных состояний нет. */
+.meta.gate { font-variant-numeric: tabular-nums; }
+.meta.gate-pass { color: #4ade80; }
+.meta.gate-fail { color: #f87171; }
+.meta.gate-none { opacity: .55; }

@@ -247,6 +247,13 @@ async def project_rename(slug: str, request: Request) -> Dict[str, Any]:
     return service.rename_project(_slug(slug), str(payload.get("title") or ""))
 
 
+@app.post("/api/projects/{slug}/gate")
+async def project_gate(slug: str, request: Request) -> Dict[str, Any]:
+    """Прогон приёмки по требованию: сборка, статика и запуск в браузере."""
+    payload = await _body(request)
+    return service.start_gate(_slug(slug), payload)
+
+
 @app.post("/api/projects/{slug}/archive")
 async def project_archive(slug: str, request: Request) -> Dict[str, Any]:
     payload = await _body(request)

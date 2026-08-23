@@ -18,7 +18,7 @@ CHECK_SPEC_MJS = r"""#!/usr/bin/env node
  *
  * Зависимостей нет намеренно: скрипт обязан работать до npm install.
  */
-import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, extname, relative } from 'node:path'
 
 const ROOT = process.cwd()
@@ -170,6 +170,44 @@ if (!usesBridge) {
   config
     ? pass('C12', `Конфиг моста на месте (${relative(ROOT, config)})`)
     : fail('C12', 'Нет public/playgama-bridge-config.json — bridge.initialize() поймает 404 и площадка не ответит')
+}
+
+/* ── C13: мост площадки настоящий, а не одноимённый сервис ─────────────── */
+// Живой случай, стоивший этой проверки: игра «Снайпер: Призрачный Контракт»
+// имела `src/platform/BridgeService.ts`, звала его из `main.ts` на каждом шаге
+// загрузки и записала в DEVLOG.md, что «bootstrap с Playgama Bridge запущен и
+// функционирует». Никакого моста при этом не было: `@playgama/bridge` не стоял
+// в зависимостях и не подключался скриптом. Сервис вызывал сам себя, игра на
+// площадке не авторизовала бы никого и не сохранила бы ничего, а статическая
+// приёмка была полностью зелёной — C12 честно пропускал проверку, потому что
+// моста «нет», а того, что игра его изображает, не смотрел никто.
+const pkgRaw = read(join(ROOT, 'package.json'))
+let deps = {}
+try {
+  const parsed = JSON.parse(pkgRaw || '{}')
+  deps = { ...(parsed.dependencies || {}), ...(parsed.devDependencies || {}) }
+} catch { deps = {} }
+const bridgeDeclared = Object.keys(deps).some((name) => /playgama/i.test(name))
+const indexHtml = read(join(ROOT, 'index.html')) + read(join(ROOT, 'dist', 'index.html'))
+const bridgeScripted = /playgama[^"']*\.js|bridge\.js/i.test(indexHtml)
+// «Изображает мост» — это собственный сервис с таким именем или обращения к
+// его API. Одного слова в комментарии мало, поэтому смотрим на код.
+const claimsBridge = usesBridge ||
+  /BridgeService|PlaygamaService|playgama/i.test(bridgeText) ||
+  existsSync(join(ROOT, 'PLAYGAMA_INTEGRATION.md'))
+
+if (!claimsBridge) {
+  skip('C13', 'Игра не заявляет интеграцию с площадкой — подключать нечего')
+} else if (bridgeDeclared || bridgeScripted) {
+  pass('C13', bridgeDeclared
+    ? 'Мост площадки объявлен зависимостью проекта'
+    : 'Мост площадки подключён скриптом в index.html')
+} else {
+  fail('C13',
+    'Мост площадки только изображён: свой сервис есть, а @playgama/bridge не объявлен ' +
+    'ни в package.json, ни скриптом в index.html — на площадке не будет ни авторизации, ' +
+    'ни облачного сохранения, ни рекламы',
+    scan(codeFiles, /BridgeService|PlaygamaService/).slice(0, 4))
 }
 
 /* ── C5: одна точка сохранения ─────────────────────────────────────────── */
@@ -417,6 +455,22 @@ if (!existsSync(ACCEPTANCE)) {
 
 /* ── вывод ─────────────────────────────────────────────────────────────── */
 const failed = results.filter((r) => r.ok === false)
+
+// Отчёт на диск: по нему фабрика решает, что вернуть кодовому агенту на
+// доработку. Раньше приёмка существовала только в виде текста в терминале —
+// прочитать её мог человек и никто больше.
+try {
+  mkdirSync(join(ROOT, '.factory'), { recursive: true })
+  writeFileSync(join(ROOT, '.factory', 'spec-report.json'), JSON.stringify({
+    kind: 'spec',
+    at: new Date().toISOString(),
+    ok: failed.length === 0,
+    failed: failed.map((r) => r.id),
+    checks: results.map(({ id, text, ok, hits }) => ({ id, text, ok, hits: (hits || []).slice(0, 8) })),
+  }, null, 2), 'utf8')
+} catch (error) {
+  console.error(`(отчёт .factory/spec-report.json не записан: ${error && error.message})`)
+}
 for (const r of results) {
   const mark = r.ok === null ? '· ' : r.ok ? '✅' : '❌'
   console.log(`${mark} ${r.id}  ${r.text}`)

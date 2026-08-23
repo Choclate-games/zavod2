@@ -70,5 +70,15 @@
   ],
   "validation_status": {
     "status": "verified"
+  },
+  "gate": {
+    "ok": false,
+    "summary": "провалено 1 проверок: C13",
+    "phase": "",
+    "failed": [
+      "C13"
+    ],
+    "metrics": {},
+    "at": "2026-08-23T13:25:43"
   }
 }

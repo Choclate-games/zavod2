@@ -57,5 +57,36 @@
   ],
   "validation_status": {
     "status": "verified"
+  },
+  "gate": {
+    "ok": false,
+    "summary": "провалено 9 проверок: B1, B6, C1, C12, F1, G2, G6, G7, S2",
+    "phase": "",
+    "failed": [
+      "B1",
+      "B6",
+      "C1",
+      "C12",
+      "F1",
+      "G2",
+      "G6",
+      "G7",
+      "S2"
+    ],
+    "metrics": {
+      "fps": 27,
+      "framesTotal": 182,
+      "draws": 2184,
+      "drawsMobile": 2904,
+      "bundleBytes": 2873780,
+      "bundleFiles": 3,
+      "firstFrameMs": 1012,
+      "firstDrawMs": 1029,
+      "consoleErrors": 2,
+      "uiClickable": 4,
+      "uiText": 10,
+      "buildMs": 8635
+    },
+    "at": "2026-08-23T13:26:23"
   }
 }

@@ -105,9 +105,12 @@ def _run_check_spec(project: Path) -> str:
     (project / "scripts").mkdir(parents=True, exist_ok=True)
     script = project / "scripts" / "check-spec.mjs"
     script.write_text(CHECK_SPEC_MJS, encoding="utf-8")
-    done = subprocess.run(["node", str(script)], cwd=project,
-                          capture_output=True, text=True)
-    return done.stdout + done.stderr
+    # Кодировку задаём явно: скрипт печатает по-русски в UTF-8, а Python на
+    # Windows по умолчанию читает вывод процесса в кодировке консоли и падает
+    # на первой же букве отчёта.
+    done = subprocess.run(["node", str(script)], cwd=project, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+    return (done.stdout or "") + (done.stderr or "")
 
 
 def _minimal_project(tmp_path: Path) -> Path:

@@ -371,6 +371,68 @@ def rebuild_checklists(
         console.print(f"[yellow]Без чек-листа осталось: {len(missing)}[/yellow]")
 
 
+@app.command(name="gate", help="Прогнать приёмку игры: сборка, статика, запуск в браузере.")
+def gate(
+    game_id: str = typer.Argument(..., help="Слаг проекта в workspace/"),
+    fix: bool = typer.Option(False, "--fix", help="Показать задачу на починку, а не только отчёт"),
+    static_only: bool = typer.Option(False, "--static", help="Без запуска браузера — только чтение исходников"),
+):
+    """Та же приёмка, что идёт после каждой фазы сборки, но по требованию.
+
+    Нужна там, где игру правил человек или чат проекта: отчёт агента о
+    собственной работе основанием считаться перестал, а проверить как-то надо.
+    """
+    from app import acceptance, sandbox
+
+    project = sandbox.project_dir(game_id)
+    if not project.exists():
+        log_error(f"Проект '{game_id}' не найден в {sandbox.workspace_root()}")
+        raise typer.Exit(code=2)
+
+    report = acceptance.run_gate(project, on_log=lambda line: console.print(line, end=""),
+                                 with_smoke=not static_only)
+    acceptance.write_gate_report(project, report)
+    acceptance.stamp_generation(project, report)
+
+    console.print()
+    for check in (*report.spec, *report.smoke):
+        console.print(check.line())
+    console.print(f"\n[bold]{report.summary()}[/bold]")
+    if report.metrics_line():
+        console.print(f"[dim]{report.metrics_line()}[/dim]")
+
+    if report.ok:
+        log_success("Игра принята: проверено запуском, а не отчётом агента.")
+        return
+    if fix:
+        console.print("\n[bold cyan]Задача агенту:[/bold cyan]\n")
+        console.print(report.repair_task())
+    raise typer.Exit(code=1)
+
+
+@app.command(name="lessons", help="Пересобрать свод уроков фабрики из отчётов приёмки всех игр.")
+def lessons():
+    from app import gate_stats
+
+    summary = gate_stats.collect()
+    path = gate_stats.publish(summary)
+    log_success(f"Свод обновлён: {path}")
+    console.print(f"[dim]Игр с приёмкой: {summary['projects']}, зелёных: {summary['green']}[/dim]")
+
+    ranked = summary.get("ranked") or []
+    if not ranked:
+        console.print("[dim]Красных проверок пока нет — учиться не на чем.[/dim]")
+        return
+    table = Table(title="Чаще всего красное")
+    table.add_column("Проверка", style="cyan")
+    table.add_column("Что это")
+    table.add_column("Игр", justify="right")
+    table.add_column("Прогонов", justify="right")
+    for row in ranked[:12]:
+        table.add_row(row["id"], row["title"] or "—", str(row["projects"]), str(row["runs"]))
+    console.print(table)
+
+
 @app.command(name="gui", help="УСТАРЕЛО: десктопное окно. Используйте веб (run_web.py).")
 def launch_gui():
     from app.gui.ctk_app import run_gui

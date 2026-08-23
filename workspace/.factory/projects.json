@@ -207,17 +207,17 @@
     "title": "Снайпер: Призрачный Контракт"
   },
   "sozday_gonku_v_stile_nfs_pust_budet_3_karty_kolt": {
-    "rating": 0,
-    "archived": false,
+    "rating": 1,
+    "archived": true,
     "created_at": "2026-08-23T12:21:26",
-    "archived_at": "",
+    "archived_at": "2026-08-23T12:51:36",
     "title": "Ночной Синдикат: Дуэли и Контракты"
   },
   "sozday_3d_fizicheskuyu_arkadu_na_three_js_gde_ig": {
-    "rating": 0,
-    "archived": false,
+    "rating": 1,
+    "archived": true,
     "created_at": "2026-08-23T12:24:13",
-    "archived_at": "",
+    "archived_at": "2026-08-23T12:51:41",
     "title": "Метро-Балансир: Час Пик"
   }
 }

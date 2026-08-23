@@ -27,7 +27,9 @@ from urllib.parse import urlparse
 
 import yaml
 
-from app import chat_store, notify, project_meta, sandbox, snapshots, uploads
+from app import acceptance, chat_store, notify, project_meta, sandbox, snapshots, uploads
+from app import gate_stats
+from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
 from app.config import BASE_DIR, config
@@ -174,20 +176,11 @@ REBUILD_SECTIONS = [
     {"key": "skills", "label": "🧩 Перегенерировать Game Skills для ИИ"},
 ]
 
-CODE_TASK_PROMPT = (
-    "Прочитай AI_DEVELOPER_PROMPT.md и специализированные скиллы в папке skills/ "
-    "(GAME_SKILL.md, GAMEPLAY_SKILL.md, RENDERER_SKILL.md, PLAYGAMA_SKILL.md). "
-    "На их основе создай полную рабочую структуру HTML5 игры: "
-    "1) package.json с зависимостями ({renderer}, @playgama/bridge, howler, typescript, vite), "
-    "2) vite.config.ts и tsconfig.json, "
-    "3) index.html, "
-    "4) src/main.ts, "
-    "5) Модули игрового цикла src/core/GameLoop.ts и src/core/EventBus.ts, "
-    "6) Игровые системы, физику, управление (клавиатура И полноценный тач), "
-    "спавн врагов и PlaygamaService. "
-    "Напиши чистый, готовый к запуску код: `npm install && npm run dev` должны "
-    "поднимать играбельную сборку без ошибок в консоли."
-)
+# Разделители журнала. Живут константами, потому что подставляются в текст,
+# который читает человек, а не в разметку.
+BR = chr(10)
+LINE_FAT = BR + chr(9552) * 65 + BR
+LINE_THIN = BR + chr(9472) * 65 + BR
 
 MAX_STUDIO_LOG_LINES = 3000
 MAX_PLAY_LOG_LINES = 1500
@@ -744,40 +737,100 @@ class FactoryService:
             )
 
             sandbox.ensure_project_docs(game_dir, title)
-            task_prompt = sandbox.build_agent_prompt(
-                task=CODE_TASK_PROMPT.format(renderer=renderer_final),
-                directory=game_dir,
-                title=title,
-            )
-
             provider_obj = self.agent_provider(coder_key, model=model, yolo=True)
-            code, _out = provider_obj.stream_run(
-                prompt=task_prompt,
-                on_line=self.append_log,
-                yolo=True,
-                cwd=game_dir,
-                stop_check_fn=job.should_stop,
+
+            # Игра собирается фазами, и каждую принимает фабрика, а не агент:
+            # она запускает сборку, открывает игру в браузере и возвращает
+            # агенту то, что не работает. Один заход «напиши игру целиком»
+            # давал двадцать заготовок вместо трёх работающих систем.
+            outcome = build_game(
+                project_dir=game_dir,
+                provider=provider_obj,
+                title=title,
+                on_log=self.append_log,
+                progress=lambda percent, step: self.update_progress(
+                    96 + max(0, min(3, percent // 25)), step),
+                stop_check=job.should_stop,
+                repair_attempts=int(opts.get("repair_attempts", 2)),
             )
 
-            if code == 0:
-                self.update_progress(100, "🎉 Игра успешно создана!")
+            report = outcome.last_report
+            self.append_log(
+                LINE_THIN + "Итог сборки по фазам:" + BR + outcome.summary() + BR
+            )
+            if outcome.stopped:
+                self.update_progress(100, "● Сборка остановлена")
+            elif outcome.ok:
+                self.update_progress(100, "🎉 Игра прошла приёмку!")
                 self.append_log(
-                    f"\n{'═' * 65}\n✅ УСПЕХ! Проект игры создан в workspace/{game_dir.name}\n"
-                    f"▶ Вкладка «🌐 Играть» запустит его в браузере.\n{'═' * 65}\n"
-                )
-                sandbox.append_devlog(
-                    game_dir,
-                    f"Генерация кода агентом {coder_key.upper()}",
-                    f"- **Задача**: сборка игрового каркаса по спецификации.\n"
-                    f"- **Сделано**: агент отработал этап кодогенерации (код выхода {code}).\n"
-                    f"- **Следующий шаг**: запустить `npm run dev` и проверить игру в браузере.",
+                    LINE_FAT
+                    + f"✅ УСПЕХ! Игра в workspace/{game_dir.name} собрана и принята." + BR
+                    + (report.metrics_line() + BR if report else "")
+                    + "▶ Вкладка «🌐 Играть» запустит её в браузере." + BR + LINE_FAT
                 )
             else:
-                self.update_progress(100, f"Завершено с кодом {code}")
+                self.update_progress(100, "⚠️ Игра собрана, приёмка красная")
+                self.append_log(
+                    LINE_FAT
+                    + f"⚠️ Игра в workspace/{game_dir.name} собрана, но приёмку не прошла: "
+                    + (report.summary() if report else "отчёта нет") + BR
+                    + "Отчёт лежит в .factory/gate.json — открой чат проекта и попроси починить."
+                    + BR + LINE_FAT
+                )
+
+            sandbox.append_devlog(
+                game_dir,
+                f"Сборка по фазам агентом {coder_key.upper()}",
+                "- **Задача**: довести игру до приёмки фабрики по фазам." + BR
+                + "- **Сделано**:" + BR + outcome.summary() + BR
+                + "- **Приёмка**: "
+                + (report.summary() if report else "не запускалась") + "." + BR
+                + "- **Числа игрока**: " + (report.metrics_line() if report else "—"),
+            )
+            bus.publish("projects.changed")
             bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
 
         job = self._launch_job(kind="full", title=self._job_title(prompt), prompt=prompt,
                                provider=provider, mode=mode, body=body)
+        return {"status": "started", "job_id": job.id}
+
+    def start_gate(self, slug: str, opts: Dict[str, Any]) -> Dict[str, Any]:
+        """Прогоняет приёмку готовой игры по требованию.
+
+        Нужна, когда игру правил человек или чат проекта: отчёт агента о
+        собственной работе основанием считаться перестал, а проверить надо.
+        Идёт заданием студии, потому что дымовой запуск собирает игру и
+        поднимает браузер — это минуты, а не секунды.
+        """
+        try:
+            project = sandbox.project_dir(slug)
+        except sandbox.SandboxViolation as exc:
+            return {"status": "error", "message": str(exc)}
+        if not (project / "package.json").exists():
+            return {"status": "error", "message": "У проекта ещё нет кода — принимать нечего."}
+
+        static_only = bool(opts.get("static"))
+
+        def body(job: StudioJob) -> None:
+            job.slug = slug
+            self.update_progress(5, f"Приёмка {slug}...")
+            report = acceptance.run_gate(
+                project, on_log=self.append_log, stop_check=job.should_stop,
+                phase="manual", with_smoke=not static_only,
+            )
+            acceptance.write_gate_report(project, report)
+            acceptance.stamp_generation(project, report)
+            gate_stats.publish()
+
+            self.append_log(LINE_THIN + report.summary() + BR +
+                            (report.metrics_line() or "") + BR)
+            self.update_progress(100, "✅ Приёмка зелёная" if report.ok
+                                 else "⚠️ Приёмка красная")
+            bus.publish("projects.changed")
+            bus.publish("studio.done", slug=slug, job_id=job.id)
+
+        job = self._launch_job(kind="gate", title=f"Приёмка: {slug}", prompt=slug,
+                               provider="", mode="gate", body=body)
         return {"status": "started", "job_id": job.id}
 
     def start_batch_generation(self, ideas: List[Dict[str, str]], opts: Dict[str, Any]) -> Dict[str, Any]:
@@ -929,9 +982,40 @@ class FactoryService:
                 "tokens": spend.get(slug, {}).get("tokens", 0),
                 "tokens_human": spend.get(slug, {}).get("tokens_human", "0"),
                 "agent_runs": spend.get(slug, {}).get("runs", 0),
+                # Приёмка вместо самооценки. Поле score выставляет модель ещё до
+                # того, как написана первая строка кода, — с игрой оно не связано
+                # никак. Здесь лежит то, что фабрика проверила запуском.
+                **self._gate_card(path),
             })
         projects.sort(key=lambda p: (p["created_at"], p["updated_ts"]), reverse=True)
         return projects
+
+    @staticmethod
+    def _gate_card(path) -> Dict[str, Any]:
+        """Строки приёмки для карточки: состояние, числа игрока, дата прогона.
+
+        Пустой словарь означает ровно одно — приёмка по этой игре не гонялась,
+        и утверждать о ней нечего.
+        """
+        gate = acceptance.read_gate(path)
+        if not gate:
+            return {"gate_state": "none", "gate_summary": "приёмка не запускалась",
+                    "gate_metrics": {}, "gate_at": "", "gate_failed": []}
+        metrics = gate.get("metrics") or {}
+        bundle = metrics.get("bundleBytes")
+        return {
+            "gate_state": "pass" if gate.get("ok") else "fail",
+            "gate_summary": gate.get("summary", ""),
+            "gate_at": gate.get("at", ""),
+            "gate_failed": gate.get("failed", []),
+            "gate_metrics": {
+                "fps": metrics.get("fps"),
+                "draws": metrics.get("draws"),
+                "bundle_mb": round(bundle / 1048576, 2) if isinstance(bundle, (int, float)) else None,
+                "first_frame_ms": metrics.get("firstFrameMs"),
+                "console_errors": metrics.get("consoleErrors"),
+            },
+        }
 
     @staticmethod
     def _created_fallback(path: Path) -> float:

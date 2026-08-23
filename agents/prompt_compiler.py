@@ -630,39 +630,42 @@ class PromptCompilerAgent:
 
 
     @staticmethod
-    def _mechanic_depth_block(deep) -> str:
-        """Глубина механики для кодового агента: числа, состояния, псевдокод.
+    def _mechanic_digest(m, deep) -> str:
+        """Механика в промпте — сводка и адрес, а не второй экземпляр документа.
 
-        Без этого блока агент реализует жанровый шаблон, а не эту игру.
+        Полное описание механики уже написано в `MECHANICS.md`: числа, состояния,
+        слои отклика, псевдокод тика. Раньше всё это печаталось ещё и здесь, и
+        одна только эта секция занимала треть мастер-промпта — тридцать девять
+        тысяч знаков рядом с файлом, где лежит ровно то же самое. Агент читает
+        промпт целиком и на середине уже не помнит начала; документ он открывает
+        тогда, когда пишет соответствующий код, и там подробности к месту.
+
+        Здесь остаётся то, без чего нельзя даже начать: чем механика является,
+        что делает игрок, какое решение он принимает и чем это не жанровый
+        шаблон. Остальное — по адресу.
         """
-        if deep is None:
-            return ""
-        params = "\n".join(f"  - `{p.name}` = `{p.value}` — {p.tuning_note}" for p in deep.parameters)
-        states = ", ".join(f"`{s}`" for s in deep.states)
-        feedback = "\n".join(f"  - {f}" for f in deep.feedback_layers)
-        synergies = "\n".join(f"  - {s}" for s in deep.synergies)
-        pseudocode = f"\n- **Псевдокод тика**:\n```text\n{deep.pseudocode.strip()}\n```" if deep.pseudocode.strip() else ""
-        lines = [f"- **Решение игрока**: {deep.player_decision}" if deep.player_decision else ""]
-        if states:
-            lines.append(f"- **Состояния**: {states}")
-        if params:
-            lines.append(
-                "- **Числовые параметры** — лежат в `balance.yaml`, читай оттуда и не "
-                f"переписывай литералами в код:\n{params}"
-            )
-        if feedback:
-            lines.append(f"- **Слои отклика**:\n{feedback}")
-        if deep.failure_mode:
-            lines.append(f"- **Режим отказа игрока**: {deep.failure_mode}")
-        if deep.mastery_curve:
-            lines.append(f"- **Кривая мастерства**: {deep.mastery_curve}")
-        if deep.counterplay:
-            lines.append(f"- **Сопротивление игры**: {deep.counterplay}")
-        if synergies:
-            lines.append(f"- **Синергии**:\n{synergies}")
-        if deep.why_unique:
-            lines.append(f"- **Почему это не жанровый шаблон**: {deep.why_unique}")
-        return "\n".join([l for l in lines if l]) + pseudocode + "\n"
+        lines = [
+            f"### {m.name} ({m.priority.upper()})",
+            f"- **Категория**: {m.category} · **Сложность**: {m.technical_complexity}",
+            f"- **Суть**: {m.description}",
+            f"- **Вход игрока**: {m.player_interaction}",
+        ]
+        if deep is not None:
+            if deep.player_decision:
+                lines.append(f"- **Решение игрока**: {deep.player_decision}")
+            if deep.why_unique:
+                lines.append(f"- **Почему это не жанровый шаблон**: {deep.why_unique}")
+            if deep.failure_mode:
+                lines.append(f"- **Как игрок проигрывает**: {deep.failure_mode}")
+        elif m.feedback:
+            # Подробного описания нет — короткий отклик остаётся единственным.
+            lines.append(f"- **Отклик**: {m.feedback}")
+        lines.append(
+            f"- **Полностью**: `MECHANICS.md` → раздел «Механика: {m.name}» "
+            "(состояния, слои отклика, синергии, псевдокод тика). "
+            "Числа — `balance.yaml`, литералами в код не переписывать."
+        )
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _core_design_block(concept) -> str:
@@ -687,21 +690,33 @@ class PromptCompilerAgent:
             parts.append(f"**Шаблон жанра, который НЕ реализуем**: {core.genre_template_rejected}")
         if core.loop_diagram.strip():
             parts.append(f"**Схема петли**:\n```text\n{core.loop_diagram.strip()}\n```")
+        # Микро-петля остаётся здесь целиком: это те самые секунды, ради которых
+        # игру запускают, и писать их код, держа документ закрытым, нельзя.
         if core.micro_loop:
             parts.append(f"**Микро-петля (посекундно)**:\n{steps(core.micro_loop)}")
+        # Мезо и макро расписаны по шагам в `CORE_LOOP.md`, а прогрессия — в
+        # `PROGRESSION.md`. Второй экземпляр того же текста здесь не помогал
+        # никому: он раздувал промпт ровно в том месте, где агенту нужно было
+        # держать в голове начало документа.
+        deferred = []
         if core.meso_loop:
-            parts.append(f"**Мезо-петля (этап)**:\n{steps(core.meso_loop)}")
+            deferred.append(f"мезо-петля этапа ({len(core.meso_loop)} шагов)")
         if core.macro_loop:
-            parts.append(f"**Макро-петля (забег)**:\n{steps(core.macro_loop)}")
+            deferred.append(f"макро-петля забега ({len(core.macro_loop)} шагов)")
+        if deferred:
+            parts.append("**По шагам — в `CORE_LOOP.md`**: " + ", ".join(deferred) + ".")
         if core.tension_curve:
             parts.append(f"**Кривая напряжения**: {core.tension_curve}")
         if core.core_formulas:
             formulas = "\n".join(f"- `{f}`" for f in core.core_formulas)
             parts.append(f"**Формулы ядра (реализуй буквально)**:\n{formulas}")
-        if core.run_progression:
-            parts.append("**Прогрессия внутри забега**:\n" + "\n".join(f"- {i}" for i in core.run_progression))
-        if core.meta_progression:
-            parts.append("**Мета-прогрессия**:\n" + "\n".join(f"- {i}" for i in core.meta_progression))
+        if core.run_progression or core.meta_progression:
+            parts.append(
+                "**Прогрессия** — в `PROGRESSION.md`: "
+                + f"внутри забега {len(core.run_progression)} ступеней, "
+                + f"мета-прогрессия {len(core.meta_progression)} ступеней. "
+                + "Числа берутся из `balance.yaml`."
+            )
         return "\n\n".join(parts)
 
     @classmethod
@@ -784,15 +799,7 @@ class PromptCompilerAgent:
         # заголовка, и так на каждой механике. Короткое поле остаётся только
         # там, где подробного нет.
         mechanics_items = "\n".join([
-            f"### {m.name} ({m.priority.upper()})\n"
-            f"- **Category**: {m.category}\n"
-            f"- **Description**: {m.description}\n"
-            f"- **Player Input**: {m.player_interaction}\n"
-            + (f"- **Hit & Sensory Feedback**: {m.feedback}\n"
-               if m.feedback and not getattr(
-                   deep_by_name.get(m.name.strip().lower()), "feedback_layers", None) else "")
-            + f"- **Technical Complexity**: {m.technical_complexity}\n"
-            + self._mechanic_depth_block(deep_by_name.get(m.name.strip().lower()))
+            self._mechanic_digest(m, deep_by_name.get(m.name.strip().lower()))
             for m in concept.mechanics
         ])
         core_block = self._core_design_block(concept)
