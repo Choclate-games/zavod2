@@ -26,9 +26,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -57,6 +59,65 @@ NO_PROJECT_TITLE = "вне проектов (идеи, тесты, брейнс�
 # Агент, расход которого считается не по журналу фабрики, а по его
 # собственным файлам сессий: там точная цифра и по ручным запускам тоже.
 CODEX_AGENT = "codex"
+
+
+# Проект, которому принадлежит работа текущего потока.
+#
+# Расход обычно определяется по рабочему каталогу агента (`project_from_path`),
+# но у агентов спецификации каталога нет: они пишут документы, а не код, и
+# запускаются без cwd. Раньше их расход падал в графу «вне проектов», а потом
+# переписывался на проект пачкой «всё, что было после такого-то времени».
+# Для одиночного прогона это работало; в пакете из десяти параллельных прогонов
+# первый же финишировавший забирал себе записи всех десяти — отсюда двадцать
+# четыре запуска агентов на одной игре и по одному на остальных.
+#
+# Поток — правильная единица владения: каждый прогон студии живёт в своём
+# рабочем потоке от начала до конца, и все вызовы провайдеров внутри него
+# принадлежат именно ему.
+_current = threading.local()
+
+# Замок на файлы учёта.
+#
+# И журнал, и агрегат правятся по схеме «прочитать целиком → изменить →
+# записать целиком». Пока прогон был один, этого хватало. Пакет из десяти
+# прогонов идёт в десяти потоках, и одновременные записи затирали друг друга:
+# из пятидесяти запусков агентов в файл доезжало два-три. В аналитике это
+# выглядело как «расход не посчитался».
+#
+# Замок общий для всех экземпляров трекера, потому что общие у них файлы:
+# у веб-сервиса, у GUI и у каждого провайдера свой AgentUsageTracker, но
+# пишут они в одни и те же два файла.
+_io_lock = threading.RLock()
+
+
+def current_project() -> str:
+    """Слаг проекта, которому принадлежит работа этого потока (или пусто)."""
+    return getattr(_current, "project", "") or ""
+
+
+def set_project(slug: str) -> None:
+    """Назначает владельца работы этого потока.
+
+    Отдельно от `use_project`, потому что пайплайн узнаёт слаг в середине
+    длинного метода, а не на входе в него. Границу, за которой значение
+    сбрасывается, держит `use_project` в раннере прогонов.
+    """
+    _current.project = (slug or "").strip()
+
+
+@contextlib.contextmanager
+def use_project(slug: str):
+    """Помечает всю работу потока принадлежащей проекту `slug`.
+
+    Вложенные вызовы возвращают предыдущее значение, а не затирают его: прогон
+    может внутри себя запустить сборку или приёмку той же игры.
+    """
+    previous = getattr(_current, "project", "")
+    _current.project = (slug or "").strip()
+    try:
+        yield
+    finally:
+        _current.project = previous
 
 
 def human_tokens(value: Any) -> str:
@@ -245,6 +306,13 @@ class AgentUsageTracker:
                project: Optional[str] = None) -> float:
         """Отмечает запуск агента и возвращает ключ записи (для дозаписи токенов)."""
         stamp = datetime.now()
+        # Каталога у агентов спецификации нет, зато есть поток прогона — см.
+        # use_project. Без этого их расход не попадал бы на игру вовсе.
+        project = (project or "").strip() or current_project()
+        with _io_lock:
+            return self._record_locked(agent, model, prompt_len, project, stamp)
+
+    def _record_locked(self, agent, model, prompt_len, project, stamp) -> float:
         # Агрегат достраивается по журналу до того, как в журнал попадёт новая
         # запись: иначе этот же запуск учтётся дважды — и в достройке, и в
         # инкременте ниже.
@@ -273,6 +341,10 @@ class AgentUsageTracker:
         """
         if not tokens:
             return
+        with _io_lock:
+            self._add_tokens_locked(key, tokens)
+
+    def _add_tokens_locked(self, key: float, tokens: int) -> None:
         history = self._load()
         for item in reversed(history):
             if item.get("timestamp") == key:
@@ -488,7 +560,10 @@ class AgentUsageTracker:
         slug = (project or "").strip()
         if not slug:
             return 0
+        with _io_lock:
+            return self._reassign_locked(since, slug)
 
+    def _reassign_locked(self, since: float, slug: str) -> int:
         moved: Dict[str, Dict[str, int]] = {}
         history = self._load()
         changed = 0

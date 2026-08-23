@@ -70,10 +70,14 @@ class IdeaAnalyzerAgent:
             "vision, elevator_pitch, win/lose conditions, and mechanics MUST be written in RUSSIAN (на русском языке)!\n"
             "- The `slug` field MUST be english ASCII lowercase kebab-case (e.g. 'bioswarm-evolution-3d', 'gladiator-arena-3d')."
         )
+        # Приложенный к заказу промпт игры — часть задания, а не справка:
+        # агенты спецификации файлов не открывают, поэтому текст едет им сюда.
+        materials = ctx.attachments_brief()
         user_prompt = (
             f"User Game Pitch: {ctx.raw_prompt}\n"
             "Target Platform: Playgama Bridge / Yandex Games / Web & Mobile\n\n"
-            "Проекты, которые фабрика уже выпустила.\n"
+            + (f"{materials}\n\n" if materials else "")
+            + "Проекты, которые фабрика уже выпустила.\n"
             f"{fidelity.repetition_rule(ctx.raw_prompt)}\n"
             f"{recent_summary(ctx.output_base_dir)}"
         )

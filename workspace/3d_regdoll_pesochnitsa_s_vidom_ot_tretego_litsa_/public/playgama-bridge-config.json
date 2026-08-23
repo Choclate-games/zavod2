@@ -1,0 +1,11 @@
+{
+  "platformId": "web",
+  "publisherId": "",
+  "gameId": "banketnyi-krash-svadebnyi-sabotazh",
+  "placement": {
+    "interstitial": "interstitial_default",
+    "rewarded": "rewarded_default"
+  },
+  "socials": {},
+  "leaderboards": []
+}

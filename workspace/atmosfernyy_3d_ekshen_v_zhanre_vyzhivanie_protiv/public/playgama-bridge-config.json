@@ -1,0 +1,21 @@
+{
+  "playgama_bridge_config_version": "2",
+  "game_id": "lighthouse_night_watch",
+  "platform_ids": {
+    "yandex": "",
+    "vk": "",
+    "ok": "",
+    "crazygames": "",
+    "playgama": ""
+  },
+  "leaderboards": {
+    "night_watch": "Рейтинг лучших смотрителей по набранным очкам за вахту"
+  },
+  "advertisement": {
+    "interstitial_min_interval_sec": 90,
+    "rewarded_placements": ["revive_night", "double_score"]
+  },
+  "socials": {
+    "community_url": ""
+  }
+}

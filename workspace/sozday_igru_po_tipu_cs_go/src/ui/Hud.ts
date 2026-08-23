@@ -15,7 +15,6 @@ export class Hud {
   private oneTapBanner: HTMLElement;
 
   private lastSpeedText = '';
-  private lastAmmoText = '';
 
   constructor() {
     this.container = document.createElement('div');

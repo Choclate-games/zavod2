@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Type
 import requests
 
 from providers.base import AIProvider, T
+from providers import json_output
 
 # Локальной подмены ответа здесь больше нет.
 #
@@ -71,7 +72,7 @@ class GoogleProvider(AIProvider):
             resp.raise_for_status()
             data = resp.json()
             text = data["candidates"][0]["content"]["parts"][0]["text"]
-            parsed = json.loads(text)
+            parsed = json_output.loads(text)
             return response_model.model_validate(parsed)
         except Exception as exc:
             raise RuntimeError(

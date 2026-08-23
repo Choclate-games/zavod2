@@ -1,0 +1,33 @@
+{
+  "gameId": "avalanche-sniper-echo-canyon",
+  "name": {
+    "ru": "Лавинный снайпер: Эхо Каньона",
+    "en": "Avalanche Sniper: Echo Canyon"
+  },
+  "orientation": "landscape",
+  "interstitial": {
+    "minimumDelaySeconds": 90
+  },
+  "banners": {
+    "sticky": true,
+    "placements": []
+  },
+  "rewarded": {
+    "placements": [
+      "second_chance_ammo",
+      "wind_drone_scan",
+      "double_mastery_reward"
+    ]
+  },
+  "leaderboards": [
+    {
+      "id": "leaderboard_mastery_score",
+      "name": { "ru": "Счет мастерства стрелков", "en": "Marksman Mastery Score" }
+    }
+  ],
+  "payments": {
+    "products": [
+      { "id": "no_ads" }
+    ]
+  }
+}

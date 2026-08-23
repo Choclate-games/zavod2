@@ -28,10 +28,27 @@ class GenerationContext:
     # Типизирована как Any, чтобы app.run_session не тянуло сюда циклический импорт.
     session: Optional[Any] = None
 
+    # Материалы, приложенные к заказу: промпт игры, референсы, модели. Файлы
+    # переезжают в `.factory/uploads/` проекта до первого вызова модели
+    # (`app.uploads.adopt`), здесь лежат их описания.
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
+    attachments_root: Optional[Path] = None
+
     game_dir: Optional[Path] = None
     generated_files: List[Path] = field(default_factory=list)
     validation_reports: List[Dict[str, Any]] = field(default_factory=list)
     logs: List[str] = field(default_factory=list)
+
+    def attachments_brief(self) -> str:
+        """Приложенные материалы так, как их читает агент спецификации.
+
+        Пусто, когда ничего не прикладывали, — поэтому блок можно вставлять в
+        любой промпт без проверок на стороне вызывающего.
+        """
+        if not self.attachments:
+            return ""
+        from app import uploads  # локально: uploads знает про sandbox, контекст — нет
+        return uploads.brief_block(self.attachments, self.attachments_root)
 
     def log(self, message: str):
         ts = datetime.now().strftime("%H:%M:%S")

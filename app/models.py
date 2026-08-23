@@ -168,6 +168,9 @@ class UIUXSpec(BaseSafeModel):
     # придумывал сам, одинаково: карточка с колонкой кнопок по центру.
     screens: List[Dict[str, str]] = Field(default_factory=list)
     mobile_controls_layout: str = Field(default="")
+    # Десктопная раскладка проектируется наравне с мобильной: схем управления
+    # две, и кодовый агент не должен придумывать клавиши сам.
+    desktop_controls_layout: str = Field(default="")
     keyboard_controls: Dict[str, str] = Field(default_factory=dict)
     touch_controls: Dict[str, str] = Field(default_factory=dict)
     wireframes_ascii: str = Field(default="")

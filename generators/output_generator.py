@@ -1,10 +1,12 @@
 import json
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List
 import yaml
 
 from app import knowledge, library, sandbox
+from app.config import config
 from app.slugs import _slugify
 from app.context import GenerationContext
 from app.logging import log_agent, log_success, log_info
@@ -192,12 +194,43 @@ class OutputGenerator:
         concept = ctx.concept
         files: List[Dict[str, object]] = []
         seen: set = set()
+        missing: List[str] = []
 
         def add(path: str, why: str, required: bool = False) -> None:
             if not path or path in seen:
                 return
             seen.add(path)
+            # Путь проверяется по диску фабрики. Ссылки на документы приходят
+            # от куратора скиллов, то есть от модели, и она их иногда
+            # выдумывает («knowledge/math/ballistics_and_trajectories.md»).
+            # Такая строка в манифесте — это гарантированный HTTP 404 у игры,
+            # а если она ещё и помечена обязательной, загрузка базы падает
+            # целиком и агент садится писать код вслепую.
+            if not (config.base_dir / path).exists():
+                missing.append(path)
+                return
             files.append({"path": path, "why": why, "required": required})
+
+        def untracked(paths: List[str]) -> List[str]:
+            """Пути, которых нет в git фабрики, — значит, нет и у игры.
+
+            Игра тянет базу знаний из УДАЛЁННОГО репозитория, а не с диска
+            рядом. Файл, который лежит здесь, но не закоммичен, отдаёт игре
+            HTTP 404; если он обязательный, загрузка базы падает целиком и
+            агент пишет код без правил фабрики. Молча это выглядело как
+            «база знаний недоступна» — проверка ниже называет виновника.
+            """
+            if not paths:
+                return []
+            try:
+                result = subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", "--", *paths],
+                    cwd=config.base_dir, capture_output=True, text=True, timeout=20,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return []   # без git проверить нечем — молчим, а не пугаем
+            known = {line.strip().replace("\\", "/") for line in result.stdout.splitlines()}
+            return [p for p in paths if p.replace("\\", "/") not in known]
 
         add(f"knowledge/{knowledge.CRITICAL_RULES_FILE}",
             "запреты, которые дороже всего нарушить", required=True)
@@ -235,6 +268,19 @@ class OutputGenerator:
         )
         ctx.generated_files.append(manifest)
         required = sum(1 for f in files if f["required"])
+        absent = untracked([str(f["path"]) for f in files])
+        if absent:
+            log_info(
+                "Не в git фабрики, игра получит по ним 404 — закоммитьте и "
+                f"запушьте: {', '.join(absent[:5])}"
+                + (" …" if len(absent) > 5 else "")
+            )
+        if missing:
+            log_info(
+                f"В манифест не попали {len(missing)} несуществующих пути: "
+                + ", ".join(missing[:5])
+                + (" …" if len(missing) > 5 else "")
+            )
         log_success(
             f"Манифест базы знаний: [highlight]{len(files)}[/highlight] файл(ов), "
             f"из них обязательных {required}"

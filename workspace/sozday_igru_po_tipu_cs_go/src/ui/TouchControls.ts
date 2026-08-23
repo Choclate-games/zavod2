@@ -1,6 +1,6 @@
-﻿import { EntityManager } from '../entities/EntityManager';
+﻿import * as THREE from 'three';
+import { EntityManager } from '../entities/EntityManager';
 import { RaycastBvhBallisticsEngineSystem } from '../systems/RaycastBvhBallisticsEngineSystem';
-import { EventBus } from '../core/EventBus';
 
 export class TouchControls {
   private container: HTMLElement;

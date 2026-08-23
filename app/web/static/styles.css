@@ -1550,7 +1550,8 @@ textarea {
   border-radius: 4px;
 }
 .attach-chip .attach-del:hover { background: var(--err-bg); color: var(--err); }
-.composer.drop-target { border-color: var(--accent); background: var(--accent-bg); }
+.composer.drop-target,
+#studio-prompt.drop-target { border-color: var(--accent); background: var(--accent-bg); }
 
 /* ── Играть (Play) & Встроенный предпросмотр ───────────────────────────── */
 

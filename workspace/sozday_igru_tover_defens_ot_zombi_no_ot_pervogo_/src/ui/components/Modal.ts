@@ -1,4 +1,4 @@
-﻿export class Modal {
+export class Modal {
   public element: HTMLDivElement;
   private contentContainer: HTMLDivElement;
 

@@ -40,10 +40,13 @@ const state = {
   docRaw: false,
   docContent: "",
   ideas: [],
+  ideaError: "",     // осечка брейнсторма показывается вместо списка, а не прячется
   attachments: [],    // вложения, готовые уйти со следующим сообщением агенту
+  studioAttachments: [],  // материалы заказа: они ждут в предбаннике до старта прогона
   ttsVoices: [],
   ttsVoice: localStorage.getItem("ttsVoice") || "",
   playSlug: null,
+  demo: null,          // состояние демо-стенда базы знаний (не проект студии)
   gameTabs: {},        // slug → вкладка браузера, которая ждёт URL dev-сервера
   servers: [],
   activity: [],
@@ -97,9 +100,11 @@ function showView(name) {
     b.classList.toggle("active", b.dataset.view === name));
 
   if (name === "projects") { loadProjects(); loadChats(); }
+  if (name === "favorites") loadProjects();
   if (name === "studio") loadGallery();
   if (name === "chats") { fillChatProjects(); loadChats(); }
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
+  if (name === "demo") loadDemoState();
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
   if (name === "settings") renderSettings();
 }
@@ -201,6 +206,8 @@ function studioOpts(extra = {}) {
     renderer: $("sel-renderer").value,
     mode: $("sel-mode").value,
     image_provider: $("sel-image").value,
+    // Имена файлов из предбанника: прогон скопирует их в проект на старте.
+    attachments: state.studioAttachments.map((file) => file.name),
     ...extra,
   };
 }
@@ -340,6 +347,28 @@ function renderRuns() {
     foot.appendChild(timer);
     card.appendChild(foot);
 
+    // Сорвавшийся прогон продолжают отсюда же. Раньше кнопка жила только в
+    // чате проекта, а до чата надо было додуматься: карточка сообщала
+    // «Ошибка генерации» и предлагала открыть ТЗ, которого ещё нет.
+    if (!job.active && job.run_id && (job.status === "failed" || job.status === "paused")) {
+      const again = el("button", "btn small primary", "▶ Продолжить");
+      again.style.marginTop = "6px";
+      again.title = "Пройденные шаги пропускаются — фабрика переспросит только упавший";
+      again.onclick = async (event) => {
+        event.stopPropagation();
+        again.disabled = true;
+        const res = await api(`/api/runs/${encodeURIComponent(job.run_id)}/continue`, { body: {} });
+        if (res.status === "started") {
+          toast("Прогон", "Продолжаю с упавшего шага", "ok");
+          selectJob(res.job_id || null);
+        } else {
+          toast("Прогон", res.message || "Не удалось продолжить", "err");
+          again.disabled = false;
+        }
+        await loadJobs();
+      };
+      card.appendChild(again);
+    }
     if (job.slug && !job.active) {
       const open = el("button", "btn small", "📁 Открыть ТЗ");
       open.style.marginTop = "6px";
@@ -487,6 +516,18 @@ async function toggleArchive(project) {
   refreshProjectViews();
 }
 
+/* Избранное — полка для удачных игр. Каталог на диске не двигается: на слаг
+   завязаны чаты, состояние прогона и учёт токенов (см. app/project_meta). */
+async function toggleFavorite(project) {
+  const res = await api(`/api/projects/${encodeURIComponent(project.slug)}/favorite`,
+    { body: { favorite: !project.favorite } });
+  if (res.status === "error") { toast("Избранное", res.message, "err"); return; }
+  project.favorite = res.favorite;
+  if (res.favorite) project.archived = false;
+  toast("Избранное", res.message, "ok");
+  refreshProjectViews();
+}
+
 /* Переименование игры: меняется отображаемое имя, слаг каталога остаётся —
    на него завязаны чаты, снимки для отката и запущенные dev-серверы. */
 async function renameProject(project) {
@@ -534,7 +575,56 @@ async function deleteProject(project) {
 function refreshProjectViews() {
   loadGallery();
   loadProjects();
+  renderFavorites();
   if (state.project && state.detail) renderProjectBanner();
+}
+
+/* ── Избранное ────────────────────────────────────────────────────────── */
+
+function renderFavorites() {
+  const box = $("favorites-list");
+  if (!box) return;
+  const shown = (state.projects || []).filter((p) => p.favorite);
+
+  const badge = $("nav-fav-badge");
+  if (badge) {
+    badge.textContent = shown.length ? String(shown.length) : "";
+    badge.classList.toggle("hidden", !shown.length);
+  }
+
+  box.innerHTML = "";
+  if (!shown.length) {
+    box.appendChild(el("p", "muted",
+      "Пока пусто. Откройте удачную игру в «Проекты и ТЗ» и нажмите «⭐ В избранное»."));
+    return;
+  }
+  shown.forEach((p) => {
+    const item = el("div", "list-item");
+    if (p.has_preview) {
+      const img = el("img", "thumb");
+      img.src = `/api/projects/${encodeURIComponent(p.slug)}/preview.png?v=${p.preview_mtime}`;
+      img.loading = "lazy";
+      item.appendChild(img);
+    } else {
+      item.appendChild(el("div", "thumb-empty", "🖼 превью ещё не создано"));
+    }
+    item.appendChild(el("div", "name", `⭐ ${esc(p.title)}`));
+    item.appendChild(el("div", "meta",
+      `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
+      + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
+    item.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
+
+    const line = el("div", "row");
+    const open = el("button", "btn small primary", "📁 Открыть");
+    open.onclick = (e) => { e.stopPropagation(); showView("projects"); selectProject(p.slug); };
+    const off = el("button", "btn small", "☆ Убрать");
+    off.onclick = (e) => { e.stopPropagation(); toggleFavorite(p); };
+    const play = el("button", "btn small ok", "▶ Запустить");
+    play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
+    line.append(open, play, off);
+    item.appendChild(line);
+    box.appendChild(item);
+  });
 }
 
 async function loadGallery() {
@@ -616,22 +706,29 @@ async function runBrainstorm() {
   const btn = $("btn-run-brainstorm");
   btn.disabled = true;
   btn.textContent = "⏳ Генерация идей...";
-  $("idea-list").innerHTML = '<div class="muted">ИИ анализирует рынок и генерирует уникальные концепты...</div>';
+  // Два захода: сначала модель придумывает тематики, потом растит из них игры.
+  // Ждать приходится дольше одного запроса — говорим, чего именно ждём.
+  $("idea-list").innerHTML =
+    '<div class="muted">Шаг 1 — ИИ ищет незанятые тематики. Шаг 2 — выращивает из них игры…</div>';
   const res = await api("/api/brainstorm", {
     body: { provider: $("sel-provider").value, hint: $("brainstorm-hint").value.trim(), count: 10 },
   });
   btn.disabled = false;
   btn.textContent = "⚡ Придумать 10 идей";
   state.ideas = res.ideas || [];
+  // Заготовленный список фабрика больше не подставляет: пустая выдача — это
+  // осечка провайдера, и она должна быть видна, а не выглядеть как «идеи».
+  state.ideaError = res.status === "error" ? (res.message || "Не удалось получить идеи") : "";
   renderIdeas();
-  if (res.status === "error") toast("Брейнсторм", res.message || "Не удалось получить идеи", "err");
+  if (state.ideaError) toast("Брейнсторм", state.ideaError, "err");
 }
 
 function renderIdeas() {
   const box = $("idea-list");
   box.innerHTML = "";
   if (!state.ideas.length) {
-    box.appendChild(el("div", "muted", "Не удалось получить идеи. Попробуйте ещё раз."));
+    box.appendChild(el("div", "muted", state.ideaError
+      || "Не удалось получить идеи. Попробуйте ещё раз."));
     updateIdeaCount();
     return;
   }
@@ -706,7 +803,8 @@ async function loadProjects() {
     } else {
       item.appendChild(el("div", "thumb-empty", "🖼 превью ещё не создано"));
     }
-    item.appendChild(el("div", "name", `${p.archived ? "📦 " : "🎮 "}${esc(p.title)}`));
+    item.appendChild(el("div", "name",
+      `${p.archived ? "📦 " : (p.favorite ? "⭐ " : "🎮 ")}${esc(p.title)}`));
     item.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
@@ -720,21 +818,25 @@ async function loadProjects() {
   });
   fillPlayProjects();
   fillChatProjects();
+  renderFavorites();
 }
 
 function renderProjectBanner() {
   const detail = state.detail;
   if (!detail) return;
   const card = (state.projects || []).find((p) => p.slug === detail.slug) || detail;
-  $("project-title").textContent = `${card.archived ? "📦 " : "🎮 "}${detail.title}`;
+  const mark = card.archived ? "📦 " : (card.favorite ? "⭐ " : "🎮 ");
+  $("project-title").textContent = `${mark}${detail.title}`;
   $("project-meta").textContent =
     `Slug: ${detail.slug}  |  Жанр: ${detail.genre}  |  Рендерер: ${detail.renderer}  |  Оценка ИИ: ⭐ ${detail.score}/10`
     + (detail.created_label ? `  |  Создана: ${detail.created_label}` : "")
-    + (card.archived ? "  |  📦 в архиве" : "");
+    + (card.archived ? "  |  📦 в архиве" : "")
+    + (card.favorite ? "  |  ⭐ в избранном" : "");
   const stars = $("project-stars");
   stars.innerHTML = "";
   stars.appendChild(starWidget(card));
   $("btn-archive-project").textContent = card.archived ? "↩️ Из архива" : "📦 В архив";
+  $("btn-favorite-project").textContent = card.favorite ? "☆ Из избранного" : "⭐ В избранное";
   $("btn-play-project").disabled = !detail.playable;
 }
 
@@ -1459,6 +1561,81 @@ function renderAttachments() {
   });
 }
 
+/* ── Материалы заказа: те же вложения, но у прогона ещё нет проекта ───────
+ *
+ * Файл уезжает в предбанник песочницы сразу при выборе, а прогон копирует его
+ * в каталог игры первым же делом — до первого вызова модели. Поэтому в заказ
+ * можно положить готовый промпт игры, референсы или 3D-модели: агенты
+ * спецификации получат текст врезкой, кодовый агент — пути внутри проекта.
+ */
+
+function renderStudioAttachments() {
+  const bar = $("studio-attachments");
+  bar.innerHTML = "";
+  bar.classList.toggle("hidden", !state.studioAttachments.length);
+  $("studio-attach-hint").textContent = state.studioAttachments.length
+    ? `Поедут в проект вместе с заказом: ${state.studioAttachments.length}`
+    : "Промпт игры, референсы, 3D-модели — агент получит их вместе с ТЗ";
+  if (!state.studioAttachments.length) return;
+
+  state.studioAttachments.forEach((file) => {
+    const chip = el("div", "attach-chip");
+    if (file.is_image) {
+      const img = el("img");
+      img.src = `/api/studio/uploads/file/${encodeURIComponent(file.name)}`;
+      img.loading = "lazy";
+      chip.appendChild(img);
+    } else chip.appendChild(el("span", "attach-icon", "📄"));
+
+    const info = el("div", "attach-info");
+    info.appendChild(el("div", "attach-name", esc(file.original)));
+    info.appendChild(el("div", "attach-meta", `${esc(file.size_label)} · в заказ`));
+    chip.appendChild(info);
+
+    const drop = el("button", "attach-del", "✕");
+    drop.title = "Убрать материал из заказа и удалить файл";
+    drop.onclick = async () => {
+      state.studioAttachments = state.studioAttachments.filter((f) => f.name !== file.name);
+      renderStudioAttachments();
+      await api(`/api/studio/uploads/file/${encodeURIComponent(file.name)}`, { method: "DELETE" });
+    };
+    chip.appendChild(drop);
+    bar.appendChild(chip);
+  });
+}
+
+/** Предбанник переживает перезагрузку страницы: показываем, что в нём осталось. */
+async function loadStudioAttachments() {
+  const res = await api("/api/studio/uploads");
+  state.studioAttachments = res.files || [];
+  renderStudioAttachments();
+}
+
+async function attachStudioFiles(files) {
+  const list = [...(files || [])];
+  if (!list.length) return;
+  for (const file of list) {
+    try {
+      const data = await readAsDataUrl(file);
+      const res = await api("/api/studio/uploads", {
+        body: { name: file.name || "screenshot.png", data },
+      });
+      if (res.status !== "success") { toast("Материалы заказа", res.message || "Не принято", "err"); continue; }
+      state.studioAttachments.push(res.file);
+    } catch (err) {
+      toast("Материалы заказа", String(err && err.message || err), "err");
+    }
+  }
+  renderStudioAttachments();
+}
+
+/** Прогон уже забрал копию — очищаем только полосу, файлы остаются в предбаннике
+ *  до истечения срока или до кнопки «✕». */
+function clearStudioAttachments() {
+  state.studioAttachments = [];
+  renderStudioAttachments();
+}
+
 function readAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1844,6 +2021,61 @@ async function openPlay(slug) {
   if (res.url) resolveGameTab(slug, res.url);
   else toast("Запуск игры", `${projectName(slug)}: поднимаю dev-сервер, вкладка откроется сама.`, "");
   loadServers();
+}
+
+/* ── Демо-стенд базы знаний ───────────────────────────────────────────────
+ *
+ * Стенд поднимается тем же dev-сервером, что и игры, но проектом не является:
+ * в витрине его карточку путали с выпущенной игрой, поэтому у него своя кнопка
+ * в навигации и свой экран, а из списка проектов он исключён на бэкенде.
+ */
+
+const DEMO_SLUG = "knowledge-showcase";
+
+function setDemoStatus(running, starting, url) {
+  const node = $("demo-status");
+  if (starting) { node.textContent = "● Запуск стенда..."; node.style.color = "var(--warn)"; }
+  else if (running) { node.textContent = `● Стенд работает${url ? " · " + url : ""}`; node.style.color = "var(--ok)"; }
+  else { node.textContent = "● Сервер остановлен"; node.style.color = "var(--muted)"; }
+  $("nav-demo-badge").classList.toggle("hidden", !running && !starting);
+}
+
+function renderDemoPages(state_) {
+  const box = $("demo-pages");
+  box.innerHTML = "";
+  if (!state_.running || !state_.url) return;
+  box.appendChild(el("span", "dim", "Страницы стенда:"));
+  (state_.pages || []).forEach((page) => {
+    const btn = el("button", "btn small", page.label);
+    btn.onclick = () => window.open(new URL(page.path, state_.url).href, "_blank", "noopener");
+    box.appendChild(btn);
+  });
+}
+
+async function loadDemoState() {
+  const st = await api("/api/demo");
+  state.demo = st;
+  $("demo-log").textContent = st.logs || "";
+  $("demo-log").scrollTop = $("demo-log").scrollHeight;
+  $("demo-path").textContent = st.exists
+    ? `📂 ${st.path}${st.installed ? "" : " · зависимости не установлены — первый запуск поставит npm install"}`
+    : `⚠️ Стенда нет на диске: ${st.path}`;
+  $("btn-demo-start").disabled = !st.exists;
+  setDemoStatus(st.running, st.starting, st.url);
+  renderDemoPages(st);
+}
+
+async function startDemo() {
+  setDemoStatus(false, true, "");
+  const res = await api("/api/demo/start", { method: "POST" });
+  if (res.status === "error") {
+    toast("Демо-стенд", res.message || "Не удалось запустить стенд", "err");
+    loadDemoState();
+    return;
+  }
+  if (res.url) window.open(res.url, "_blank", "noopener");
+  else toast("Демо-стенд", "Поднимаю dev-сервер — адрес появится здесь и в логе.");
+  loadDemoState();
 }
 
 async function loadPlayState() {
@@ -2247,6 +2479,11 @@ function renderSettings() {
   (fish.models || []).forEach((m) => fishModel.appendChild(new Option(m.label, m.key)));
   fishModel.value = fish.model || fish.free_model || "";
 
+  const knowledge = settings.knowledge || {};
+  $("set-knowledge-repo").value = knowledge.repo || "";
+  $("set-knowledge-ref").value = knowledge.ref || "main";
+  $("set-knowledge-token").value = knowledge.token || "";
+
   const defaults = $("set-default-agent");
   defaults.innerHTML = "";
   state.boot.agents.forEach((a) => defaults.appendChild(new Option(a.label, a.key)));
@@ -2268,6 +2505,11 @@ async function saveSettings() {
       reset_game_on_launch: $("set-reset-launch").checked,
       allow_template_mixing: $("set-template-mixing").checked,
       fish_audio: { api_key: $("set-fish-key").value.trim(), model: $("set-fish-model").value },
+      knowledge: {
+        repo: $("set-knowledge-repo").value.trim(),
+        ref: $("set-knowledge-ref").value.trim(),
+        token: $("set-knowledge-token").value.trim(),
+      },
     },
   });
   $("settings-msg").textContent = res.message || "";
@@ -2356,6 +2598,11 @@ function handleEvent(topic, data) {
         box.appendChild(document.createTextNode(data.line));
         box.scrollTop = box.scrollHeight;
       }
+      if (data.slug === DEMO_SLUG) {
+        const box = $("demo-log");
+        box.appendChild(document.createTextNode(data.line));
+        box.scrollTop = box.scrollHeight;
+      }
       break;
     case "play.url":
       resolveGameTab(data.slug, data.url);
@@ -2363,6 +2610,12 @@ function handleEvent(topic, data) {
         $("play-url").value = data.url;
         setPlayStatus(true, false, data.url);
         toast("Игра запущена", data.url, "ok", [["Открыть", () => window.open(viewerUrl(data.url, data.slug), "_blank", "noopener")]]);
+      }
+      if (data.slug === DEMO_SLUG) {
+        setDemoStatus(true, false, data.url);
+        renderDemoPages({ ...(state.demo || {}), running: true, url: data.url });
+        toast("Демо-стенд запущен", data.url, "ok",
+          [["Открыть", () => window.open(data.url, "_blank", "noopener")]]);
       }
       loadServers();
       break;
@@ -2372,6 +2625,7 @@ function handleEvent(topic, data) {
         dropGameTab(data.slug, "Dev-сервер не работает — смотрите лог во вкладке «Играть».");
       }
       if (data.slug === state.playSlug) setPlayStatus(data.running, data.starting, data.url);
+      if (data.slug === DEMO_SLUG) setDemoStatus(data.running, data.starting, data.url);
       loadServers();
       break;
     case "quota.changed":
@@ -2425,6 +2679,7 @@ function bindStudio() {
     showLogPane(true);
     $("studio-log").textContent = "";
     state.jobSel = res.job_id;
+    clearStudioAttachments();
     await loadJobs();
     ensureRunTicker();
   };
@@ -2450,6 +2705,31 @@ function bindStudio() {
     await navigator.clipboard.writeText($("studio-log").textContent);
     toast("Журнал", "Скопирован в буфер обмена", "ok");
   };
+  // Материалы заказа: кнопка, Ctrl+V со скриншотом, перетаскивание в поле идеи.
+  const studioPrompt = $("studio-prompt");
+  $("btn-studio-attach").onclick = () => $("studio-file-input").click();
+  $("studio-file-input").onchange = async (e) => {
+    await attachStudioFiles(e.target.files);
+    e.target.value = "";
+  };
+  studioPrompt.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData ? e.clipboardData.files : [])];
+    if (!files.length) return;   // обычный текст вставляем как обычно
+    e.preventDefault();
+    attachStudioFiles(files);
+  });
+  ["dragenter", "dragover"].forEach((type) => studioPrompt.addEventListener(type, (e) => {
+    e.preventDefault();
+    studioPrompt.classList.add("drop-target");
+  }));
+  ["dragleave", "drop"].forEach((type) => studioPrompt.addEventListener(type, (e) => {
+    e.preventDefault();
+    studioPrompt.classList.remove("drop-target");
+  }));
+  studioPrompt.addEventListener("drop", (e) => {
+    if (e.dataTransfer && e.dataTransfer.files.length) attachStudioFiles(e.dataTransfer.files);
+  });
+
   $("btn-refresh-gallery").onclick = loadGallery;
   if ($("gallery-search")) $("gallery-search").oninput = loadGallery;
 
@@ -2507,6 +2787,11 @@ function bindProjects() {
     const card = (state.projects || []).find((p) => p.slug === state.project);
     if (card) toggleArchive(card);
   };
+  $("btn-favorite-project").onclick = () => {
+    const card = (state.projects || []).find((p) => p.slug === state.project);
+    if (card) toggleFavorite(card);
+  };
+  $("btn-refresh-favorites").onclick = loadProjects;
   $("btn-delete-project").onclick = () => {
     const card = (state.projects || []).find((p) => p.slug === state.project);
     if (card) deleteProject(card);
@@ -2685,6 +2970,19 @@ function bindPlay() {
   };
   $("btn-play-clear").onclick = () => { $("play-log").textContent = ""; };
 
+  $("btn-demo-start").onclick = startDemo;
+  $("btn-demo-stop").onclick = async () => {
+    await api("/api/demo/stop", { method: "POST" });
+    loadDemoState();
+  };
+  $("btn-demo-open").onclick = () => {
+    const url = (state.demo || {}).url;
+    if (url) window.open(url, "_blank", "noopener");
+    else toast("Демо-стенд", "Стенд не запущен — сначала нажмите «Запустить стенд».", "warn");
+  };
+  $("btn-demo-folder").onclick = () => api("/api/demo/open-folder", { method: "POST" });
+  $("btn-demo-clear").onclick = () => { $("demo-log").textContent = ""; };
+
   $("btn-servers-refresh").onclick = loadServers;
   $("btn-servers-stop-all").onclick = async () => {
     const res = await api("/api/play/stop-all", { method: "POST" });
@@ -2767,6 +3065,7 @@ async function boot() {
   startActivityTimer();
   await loadProjects();
   await loadStudioState();
+  await loadStudioAttachments();
   await loadGallery();
   loadQuota();
   refreshModels(true);

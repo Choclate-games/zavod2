@@ -1,0 +1,23 @@
+{
+  "name": "ice-express-liquid-balance",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ледяной Экспресс: Жидкий Баланс — 3D аркадный физический дрифт-спуск молоковоза по ледяному серпантину",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check:spec": "node scripts/check-spec.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "@playgama/bridge": "^2.1.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vite": "^6.3.5"
+  }
+}

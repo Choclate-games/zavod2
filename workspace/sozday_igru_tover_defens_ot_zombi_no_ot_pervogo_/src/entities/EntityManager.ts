@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { ProceduralModels } from '../rendering/ProceduralModels';
 import { BALANCE } from '../balance';
 import { EventBus } from '../core/EventBus';
@@ -64,7 +64,7 @@ export class EntityManager {
   public scrap = 150; // Начальный скрап для первой турели
 
   // Инстансированный рендеринг орды зомби
-  private zombieInstancedMesh: THREE.InstancedMesh;
+  private zombieInstancedMesh!: THREE.InstancedMesh;
   private maxZombies = 160;
   private dummyTransform = new THREE.Object3D();
   private scene: THREE.Scene;

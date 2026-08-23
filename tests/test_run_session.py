@@ -6,6 +6,8 @@
 повторы не помогли — прогон приостанавливается и продолжается с того же шага,
 не переспрашивая модель о том, что она уже ответила.
 """
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -344,3 +346,162 @@ def test_web_chat_offers_to_continue_a_paused_run(tmp_path, monkeypatch):
     assert opened["session"]["kind"] == "run"
     assert opened["run"]["can_continue"] is True
     assert opened["run"]["failed"] == ["art_director"]
+
+
+# ── Имя каталога проекта ────────────────────────────────────────────────────
+
+
+def test_the_folder_is_named_after_the_game_when_the_name_is_known(tmp_path):
+    """Заказ из брейнсторма приносит название — по нему и называем каталог.
+
+    Заказы модели начинаются с жанровой шапки («Динамичный 3D мердж-экшен с
+    видом сверху на …»), одинаковой у всех. Пакет из десяти игр давал десять
+    каталогов, неразличимых в списке до сорок восьмого символа.
+    """
+    seed = ("Динамичный 3D мердж-экшен с видом сверху на круглой арене. "
+            "Игрок сталкивает одинаковых мутантов.")
+    session = RunSession.start(seed, tmp_path, "test-provider",
+                               title="Био-Колизей: Ударный Синтез")
+    assert session.slug == "bio_kolizey_udarnyy_sintez"
+    assert (tmp_path / session.slug).is_dir()
+
+
+def test_without_a_name_the_folder_still_comes_from_the_order(tmp_path):
+    """Ручной заказ названия не приносит — поведение прежнее."""
+    session = RunSession.start("игра про смотрителя маяка", tmp_path)
+    assert session.slug.startswith("igra_pro_smotritelya")
+
+
+def test_a_blank_name_does_not_swallow_the_order(tmp_path):
+    """`slugify("")` возвращает собственную заглушку, и она истинна.
+
+    Наивная запись `_slugify(title) or _slugify(prompt)` из-за этого теряла
+    текст заказа на каждом прогоне без названия.
+    """
+    session = RunSession.start("игра про смотрителя маяка", tmp_path, title="   ")
+    assert session.slug.startswith("igra_pro_smotritelya")
+
+
+def test_two_games_with_the_same_name_get_separate_folders(tmp_path):
+    first = RunSession.start("заказ", tmp_path, title="Вор напролом")
+    second = RunSession.start("заказ", tmp_path, title="Вор напролом")
+    assert first.slug == "vor_naprolom"
+    assert second.slug == "vor_naprolom_002"
+
+
+# ── Продолжение сорвавшегося заказа ─────────────────────────────────────────
+
+
+def test_the_run_remembers_whether_the_order_was_turnkey(tmp_path):
+    """«Под ключ» и «только ТЗ» — разные заказы, и продолжать их надо по-разному."""
+    turnkey = RunSession.start("заказ", tmp_path, title="Обвал для титана", kind="full")
+    assert turnkey.kind == "full"
+    assert RunSession.load(turnkey.run_id, tmp_path).kind == "full"
+
+    spec = RunSession.start("заказ", tmp_path, title="Эхо во тьме")
+    assert RunSession.load(spec.run_id, tmp_path).kind == "spec"
+
+
+def test_an_old_run_without_the_field_counts_as_a_spec_order(tmp_path):
+    """Прогоны, начатые до появления поля, лежат на диске без него.
+
+    Считать их «под ключ» нельзя: продолжение запустило бы кодового агента по
+    заказу, которого человек не делал, и это оплаченная работа.
+    """
+    import json
+
+    session = RunSession.start("заказ", tmp_path, title="Старый прогон")
+    data = json.loads(session.state_file.read_text(encoding="utf-8"))
+    del data["kind"]
+    session.state_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert RunSession.load(session.run_id, tmp_path).kind == "spec"
+
+
+def test_a_turnkey_order_still_builds_the_game_after_being_continued(tmp_path, monkeypatch):
+    """Сорвавшийся «под ключ» доводится до игры, а не до папки документов.
+
+    Продолжение шло единственной веткой — пайплайн спецификаций, — и заказ
+    «под ключ» после кнопки «Продолжить» молча заканчивался пакетом
+    документов. Человек ждал игру.
+    """
+    from app.config import config
+    from app.web.service import FactoryService
+
+    monkeypatch.setattr(config, "output_dir", tmp_path)
+    monkeypatch.setattr(config, "workspace_dir", tmp_path)
+
+    session = RunSession.start("гонки по луне", tmp_path, "test-provider", kind="full")
+    session.fail_step("idea_analyzer", "модель не вернула JSON")
+
+    service = FactoryService()
+    stages = []
+    monkeypatch.setattr(service, "run_spec_pipeline",
+                        lambda *a, **k: (tmp_path / session.slug))
+    monkeypatch.setattr(service, "_code_stage",
+                        lambda *a, **k: stages.append("код"))
+
+    started = service.continue_run(session.run_id)
+    assert started["status"] == "started"
+
+    job = service.studio_jobs.get(started["job_id"])
+    for _ in range(200):
+        if not job.active:
+            break
+        time.sleep(0.02)
+
+    assert job.status != "failed", job.error
+    assert stages == ["код"], "продолжение остановилось на спецификации"
+
+
+def test_a_spec_order_does_not_start_the_coding_agent(tmp_path, monkeypatch):
+    """Обратная сторона: «только ТЗ» не должно тайно превратиться в сборку."""
+    from app.config import config
+    from app.web.service import FactoryService
+
+    monkeypatch.setattr(config, "output_dir", tmp_path)
+    monkeypatch.setattr(config, "workspace_dir", tmp_path)
+
+    session = RunSession.start("гонки по луне", tmp_path, "test-provider")
+    session.fail_step("idea_analyzer", "модель не вернула JSON")
+
+    service = FactoryService()
+    stages = []
+    monkeypatch.setattr(service, "run_spec_pipeline",
+                        lambda *a, **k: (tmp_path / session.slug))
+    monkeypatch.setattr(service, "_code_stage",
+                        lambda *a, **k: stages.append("код"))
+
+    started = service.continue_run(session.run_id)
+    job = service.studio_jobs.get(started["job_id"])
+    for _ in range(200):
+        if not job.active:
+            break
+        time.sleep(0.02)
+
+    assert stages == []
+
+
+def test_the_same_run_cannot_be_continued_twice_at_once(tmp_path, monkeypatch):
+    """Два потока на одной сессии писали бы `state.json` друг поверх друга."""
+    from app.config import config
+    from app.web.service import FactoryService
+
+    monkeypatch.setattr(config, "output_dir", tmp_path)
+    monkeypatch.setattr(config, "workspace_dir", tmp_path)
+
+    session = RunSession.start("гонки по луне", tmp_path, "test-provider")
+    session.fail_step("idea_analyzer", "модель не вернула JSON")
+
+    service = FactoryService()
+    release = threading.Event()
+    monkeypatch.setattr(service, "run_spec_pipeline",
+                        lambda *a, **k: (release.wait(5), tmp_path / session.slug)[1])
+
+    first = service.continue_run(session.run_id)
+    assert first["status"] == "started"
+    second = service.continue_run(session.run_id)
+    release.set()
+
+    assert second["status"] == "error"
+    assert "идёт" in second["message"]

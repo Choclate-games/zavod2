@@ -355,6 +355,56 @@ if (!touchFiles.length) {
            touchFiles.map((f) => relative(ROOT, f)))
 }
 
+/* ── G11: обе схемы управления и переключение по устройству ────────────── */
+// Две готовые игры подряд уехали с одной «универсальной» раскладкой: тач-слой
+// создавался безусловно, а рядом висели keydown и pointer lock. На ПК кнопки
+// перехватывали мышь, на телефоне действия оставались на клавишах, которых
+// там нет. Проверяем ровно это: есть ли обе схемы и решает ли устройство,
+// какая из них работает.  CRITICAL_RULES §83–86.
+const hasKeyboard = /addEventListener\(\s*['"`]key(down|up)['"`]/.test(codeText)
+const hasTouchScheme = touchFiles.length > 0 ||
+  /pointerType\s*===\s*['"`]touch['"`]|setPointerCapture/.test(codeText)
+// Тип устройства спрашивают у моста; браузерные признаки допустимы только как
+// запасной вариант, поэтому засчитываем их лишь вместе с обращением к мосту.
+const asksDevice = /device\s*(\?\.)?\s*\.\s*type|deviceType|DEVICE_TYPE/.test(codeText)
+const switchesOnDevice = asksDevice &&
+  /['"`](mobile|tablet|desktop)['"`]/.test(codeText)
+
+if (!hasKeyboard && !hasTouchScheme) {
+  fail('G11', 'В коде нет ни клавиатурной, ни экранной схемы управления — играть нечем')
+} else if (!hasKeyboard) {
+  fail('G11', 'Есть только экранное управление: на ПК игру не во что играть — нужна схема клавиатура + мышь',
+       ['CRITICAL_RULES §83 — схем управления всегда две'])
+} else if (!hasTouchScheme) {
+  fail('G11', 'Есть только клавиатура и мышь: на телефоне игра неуправляема — нужна экранная схема',
+       ['CRITICAL_RULES §83 — схем управления всегда две'])
+} else if (!switchesOnDevice) {
+  fail('G11', 'Обе схемы написаны, но устройство ни разу не спрошено: активна всегда одна и та же раскладка',
+       ['Режим берётся из bridge.device.type — CRITICAL_RULES §84',
+        'Рецепт целиком: knowledge/ux/input_scheme_switching.md'])
+} else {
+  pass('G11', 'Есть обе схемы управления, режим выбирается по типу устройства')
+}
+
+/* ── G12: pointer lock не запрашивается в мобильной схеме ──────────────── */
+// requestPointerLock на телефоне либо не делает ничего, либо съедает первый
+// тап, а подсказка «кликните, чтобы захватить курсор» там невыполнима.
+const lockFiles = codeFiles.filter((f) => /requestPointerLock/.test(read(f)))
+if (!lockFiles.length) {
+  skip('G12', 'Pointer lock не используется — проверять нечего')
+} else {
+  // Запрос обязан стоять под проверкой режима: рядом в файле должно быть
+  // упоминание десктопной ветки или типа устройства.
+  const guarded = lockFiles.every((f) => {
+    const body = read(f)
+    return /desktop|device\s*(\?\.)?\s*\.\s*type|deviceType|inputMode|isTouch|isMobile/.test(body)
+  })
+  guarded
+    ? pass('G12', 'Pointer lock запрашивается только в десктопной схеме')
+    : fail('G12', 'Pointer lock запрашивается без проверки режима — на телефоне он съедает первый тап',
+           lockFiles.map((f) => relative(ROOT, f)))
+}
+
 /* ── G5: числа баланса читаются кодом ──────────────────────────────────── */
 // Имена ключей в balance.yaml транслитерированы дизайнером и в коде не
 // встречаются никогда, поэтому сверяем не имена, а сами числа: значение,
@@ -483,7 +533,7 @@ for (const r of results) {
 console.log('\nСборку, консоль, живой кадр и телефон проверяет не этот скрипт:')
 console.log('  node scripts/smoke.mjs — A1, A2 и S1–S6. Зелёный check-spec без зелёного smoke ничего не значит.')
 console.log('\nОстальное из ACCEPTANCE.md не проверяется машиной и остаётся человеку:')
-console.log('  B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры · G8–G10 глаголы, вертикаль и мёртвые методы')
+console.log('  B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры · G8–G10 глаголы, вертикаль и мёртвые методы · G13 обе раскладки глазами')
 
 if (failed.length) {
   console.error(`\nПровалено проверок: ${failed.length}. Игра не готова.`)

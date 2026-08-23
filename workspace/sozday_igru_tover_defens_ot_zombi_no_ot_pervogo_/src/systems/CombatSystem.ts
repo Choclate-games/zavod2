@@ -1,4 +1,4 @@
-﻿import { EntityManager } from '../entities/EntityManager';
+import { EntityManager } from '../entities/EntityManager';
 import { Player, PlayerInputState } from '../entities/Player';
 import { BALANCE } from '../balance';
 import { AudioManager } from '../audio/AudioManager';

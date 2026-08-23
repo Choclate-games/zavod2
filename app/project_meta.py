@@ -9,6 +9,12 @@
 
 Архив — это не удаление: игра остаётся на диске в полном составе, просто не
 показывается в главной витрине, пока не включён фильтр «Архив».
+
+Избранное — обратная по смыслу пометка и отдельный раздел витрины: сюда
+переезжает то, что получилось. Каталог игры при этом не двигается с места —
+переносить его пришлось бы вместе со слагом, чатами, состоянием прогона и
+записями расхода токенов, а все они привязаны к имени `workspace/<slug>`.
+Пометка даёт ту же «папку» в интерфейсе, ничего не ломая на диске.
 """
 
 from __future__ import annotations
@@ -28,6 +34,8 @@ _lock = threading.Lock()
 DEFAULT_META: Dict[str, Any] = {
     "rating": 0,
     "archived": False,
+    "favorite": False,
+    "favorited_at": "",
     "created_at": "",
     "archived_at": "",
     # Название, которое дал игре пользователь. Пустое — берём title из
@@ -105,9 +113,30 @@ def set_title(slug: str, title: str) -> Dict[str, Any]:
     return update(slug, title=(title or "").strip())
 
 
+def set_favorite(slug: str, favorite: bool) -> Dict[str, Any]:
+    """Переносит игру в «Избранное» и обратно.
+
+    Из архива при этом вынимает: держать игру одновременно в избранном и в
+    архиве нельзя — это две противоположные полки, и вещь, лежащая на обеих,
+    в витрине выглядит как ошибка.
+    """
+    stamp = datetime.now().isoformat(timespec="seconds") if favorite else ""
+    fields: Dict[str, Any] = {"favorite": bool(favorite), "favorited_at": stamp}
+    if favorite:
+        fields["archived"] = False
+        fields["archived_at"] = ""
+    return update(slug, **fields)
+
+
 def set_archived(slug: str, archived: bool) -> Dict[str, Any]:
     stamp = datetime.now().isoformat(timespec="seconds") if archived else ""
-    return update(slug, archived=bool(archived), archived_at=stamp)
+    fields: Dict[str, Any] = {"archived": bool(archived), "archived_at": stamp}
+    if archived:
+        # Обратная сторона правила из set_favorite: в архив — значит, из
+        # избранного.
+        fields["favorite"] = False
+        fields["favorited_at"] = ""
+    return update(slug, **fields)
 
 
 def forget(slug: str) -> None:

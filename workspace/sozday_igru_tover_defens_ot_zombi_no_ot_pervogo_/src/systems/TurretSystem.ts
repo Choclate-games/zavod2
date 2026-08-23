@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { EntityManager, TurretSlot, ZombieEntity } from '../entities/EntityManager';
 import { BALANCE } from '../balance';
 import { AudioManager } from '../audio/AudioManager';

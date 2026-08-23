@@ -88,13 +88,12 @@ export class LeaderboardModalScreen {
     this.listContainer.innerHTML = '';
     mockLeaders.forEach((l, idx) => {
       const row = document.createElement('div');
+      row.className = l.isPlayer ? 'leaderboard-row player' : 'leaderboard-row';
       row.style.display = 'flex';
       row.style.justifyContent = 'space-between';
       row.style.alignItems = 'center';
       row.style.padding = '8px 12px';
       row.style.borderRadius = 'var(--radius-sm)';
-      row.style.background = l.isPlayer ? 'rgba(243, 156, 18, 0.2)' : 'rgba(44, 62, 80, 0.5)';
-      row.style.border = l.isPlayer ? '1px solid var(--color-secondary)' : '1px solid transparent';
 
       row.innerHTML = `
         <div style="display: flex; gap: 12px; align-items: center;">

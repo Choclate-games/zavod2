@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "sozday_igru_tover_defens_ot_zombi_no_ot_pervogo_",
   "private": true,
   "version": "0.1.0",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
-    "@playgama/bridge": "^2.3.0",
+    "@playgama/bridge": "^2.1.0",
     "howler": "^2.2.4",
     "three": "^0.174.0"
   },

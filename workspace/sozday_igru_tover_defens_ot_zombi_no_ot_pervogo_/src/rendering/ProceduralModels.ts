@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 
 export class ProceduralModels {
   public static createTurretMesh(): THREE.Group {

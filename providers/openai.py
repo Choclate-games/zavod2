@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Type
 import requests
 
 from providers.base import AIProvider, ImageProvider, T
+from providers import json_output
 from providers.local import LocalAIProvider, LocalImageProvider
 
 class OpenAIProvider(AIProvider):
@@ -86,7 +87,7 @@ class OpenAIProvider(AIProvider):
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            parsed = json_output.loads(content)
             return response_model.model_validate(parsed)
         except Exception as e:
             print(f"OpenAI structured call failed ({e}), falling back to Local Expert...")

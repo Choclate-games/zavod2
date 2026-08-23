@@ -6,10 +6,22 @@
 за один запуск кладёт всё в `docs/ref/`. Дальше прогон идёт офлайн: файлы уже
 локальные.
 
-Адрес — Contents API, а не raw.githubusercontent. Для публичного репозитория
-работают оба, но приватный raw требует одноразовый `?token=`, который протухает
-за минуты; у Contents API приватный и публичный отличаются только заголовком
-Authorization.
+Адресов два, и порядок между ними важнее, чем кажется.
+
+Сначала пробуется `raw.githubusercontent.com`. Это CDN: он раздаёт файлы
+публичного репозитория без счётчика запросов.
+
+Contents API остаётся вторым заходом — для приватного репозитория, где raw
+требует одноразовый `?token=`, протухающий за минуты, а у API приватный и
+публичный отличаются одним заголовком Authorization.
+
+Почему не наоборот, как было раньше: неавторизованный Contents API отдаёт
+**шестьдесят запросов в час на IP**. В манифесте одной игры сорок с лишним
+файлов, а пакет фабрики запускает до десяти прогонов разом — лимит выгорал на
+первой же игре, и все остальные получали HTTP 403. В журналах это выглядело как
+«База знаний недоступна (403 — токен не задан)», хотя репозиторий публичный и
+никакой токен для него не нужен: игры просто собирались вслепую, без правил,
+чек-листов и рецептов фабрики.
 """
 
 FETCH_KNOWLEDGE_MJS = r'''#!/usr/bin/env node
@@ -48,6 +60,10 @@ function readManifest() {
     })()
 }
 
+function rawUrl(repo, ref, path) {
+    return `https://raw.githubusercontent.com/${repo}/${encodeURIComponent(ref)}/${encodeURI(path)}`
+}
+
 function contentsUrl(repo, ref, path) {
     return `https://api.github.com/repos/${repo}/contents/${encodeURI(path)}?ref=${encodeURIComponent(ref)}`
 }
@@ -58,7 +74,13 @@ function contentsUrl(repo, ref, path) {
 // дальше все запросы идут без него.
 let tokenRejected = false
 
-async function request(repo, ref, path, useToken) {
+async function requestRaw(repo, ref, path) {
+    return fetch(rawUrl(repo, ref, path), {
+        headers: { 'User-Agent': 'zavod-fetch-knowledge' },
+    })
+}
+
+async function requestApi(repo, ref, path, useToken) {
     const headers = {
         Accept: 'application/vnd.github.raw',
         'User-Agent': 'zavod-fetch-knowledge',
@@ -68,21 +90,27 @@ async function request(repo, ref, path, useToken) {
 }
 
 async function fetchOne(repo, ref, entry) {
-    const useToken = TOKEN && !tokenRejected
-    let res = await request(repo, ref, entry.path, useToken)
-    if (useToken && (res.status === 401 || res.status === 403)) {
-        tokenRejected = true
-        console.log('Токен отклонён — пробую без него (годится, если репозиторий публичный).')
-        res = await request(repo, ref, entry.path, false)
+    // Сначала CDN: у него нет часового лимита на запросы, и для публичной базы
+    // этого хватает всегда. К Contents API идём, только если raw отказал —
+    // то есть репозиторий приватный.
+    let res = await requestRaw(repo, ref, entry.path)
+    if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 404)) {
+        const useToken = TOKEN && !tokenRejected
+        res = await requestApi(repo, ref, entry.path, useToken)
+        if (useToken && (res.status === 401 || res.status === 403)) {
+            tokenRejected = true
+            console.log('Токен отклонён — пробую без него (годится, если репозиторий публичный).')
+            res = await requestApi(repo, ref, entry.path, false)
+        }
     }
     if (!res.ok) {
         let hint = ''
         if (res.status === 404 && !TOKEN) {
-            hint = ' — репозиторий приватный? задайте ZAVOD_KNOWLEDGE_TOKEN'
+            hint = ' — нет такого пути, либо репозиторий приватный: задайте ZAVOD_KNOWLEDGE_TOKEN'
         } else if (res.status === 404) {
             hint = ' — нет такого пути в репозитории базы'
         } else if (res.status === 401 || res.status === 403) {
-            hint = ' — токен не подходит или исчерпан лимит запросов'
+            hint = ' — токен не подходит или исчерпан часовой лимит Contents API'
         }
         throw new Error(`HTTP ${res.status}${hint}`)
     }

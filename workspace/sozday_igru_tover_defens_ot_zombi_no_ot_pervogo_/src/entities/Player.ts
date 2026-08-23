@@ -1,4 +1,4 @@
-﻿import { BALANCE } from '../balance';
+import { BALANCE } from '../balance';
 import { EventBus } from '../core/EventBus';
 
 export interface PlayerInputState {
@@ -20,9 +20,9 @@ export class Player {
   public yaw = 0;
   public pitch = 0;
 
-  public cryoTank = BALANCE.thermal.zapas_krio_hladagenta_v_rantse;
+  public cryoTank: number = BALANCE.thermal.zapas_krio_hladagenta_v_rantse;
   public isCarryingCell = false;
-  public stamina = BALANCE.player.max_stamina;
+  public stamina: number = BALANCE.player.max_stamina;
   public meleeCooldown = 0;
 
   private stepTime = 0;
@@ -40,11 +40,11 @@ export class Player {
       this.stamina = Math.max(0, this.stamina - BALANCE.player.stamina_drain_sprint * dt);
       if (this.stamina <= 0) isSprinting = false;
     } else {
-      this.stamina = Math.min(BALANCE.player.max_stamina, this.stamina + BALANCE.player.stamina_recovery * dt);
+      this.stamina = Math.min(BALANCE.player.max_stamina as number, this.stamina + BALANCE.player.stamina_recovery * dt);
     }
 
     // 3. Скорость перемещения с учетом веса Overcharge-ячейки
-    let baseSpeed = isSprinting ? BALANCE.player.sprint_speed : BALANCE.player.walk_speed;
+    let baseSpeed: number = isSprinting ? BALANCE.player.sprint_speed : BALANCE.player.walk_speed;
     if (this.isCarryingCell) {
       baseSpeed *= (1.0 - BALANCE.overcharge.shtraf_k_skorosti_inzhenera_pri_perenoske_yacheyki);
     }

@@ -1,8 +1,8 @@
-﻿import bridge from '@playgama/bridge';
+import bridge from '@playgama/bridge';
 import { EventBus } from '../core/EventBus';
 
 class PlaygamaServiceImpl {
-  private isInitialized = false;
+  public isInitialized = false;
   private isReadySent = false;
   private lastInterstitialTime = 0;
   private isRewardedShowing = false;
@@ -28,7 +28,7 @@ class PlaygamaServiceImpl {
     if (this.isReadySent) return;
     this.isReadySent = true;
     try {
-      if (bridge.platform) {
+      if (this.isInitialized && bridge.platform) {
         bridge.platform.sendMessage('game_ready');
         bridge.platform.sendMessage('in_game_loading_stopped');
       }
@@ -36,6 +36,7 @@ class PlaygamaServiceImpl {
   }
 
   public setProgress(percent: number): void {
+    if (!this.isInitialized) return;
     try {
       if (bridge.platform && typeof bridge.platform.sendMessage === 'function') {
         const p = Math.max(0, Math.min(100, Math.round(percent)));
@@ -46,7 +47,7 @@ class PlaygamaServiceImpl {
 
   private setupListeners(): void {
     try {
-      if (bridge && bridge.platform && bridge.EVENT_NAME) {
+      if (this.isInitialized && bridge && bridge.platform && bridge.EVENT_NAME) {
         bridge.platform.on(bridge.EVENT_NAME.PAUSE_STATE_CHANGED, (isPaused: boolean) => {
           EventBus.emit('PAUSE_TRIGGERED', !!isPaused);
         });
@@ -65,14 +66,17 @@ class PlaygamaServiceImpl {
     }
     this.lastInterstitialTime = now;
     try {
-      if (bridge && bridge.advertisement && typeof bridge.advertisement.showInterstitial === 'function') {
-        bridge.advertisement.showInterstitial()
-          .then(() => {
+      if (this.isInitialized && bridge && bridge.advertisement) {
+        const res = bridge.advertisement.showInterstitial() as unknown;
+        if (res && typeof (res as Promise<void>).then === 'function') {
+          (res as Promise<void>).then(() => {
             if (onClosed) onClosed();
-          })
-          .catch(() => {
+          }).catch(() => {
             if (onClosed) onClosed();
           });
+        } else {
+          if (onClosed) onClosed();
+        }
       } else {
         if (onClosed) onClosed();
       }
@@ -86,7 +90,7 @@ class PlaygamaServiceImpl {
     this.isRewardedShowing = true;
 
     try {
-      if (bridge && bridge.advertisement && typeof bridge.advertisement.showRewarded === 'function') {
+      if (this.isInitialized && bridge && bridge.advertisement) {
         let rewardedGranted = false;
 
         const onStateChange = (state: string) => {
@@ -96,7 +100,8 @@ class PlaygamaServiceImpl {
           } else if (state === 'closed' || state === 'failed') {
             this.isRewardedShowing = false;
             if (bridge.advertisement && typeof bridge.advertisement.off === 'function') {
-              bridge.advertisement.off('rewarded_state_changed', onStateChange);
+              const ev = 'rewarded_state_changed';
+              bridge.advertisement.off(ev as any, onStateChange);
             }
             if (!rewardedGranted && onError && state === 'failed') {
               onError();
@@ -105,13 +110,17 @@ class PlaygamaServiceImpl {
         };
 
         if (bridge.advertisement && typeof bridge.advertisement.on === 'function') {
-          bridge.advertisement.on('rewarded_state_changed', onStateChange);
+          const ev = 'rewarded_state_changed';
+          bridge.advertisement.on(ev as any, onStateChange);
         }
 
-        bridge.advertisement.showRewarded().catch(() => {
-          this.isRewardedShowing = false;
-          if (onError) onError();
-        });
+        const res = bridge.advertisement.showRewarded() as unknown;
+        if (res && typeof (res as Promise<void>).catch === 'function') {
+          (res as Promise<void>).catch(() => {
+            this.isRewardedShowing = false;
+            if (onError) onError();
+          });
+        }
       } else {
         this.isRewardedShowing = false;
         // Режим оффлайн/тест — выдаем награду
@@ -124,6 +133,7 @@ class PlaygamaServiceImpl {
   }
 
   public isRewardedSupported(): boolean {
+    if (!this.isInitialized) return true;
     try {
       return !!(bridge && bridge.advertisement && bridge.advertisement.isRewardedSupported);
     } catch {

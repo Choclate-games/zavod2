@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from app import acceptance, chat_store, notify, project_meta, sandbox, snapshots, uploads
+from app import acceptance, chat_store, library, notify, project_meta, sandbox, snapshots, uploads
 from app import gate_stats
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
@@ -40,6 +40,7 @@ from app.pipeline import Pipeline
 from app.run_session import RunPaused, RunSession
 from app.web.bus import bus
 
+from providers import agent_usage
 from providers.agent_usage import AgentUsageTracker, human_tokens
 from providers.agy import AGYProvider, AGYQuotaTracker
 from providers.fish_audio import FishAudioClient, FishAudioError, FORMATS as TTS_FORMATS, \
@@ -54,6 +55,7 @@ from agents.critic import SelfCritiqueAgent
 from agents.game_designer import GameDesignerAgent
 from agents.project_director import ProjectDirectorAgent
 from agents.idea_analyzer import IdeaAnalyzerAgent
+from agents import idea_brainstormer as brainstormer
 from agents.idea_brainstormer import IdeaBrainstormerAgent
 from agents.mechanics_architect import MechanicsArchitectAgent
 from agents.knowledge_curator import KnowledgeCuratorAgent
@@ -71,6 +73,12 @@ from generators.output_generator import OutputGenerator
 
 MODEL_DEFAULT = "по умолчанию"
 EFFORT_AUTO = "auto (не передавать)"
+
+# Демо-стенд базы знаний — не игра студии. Он лежит в той же песочнице (иначе
+# кодовый агент до него не дотянется), но в списке проектов его быть не должно:
+# карточка «knowledge-showcase» неотличима от выпущенной игры, её путали с
+# проектом и открывали как «ещё одну игру». У стенда своя кнопка в навигации.
+DEMO_SLUG = "knowledge-showcase"
 
 AGENT_LABELS: Dict[str, str] = {
     "agy": "⚡ agy (Antigravity CLI)",
@@ -462,20 +470,37 @@ class FactoryService:
              lambda ctx: SelfCritiqueAgent().run(ctx)),
         ]
 
-    def run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
-                          mode: str, image_provider: str, label: str = "",
-                          resume_run_id: Optional[str] = None,
-                          job: Optional[StudioJob] = None) -> Path:
+    def run_spec_pipeline(self, *args: Any, **kwargs: Any) -> Path:
+        """Прогон агентов спецификации внутри границы учёта расхода.
+
+        Тонкая обёртка нужна ровно для границы: пайплайн помечает свой поток
+        слагом проекта (agent_usage.set_project), и без парного снятия метка
+        пережила бы прогон. В студии каждый прогон живёт в своём потоке и
+        проблема не видна, а из CLI и тестов пайплайн вызывается прямо в
+        главном потоке — там чужой слаг оставался бы висеть на всём, что
+        фабрика сделает следующим.
+        """
+        with agent_usage.use_project(""):
+            return self._run_spec_pipeline(*args, **kwargs)
+
+    def _run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
+                           mode: str, image_provider: str, label: str = "",
+                           resume_run_id: Optional[str] = None,
+                           job: Optional[StudioJob] = None,
+                           attachments: Optional[List[str]] = None,
+                           title: str = "", run_kind: str = "spec") -> Path:
         """Полный прогон агентов спецификации (синхронно, в рабочем потоке).
 
         `job` — карточка прогона в студии: в неё уходят журнал и прогресс, а
-        имя игры, слаг и run_id проставляются по ходу пайплайна."""
+        имя игры, слаг и run_id проставляются по ходу пайплайна.
+        `attachments` — имена файлов из предбанника (`app.uploads`), которые
+        человек приложил к заказу до старта прогона.
+        `title` — название игры, если оно известно до прогона (заказ из
+        брейнсторма приносит его готовым). По нему называется каталог проекта:
+        без него имя берётся из первых слов заказа, а они у всех заказов модели
+        одинаковы («Динамичный 3D … с видом …»)."""
         tag = f"{label} " if label else ""
         self._bind_job(job)
-        # Метка времени старта: каталог игры появится только в конце пайплайна,
-        # а токены агенты жгут с первой минуты. По этой метке расход потом
-        # переписывается на слаг проекта (reassign_project).
-        pipeline_started = time.time()
         self.update_progress(5, f"{tag}Инициализация контекста генерации...")
 
         if resume_run_id:
@@ -485,13 +510,20 @@ class FactoryService:
             self.append_log(f"{tag}▶ Продолжаю прогон {session.run_id}: {session.raw_prompt}")
             session.note("Прогон продолжен из веба")
         else:
-            session = RunSession.start(prompt, config.output_dir, provider, mode)
+            session = RunSession.start(prompt, config.output_dir, provider, mode,
+                                       title=title, kind=run_kind)
             self.append_log(f"{tag}Прогон {session.run_id} | чат: {session.chat_file}")
 
         if job is not None:
             job.run_id = session.run_id
             job.slug = session.slug
             self._publish_job(job)
+
+        # С этой секунды весь расход потока пишется на проект. Агенты
+        # спецификации работают без рабочего каталога, и определить владельца
+        # по пути (`project_from_path`) для них нельзя — а поток у прогона
+        # свой, см. providers/agent_usage.use_project.
+        agent_usage.set_project(session.slug)
 
         self.append_log(
             f"{tag}Запуск пайплайна спецификаций | Провайдер: {provider} | "
@@ -502,6 +534,25 @@ class FactoryService:
         ctx.session = session
         # Каталог проекта уже заведён сессией — генератор пакета пишет в него.
         ctx.game_dir = session.project_dir
+
+        # Материалы заказа переезжают в проект до первого вызова модели: пути в
+        # промпте обязаны быть относительными корню игры, иначе кодовый агент до
+        # файлов не дотянется (ему разрешён только каталог его игры).
+        # Только то, что назвали поимённо. `adopt(slug, None)` означает «забери
+        # весь предбанник» — на продолжении прогона это утащило бы в игру чужие
+        # файлы, приложенные к следующему заказу.
+        adopted = uploads.adopt(session.slug, attachments) if attachments else []
+        if adopted:
+            ctx.attachments = adopted
+            ctx.attachments_root = uploads.uploads_dir(session.slug)
+            self.append_log(
+                f"{tag}📎 К заказу приложено файлов: {len(adopted)} — "
+                + ", ".join(item["original"] for item in adopted[:6])
+            )
+            session.note(
+                "Материалы заказа: "
+                + ", ".join(f"`{item['rel']}`" for item in adopted)
+            )
         bus.publish("projects.changed")
         if resume_run_id:
             session.restore(ctx)
@@ -569,12 +620,13 @@ class FactoryService:
             self._publish_job(job)
         bus.publish("runs.changed")
 
-        moved = self.agent_usage_tracker.reassign_project(pipeline_started, game_dir.name)
+        # Переименование каталога на финише (счётчик _002 при совпадении имён)
+        # оставило бы расход на старом слаге, поэтому владельца обновляем.
+        agent_usage.set_project(game_dir.name)
         spent = self.agent_usage_tracker.project_status(game_dir.name)
         self.append_log(
             f"{tag}📊 Расход на спецификацию: {spent['tokens_human']} токенов "
-            f"за {spent['runs']} запусков агентов (записано на проект {game_dir.name}"
-            f"{f', перенесено записей: {moved}' if moved else ''})."
+            f"за {spent['runs']} запусков агентов (записано на проект {game_dir.name})."
         )
         bus.publish("quota.changed")
         return game_dir
@@ -630,15 +682,29 @@ class FactoryService:
         )
 
     def continue_run(self, run_id: str, opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Продолжить приостановленный прогон прямо из веба."""
+        """Продолжить прогон с того шага, на котором он встал.
+
+        Это же «повторить» для сорвавшегося заказа: пройденные шаги сессия
+        пропускает, а упавший переспрашивает у модели заново. Отдельной
+        кнопки «начать сначала» нет намеренно — она сожгла бы токены на
+        двенадцати шагах, которые уже сделаны и лежат в снимке.
+        """
         opts = opts or {}
         try:
             session = RunSession.load(run_id, config.output_dir)
         except FileNotFoundError as exc:
             return {"status": "error", "message": str(exc)}
+        if self._run_is_busy(session.run_id):
+            return {"status": "error", "message": "Этот прогон уже идёт — дождитесь его."}
 
         provider = opts.get("provider") or session.provider_name or self.default_agent()
         image_provider = opts.get("image_provider") or "qwen"
+        # Заказ «под ключ» доводится до игры и на продолжении: чем он был,
+        # помнит сама сессия, а не карточка прогона, которой к этому моменту
+        # может уже не быть.
+        kind = (opts.get("kind") or session.kind or "spec").strip()
+        coder_key = provider if provider in AGENT_KEYS else self.default_agent()
+        model = opts.get("model") or None
 
         def body(job: StudioJob) -> None:
             job.run_id = session.run_id
@@ -648,23 +714,40 @@ class FactoryService:
                 session.raw_prompt, None, provider, session.mode, image_provider,
                 resume_run_id=session.run_id, job=job,
             )
-            self.update_progress(100, "✅ Спецификация готова!")
             self.append_log(f"УСПЕХ! Прогон {session.run_id} доведён до конца: workspace/{game_dir.name}")
-            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+            if kind != "full":
+                self.update_progress(100, "✅ Спецификация готова!")
+                bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+                return
+            bus.publish("projects.changed")
+            if job.should_stop():
+                return
+            self._code_stage(job, game_dir, coder_key, model,
+                             int(opts.get("repair_attempts", 2)))
 
         job = self._launch_job(
-            kind="spec", title=self._job_title(session.title or session.raw_prompt),
+            kind=kind, title=self._job_title(session.title or session.raw_prompt),
             prompt=session.raw_prompt, provider=provider, mode=session.mode, body=body,
         )
         return {"status": "started", "run_id": session.run_id, "job_id": job.id}
+
+    def _run_is_busy(self, run_id: str) -> bool:
+        """Идёт ли этот прогон прямо сейчас — защита от двойного нажатия.
+
+        Два потока на одной сессии писали бы `state.json` друг поверх друга и
+        оба платили бы за одни и те же шаги.
+        """
+        return any(job.run_id == run_id and job.active
+                   for job in self.studio_jobs.all_jobs())
+
 
     def _report_pause(self, paused: RunPaused) -> None:
         """Пауза — это не ошибка: всё сделанное лежит в сессии."""
         self.update_progress(0, "⏸ Прогон приостановлен")
         self.append_log(
             f"\n⏸ ПРОГОН ПРИОСТАНОВЛЕН: {paused}\n"
-            f"Всё сделанное сохранено. Чат проекта → «▶ Продолжить прогон», "
-            f"и работа пойдёт со следующего шага."
+            f"Всё сделанное сохранено. Кнопка «▶ Продолжить» на карточке прогона "
+            f"(или в чате проекта) — и работа пойдёт с этого же шага."
         )
         bus.publish("runs.changed")
 
@@ -682,11 +765,14 @@ class FactoryService:
         provider = opts.get("provider") or "agy"
         mode = opts.get("mode") or "standard"
         image_provider = opts.get("image_provider") or "qwen"
+        attachments = self._attachment_names(opts)
+        title = (opts.get("title") or "").strip()
 
         def body(job: StudioJob) -> None:
             self.update_progress(5, "Инициализация пайплайна спецификаций...")
             game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode,
-                                              image_provider, job=job)
+                                              image_provider, job=job,
+                                              attachments=attachments, title=title)
             self.update_progress(100, "✅ Спецификация готова!")
             self.append_log(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
             bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
@@ -694,6 +780,81 @@ class FactoryService:
         job = self._launch_job(kind="spec", title=self._job_title(prompt), prompt=prompt,
                                provider=provider, mode=mode, body=body)
         return {"status": "started", "job_id": job.id}
+
+    def _code_stage(self, job: StudioJob, game_dir: Path, coder_key: str,
+                    model: Optional[str] = None, repair_attempts: int = 2) -> None:
+        """Второй этап «под ключ»: терминальный агент собирает игру по фазам.
+
+        Вынесено из start_full_game, чтобы у продолжения прогона был тот же
+        второй этап. Иначе заказ «под ключ», сорвавшийся на спецификации,
+        после «▶ Продолжить» доводился бы только до пакета документов и
+        молча останавливался — человек ждал бы игру, а получил бы папку.
+        """
+        data = self._read_yaml(sandbox.docs_dir(game_dir.name) / "GAME_DATA.yaml")
+        title = data.get("title", game_dir.name)
+
+        coder_title = AGENT_LABELS.get(coder_key, coder_key)
+        self.update_progress(96, f"⚡ ЭТАП 2: {coder_key.upper()} собирает игру по фазам...")
+        self.append_log(
+            LINE_THIN
+            + f"⚡ {coder_title} строит игру в {game_dir.name} фазами: ядро, "
+            + "содержание, оболочка, доводка. Каждую принимает фабрика — "
+            + "сборкой, запуском в браузере и проверками." + BR + LINE_THIN
+        )
+
+        sandbox.ensure_project_docs(game_dir, title)
+        provider_obj = self.agent_provider(coder_key, model=model, yolo=True)
+
+        # Игра собирается фазами, и каждую принимает фабрика, а не агент:
+        # она запускает сборку, открывает игру в браузере и возвращает
+        # агенту то, что не работает. Один заход «напиши игру целиком»
+        # давал двадцать заготовок вместо трёх работающих систем.
+        outcome = build_game(
+            project_dir=game_dir,
+            provider=provider_obj,
+            title=title,
+            on_log=self.append_log,
+            progress=lambda percent, step: self.update_progress(
+                96 + max(0, min(3, percent // 25)), step),
+            stop_check=job.should_stop,
+            repair_attempts=repair_attempts,
+        )
+
+        report = outcome.last_report
+        self.append_log(
+            LINE_THIN + "Итог сборки по фазам:" + BR + outcome.summary() + BR
+        )
+        if outcome.stopped:
+            self.update_progress(100, "● Сборка остановлена")
+        elif outcome.ok:
+            self.update_progress(100, "🎉 Игра прошла приёмку!")
+            self.append_log(
+                LINE_FAT
+                + f"✅ УСПЕХ! Игра в workspace/{game_dir.name} собрана и принята." + BR
+                + (report.metrics_line() + BR if report else "")
+                + "▶ Вкладка «🌐 Играть» запустит её в браузере." + BR + LINE_FAT
+            )
+        else:
+            self.update_progress(100, "⚠️ Игра собрана, приёмка красная")
+            self.append_log(
+                LINE_FAT
+                + f"⚠️ Игра в workspace/{game_dir.name} собрана, но приёмку не прошла: "
+                + (report.summary() if report else "отчёта нет") + BR
+                + "Отчёт лежит в .factory/gate.json — открой чат проекта и попроси починить."
+                + BR + LINE_FAT
+            )
+
+        sandbox.append_devlog(
+            game_dir,
+            f"Сборка по фазам агентом {coder_key.upper()}",
+            "- **Задача**: довести игру до приёмки фабрики по фазам." + BR
+            + "- **Сделано**:" + BR + outcome.summary() + BR
+            + "- **Приёмка**: "
+            + (report.summary() if report else "не запускалась") + "." + BR
+            + "- **Числа игрока**: " + (report.metrics_line() if report else "—"),
+        )
+        bus.publish("projects.changed")
+        bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
 
     def start_full_game(self, opts: Dict[str, Any]) -> Dict[str, Any]:
         """Под ключ: спецификация + кодогенерация терминальным агентом."""
@@ -709,6 +870,11 @@ class FactoryService:
         # из настроек чатов.
         coder_key = provider if provider in AGENT_KEYS else self.default_agent()
         model = opts.get("model") or None
+        attachments = self._attachment_names(opts)
+        # Имя переменной не `title`: ниже в этом же замыкании есть присваивание
+        # `title = data.get(...)`, и одноимённая внешняя переменная стала бы
+        # локальной для всего тела — с UnboundLocalError на первом же обращении.
+        idea_title = (opts.get("title") or "").strip()
 
         def body(job: StudioJob) -> None:
             self.update_progress(5, "Инициализация мульти-агентного пайплайна...")
@@ -720,76 +886,15 @@ class FactoryService:
             if job.should_stop():
                 return
             game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode,
-                                              image_provider, job=job)
+                                              image_provider, job=job,
+                                              attachments=attachments,
+                                              title=idea_title, run_kind="full")
             bus.publish("projects.changed")
             if job.should_stop():
                 return
 
-            data = self._read_yaml(sandbox.docs_dir(game_dir.name) / "GAME_DATA.yaml")
-            title = data.get("title", game_dir.name)
-
-            coder_title = AGENT_LABELS.get(coder_key, coder_key)
-            self.update_progress(96, f"⚡ ЭТАП 2: {coder_key.upper()} собирает игру по фазам...")
-            self.append_log(
-                LINE_THIN
-                + f"⚡ {coder_title} строит игру в {game_dir.name} фазами: ядро, "
-                + "содержание, оболочка, доводка. Каждую принимает фабрика — "
-                + "сборкой, запуском в браузере и проверками." + BR + LINE_THIN
-            )
-
-            sandbox.ensure_project_docs(game_dir, title)
-            provider_obj = self.agent_provider(coder_key, model=model, yolo=True)
-
-            # Игра собирается фазами, и каждую принимает фабрика, а не агент:
-            # она запускает сборку, открывает игру в браузере и возвращает
-            # агенту то, что не работает. Один заход «напиши игру целиком»
-            # давал двадцать заготовок вместо трёх работающих систем.
-            outcome = build_game(
-                project_dir=game_dir,
-                provider=provider_obj,
-                title=title,
-                on_log=self.append_log,
-                progress=lambda percent, step: self.update_progress(
-                    96 + max(0, min(3, percent // 25)), step),
-                stop_check=job.should_stop,
-                repair_attempts=int(opts.get("repair_attempts", 2)),
-            )
-
-            report = outcome.last_report
-            self.append_log(
-                LINE_THIN + "Итог сборки по фазам:" + BR + outcome.summary() + BR
-            )
-            if outcome.stopped:
-                self.update_progress(100, "● Сборка остановлена")
-            elif outcome.ok:
-                self.update_progress(100, "🎉 Игра прошла приёмку!")
-                self.append_log(
-                    LINE_FAT
-                    + f"✅ УСПЕХ! Игра в workspace/{game_dir.name} собрана и принята." + BR
-                    + (report.metrics_line() + BR if report else "")
-                    + "▶ Вкладка «🌐 Играть» запустит её в браузере." + BR + LINE_FAT
-                )
-            else:
-                self.update_progress(100, "⚠️ Игра собрана, приёмка красная")
-                self.append_log(
-                    LINE_FAT
-                    + f"⚠️ Игра в workspace/{game_dir.name} собрана, но приёмку не прошла: "
-                    + (report.summary() if report else "отчёта нет") + BR
-                    + "Отчёт лежит в .factory/gate.json — открой чат проекта и попроси починить."
-                    + BR + LINE_FAT
-                )
-
-            sandbox.append_devlog(
-                game_dir,
-                f"Сборка по фазам агентом {coder_key.upper()}",
-                "- **Задача**: довести игру до приёмки фабрики по фазам." + BR
-                + "- **Сделано**:" + BR + outcome.summary() + BR
-                + "- **Приёмка**: "
-                + (report.summary() if report else "не запускалась") + "." + BR
-                + "- **Числа игрока**: " + (report.metrics_line() if report else "—"),
-            )
-            bus.publish("projects.changed")
-            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+            self._code_stage(job, game_dir, coder_key, model,
+                             int(opts.get("repair_attempts", 2)))
 
         job = self._launch_job(kind="full", title=self._job_title(prompt), prompt=prompt,
                                provider=provider, mode=mode, body=body)
@@ -844,6 +949,10 @@ class FactoryService:
         for idea in ideas:
             payload = dict(opts)
             payload["prompt"] = idea.get("prompt_seed") or idea.get("title") or ""
+            # Название идеи едет отдельным полем: по нему называется каталог
+            # проекта. Без него десять игр пакета получают десять каталогов,
+            # начинающихся с одинаковой жанровой шапки заказа.
+            payload["title"] = idea.get("title") or ""
             # Рендерер идеи важнее выбранного в студии: брейнсторм уже решил,
             # 2D это или 3D.
             if idea.get("renderer"):
@@ -894,6 +1003,14 @@ class FactoryService:
         }
 
     def brainstorm(self, provider: str, hint: str = "", count: int = 10) -> List[Dict[str, Any]]:
+        # Что фабрика уже выпустила — тоже «уже показывали»: без этого списка
+        # брейнштормер раз за разом предлагал вариацию игры из соседней папки.
+        try:
+            brainstormer.remember_titles(
+                [p.get("title") or p.get("slug") or "" for p in self.list_projects()]
+            )
+        except Exception as exc:   # витрина не должна ронять брейнсторм
+            self.append_log(f"⚠️ Не удалось прочитать список выпущенных игр: {exc}")
         ideas = IdeaBrainstormerAgent().brainstorm(
             provider_name=provider, theme_hint=hint, count=count
         )
@@ -910,6 +1027,17 @@ class FactoryService:
             }
             for idea in ideas
         ]
+
+    @staticmethod
+    def _attachment_names(opts: Dict[str, Any]) -> List[str]:
+        """Имена вложений заказа из тела запроса.
+
+        Пустой список и «поле не прислали» — разные вещи только для чата, где
+        вложения относятся к одному сообщению. У прогона вложение одно на заказ,
+        поэтому здесь достаточно списка имён.
+        """
+        raw = opts.get("attachments")
+        return [str(name) for name in raw if name] if isinstance(raw, list) else []
 
     @staticmethod
     def _renderer(opts: Dict[str, Any]) -> Optional[str]:
@@ -952,6 +1080,8 @@ class FactoryService:
         spend = {row["project"]: row for row in self.agent_usage_tracker.project_stats()}
         for path in sandbox.list_projects():
             slug = path.name
+            if slug == DEMO_SLUG:
+                continue  # у демо-стенда своя кнопка, в витрине игр ему не место
             docs = sandbox.docs_dir(slug)
             data = self._read_yaml(docs / "GAME_DATA.yaml")
             preview = docs / "preview" / "concept_preview.png"
@@ -979,6 +1109,8 @@ class FactoryService:
                 "created_label": self._date_label(created_at),
                 "rating": int(meta.get("rating") or 0),
                 "archived": bool(meta.get("archived")),
+                "favorite": bool(meta.get("favorite")),
+                "favorited_at": meta.get("favorited_at") or "",
                 "chats": len(chat_store.list_sessions(slug)),
                 "tokens": spend.get(slug, {}).get("tokens", 0),
                 "tokens_human": spend.get(slug, {}).get("tokens_human", "0"),
@@ -1051,6 +1183,21 @@ class FactoryService:
             "status": "success",
             "archived": meta["archived"],
             "message": "📦 Игра убрана в архив" if archived else "↩️ Игра возвращена из архива",
+        }
+
+    def set_project_favorite(self, slug: str, favorite: bool) -> Dict[str, Any]:
+        """Полка «Избранное»: сюда переезжает то, что получилось.
+
+        Каталог игры остаётся на месте — см. app/project_meta: слаг держит на
+        себе чаты, состояние прогона и учёт токенов, и физический перенос
+        оборвал бы все три связи.
+        """
+        meta = project_meta.set_favorite(slug, favorite)
+        bus.publish("projects.changed")
+        return {
+            "status": "success",
+            "favorite": meta["favorite"],
+            "message": "⭐ Игра в избранном" if favorite else "☆ Игра убрана из избранного",
         }
 
     def project_title(self, slug: str) -> str:
@@ -1151,6 +1298,7 @@ class FactoryService:
             "project_dir": str(sandbox.project_dir(slug)),
             "rating": int(meta.get("rating") or 0),
             "archived": bool(meta.get("archived")),
+            "favorite": bool(meta.get("favorite")),
             "created_label": self._date_label(meta.get("created_at") or ""),
         }
 
@@ -1314,6 +1462,7 @@ class FactoryService:
             "done": done,
             "failed": failed,
             "finished": bool(session.game_dir),
+            "kind": session.kind,
             "can_continue": bool(failed) and not session.game_dir,
             # Работает ли именно этот прогон: параллельных теперь много.
             "running": any(j.run_id == session.run_id and j.active
@@ -1414,6 +1563,33 @@ class FactoryService:
 
     def upload_path(self, slug: str, name: str) -> Optional[Path]:
         return uploads.resolve(slug, name)
+
+    # ── Вложения заказа (прогон) ────────────────────────────────────────
+    #
+    # То же, что вложения чата, но проекта для них ещё нет: он появится вместе
+    # с прогоном. Файлы ждут в предбаннике и копируются в игру на старте.
+
+    def list_studio_uploads(self) -> Dict[str, Any]:
+        return {
+            "files": uploads.list_staged(),
+            "dir": uploads.STAGING_DIRNAME.as_posix(),
+            "max_age_days": uploads.MAX_AGE_DAYS,
+        }
+
+    def save_studio_upload(self, filename: str, payload: str) -> Dict[str, Any]:
+        try:
+            item = uploads.save_staged(filename, payload)
+        except uploads.UploadError as exc:
+            return {"status": "error", "message": str(exc)}
+        return {"status": "success", "file": item}
+
+    def delete_studio_upload(self, name: str) -> Dict[str, Any]:
+        if uploads.delete_staged(name):
+            return {"status": "success", "message": "🗑 Вложение удалено"}
+        return {"status": "error", "message": "Вложение не найдено."}
+
+    def studio_upload_path(self, name: str) -> Optional[Path]:
+        return uploads.resolve_staged(name)
 
     def send_chat_task(self, slug: str, session_id: Optional[str], prompt: str, *,
                        agent_key: str, model: Optional[str], yolo: bool,
@@ -1861,6 +2037,38 @@ class FactoryService:
             "playable": self.project_is_playable(slug),
             "reset_on_launch": bool(config.reset_game_on_launch),
         }
+
+    # ── Демо-стенд базы знаний ──────────────────────────────────────────
+    #
+    # Стенд поднимается тем же dev-сервером, что и игры: разница только в том,
+    # что он не проект, и в интерфейсе у него отдельная кнопка.
+
+    def demo_state(self) -> Dict[str, Any]:
+        """Состояние стенда: есть ли он на диске, поднят ли сервер, чем занят."""
+        root = library.showcase_root()
+        state = self.play_state(DEMO_SLUG) if root.is_dir() else {
+            "slug": DEMO_SLUG, "running": False, "starting": False,
+            "url": "", "logs": "", "playable": False,
+        }
+        state["exists"] = root.is_dir()
+        state["path"] = str(root)
+        state["installed"] = (root / "node_modules").is_dir()
+        # Вторая страница стенда: просмотрщик запечённых анимаций.
+        state["pages"] = [
+            {"path": "/", "label": "🎛 Стенд систем"},
+            *([{"path": "/anim.html", "label": "🕺 Просмотр анимаций"}]
+              if (root / "anim.html").is_file() else []),
+        ]
+        return state
+
+    def start_demo(self) -> Dict[str, Any]:
+        if not library.showcase_root().is_dir():
+            return {"status": "error",
+                    "message": f"Стенда нет на диске: {library.showcase_root()}"}
+        return self.start_play(DEMO_SLUG)
+
+    def stop_demo(self) -> Dict[str, Any]:
+        return self.stop_play(DEMO_SLUG)
 
     def start_play(self, slug: str) -> Dict[str, Any]:
         try:
@@ -2523,6 +2731,14 @@ class FactoryService:
                 "models": TTS_MODELS,
                 "free_model": TTS_FREE_MODEL,
             },
+            # Доступ игры к базе знаний. Токен нужен только приватному
+            # репозиторию и НИКОГДА не пишется в папку игры — он живёт в .env
+            # фабрики и уезжает к кодовому агенту переменной окружения.
+            "knowledge": {
+                "repo": config.knowledge_repo or "",
+                "ref": config.knowledge_ref or "main",
+                "token": config.knowledge_token or "",
+            },
         }
 
     def save_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2594,6 +2810,20 @@ class FactoryService:
             model = model if model in known else TTS_FREE_MODEL
             config.fish_audio_model = model
             env_lines["FISH_AUDIO_MODEL"] = model
+
+        knowledge_cfg = payload.get("knowledge") or {}
+        if "repo" in knowledge_cfg:
+            repo = (knowledge_cfg.get("repo") or "").strip()
+            config.knowledge_repo = repo
+            env_lines["KNOWLEDGE_REPO"] = repo
+        if "ref" in knowledge_cfg:
+            ref = (knowledge_cfg.get("ref") or "").strip() or "main"
+            config.knowledge_ref = ref
+            env_lines["KNOWLEDGE_REF"] = ref
+        if "token" in knowledge_cfg:
+            token = (knowledge_cfg.get("token") or "").strip()
+            config.knowledge_token = token
+            env_lines["ZAVOD_KNOWLEDGE_TOKEN"] = token
 
         for key, value in env_lines.items():
             os.environ[key] = value

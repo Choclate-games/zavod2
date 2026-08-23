@@ -5,7 +5,7 @@ import { EventBus } from '../core/EventBus';
 export class PlaygamaService {
   private static instance: PlaygamaService;
   private isInitialized = false;
-  private gameReadySent = false;
+  private isReadyDispatched = false;
   private lastInterstitialTime = 0;
   private readonly INTERSTITIAL_COOLDOWN_MS = 90000;
 
@@ -19,7 +19,6 @@ export class PlaygamaService {
   public async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    // 10-second initialization timeout guard
     try {
       await Promise.race([
         bridge.initialize(),
@@ -34,15 +33,11 @@ export class PlaygamaService {
       bridge.platform.sendMessage('in_game_loading_started');
     } catch {}
 
-    // Setup platform listeners
     this.setupListeners();
-
-    // Load cloud storage data
     await this.loadCloudData();
 
-    // 15-second fallback watchdog to guarantee game_ready
     setTimeout(() => {
-      this.sendGameReady();
+      this.markReady();
     }, 15000);
   }
 
@@ -63,12 +58,16 @@ export class PlaygamaService {
 
   public async loadCloudData(): Promise<void> {
     try {
-      if (bridge.storage?.isSupported?.('cloud')) {
-        const cloudData = await bridge.storage.get(['player_elo_rating']);
-        if (cloudData && cloudData[0]) {
-          const parsed = JSON.parse(cloudData[0]);
-          const normalized = StorageService.get().normalize(parsed);
-          StorageService.get().updateData(normalized);
+      const storageAny = bridge.storage as any;
+      if (storageAny && typeof storageAny.get === 'function') {
+        const cloudData = await storageAny.get(['player_elo_rating']);
+        if (cloudData && typeof cloudData === 'object') {
+          const rawVal = Array.isArray(cloudData) ? cloudData[0] : (cloudData as any)['player_elo_rating'] || cloudData;
+          if (rawVal) {
+            const parsed = typeof rawVal === 'string' ? JSON.parse(rawVal) : rawVal;
+            const normalized = StorageService.get().normalize(parsed);
+            StorageService.get().updateData(normalized);
+          }
         }
       }
     } catch (e) {
@@ -80,8 +79,9 @@ export class PlaygamaService {
     try {
       const data = StorageService.get().getData();
       StorageService.get().flush();
-      if (bridge.storage?.isSupported?.('cloud')) {
-        await bridge.storage.set(['player_elo_rating'], [JSON.stringify(data)]);
+      const storageAny = bridge.storage as any;
+      if (storageAny && typeof storageAny.set === 'function') {
+        await storageAny.set(['player_elo_rating'], [JSON.stringify(data)]);
       }
     } catch (e) {
       console.warn('Failed to save to cloud:', e);
@@ -90,13 +90,17 @@ export class PlaygamaService {
 
   public setLoadingProgress(percent: number): void {
     try {
-      bridge.platform.sendMessage('in_game_loading_progress', { progress: Math.min(100, Math.max(0, percent)) });
-    } catch {}
+      bridge.setGameLoadingProgress(Math.min(100, Math.max(0, percent)));
+    } catch {
+      try {
+        bridge.platform.sendMessage('in_game_loading_progress', { progress: Math.min(100, Math.max(0, percent)) });
+      } catch {}
+    }
   }
 
-  public sendGameReady(): void {
-    if (this.gameReadySent) return;
-    this.gameReadySent = true;
+  public markReady(): void {
+    if (this.isReadyDispatched) return;
+    this.isReadyDispatched = true;
     try {
       bridge.platform.sendMessage('game_ready');
     } catch {}
@@ -128,7 +132,6 @@ export class PlaygamaService {
   public showRewarded(rewardId: string, onRewarded: (amount: number) => void): void {
     try {
       if (!bridge.advertisement?.isRewardedSupported) {
-        // Fallback for standalone/local dev testing
         onRewarded(100);
         return;
       }
@@ -139,27 +142,29 @@ export class PlaygamaService {
           hasPaid = true;
           onRewarded(100);
           EventBus.get().emit('REWARD_GRANTED', { rewardId, amount: 100 });
+          try {
+            bridge.advertisement.off(bridge.EVENT_NAME.REWARDED_STATE_CHANGED, stateListener);
+          } catch {}
+        } else if (state === 'closed' || state === 'failed') {
+          try {
+            bridge.advertisement.off(bridge.EVENT_NAME.REWARDED_STATE_CHANGED, stateListener);
+          } catch {}
         }
       };
 
       bridge.advertisement.on(bridge.EVENT_NAME.REWARDED_STATE_CHANGED, stateListener);
-
-      bridge.advertisement.showRewarded().finally(() => {
-        try {
-          bridge.advertisement.off(bridge.EVENT_NAME.REWARDED_STATE_CHANGED, stateListener);
-        } catch {}
-      });
+      bridge.advertisement.showRewarded();
     } catch (e) {
       console.warn('Rewarded ad error:', e);
-      // Fallback
       onRewarded(100);
     }
   }
 
   public async submitLeaderboardScore(score: number): Promise<void> {
     try {
-      if (bridge.leaderboard?.isSupported) {
-        await bridge.leaderboard.setScore({
+      const leaderboardsAny = (bridge as any).leaderboards || (bridge as any).leaderboard;
+      if (leaderboardsAny && typeof leaderboardsAny.setScore === 'function') {
+        await leaderboardsAny.setScore({
           leaderboardName: 'elo_ladder',
           score: Math.floor(score)
         });

@@ -20,6 +20,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from providers import agent_usage
+
 MAX_JOB_LOG_LINES = 4000
 
 
@@ -179,7 +181,11 @@ class StudioJobManager:
                 job.status = "running"
                 job.started_at = time.time()
                 self.notify(job)
-                work(job)
+                # Граница владения расходом: всё, что прогон нажжёт, запишется
+                # на его проект (agent_usage.set_project вызывает пайплайн),
+                # и ни на байт не утечёт в соседний прогон пакета.
+                with agent_usage.use_project(""):
+                    work(job)
             except Exception as exc:                      # страховка: поток не должен падать молча
                 job.status = "failed"
                 job.error = str(exc)

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Type, Callable
 from PIL import Image, ImageDraw
 
 from providers.base import AIProvider, ImageProvider, NoneImageProvider, T
+from providers import json_output
 from providers.local import LocalImageProvider
 
 from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
@@ -1056,19 +1057,19 @@ class AGYProvider(AIProvider):
                 candidates.append(envelope["structured_output"])
             response_text = envelope.get("response")
             if isinstance(response_text, str):
-                candidates.append(cls._extract_json_string(response_text))
+                candidates.append(response_text)
             status = str(envelope.get("status") or "").upper()
             if status and status != "SUCCESS" and not candidates:
                 raise RuntimeError(f"AGY CLI вернул статус {status}: {str(envelope)[:400]}")
         else:
-            candidates.append(cls._extract_json_string(raw_output))
+            candidates.append(raw_output)
 
         errors: List[str] = []
         for candidate in candidates:
             data = candidate
             if isinstance(data, str):
                 try:
-                    data = json.loads(data)
+                    data = json_output.loads(data)
                 except ValueError as exc:
                     errors.append(str(exc))
                     continue
@@ -1084,18 +1085,8 @@ class AGYProvider(AIProvider):
 
     @staticmethod
     def _extract_json_string(text: str) -> str:
-        """Extracts JSON substring from possible markdown wrappers or surrounding text."""
-        text = text.strip()
-        match = re.search(r"```(?:json)?\s*(\{.*\}|\[.*\])\s*```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start:end + 1].strip()
-
-        return text
+        """Совместимость: вырезание и починка JSON живут в `providers.json_output`."""
+        return json_output.extract(text)
 
     def test_connection(self) -> Dict[str, Any]:
         """Test the connection with agy CLI."""

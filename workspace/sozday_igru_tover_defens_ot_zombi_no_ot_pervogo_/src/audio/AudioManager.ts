@@ -1,4 +1,4 @@
-﻿import { EventBus } from '../core/EventBus';
+import { EventBus } from '../core/EventBus';
 
 class AudioManagerImpl {
   private ctx: AudioContext | null = null;

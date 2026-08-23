@@ -586,6 +586,26 @@ class PromptCompilerAgent:
         return "\n".join(parts)
 
     @staticmethod
+    def _attachments_section(ctx) -> str:
+        """Материалы, приложенные к заказу, — в мастер-промпт.
+
+        Файлы лежат внутри каталога игры (`.factory/uploads/`), поэтому кодовому
+        агенту достаточно путей: он открывает их сам. Раздел пустой, когда
+        ничего не прикладывали, и тогда в промпте не остаётся даже заголовка.
+        """
+        files = list(getattr(ctx, "attachments", None) or [])
+        if not files:
+            return ""
+        from app import uploads
+        return (
+            "\n### Материалы, приложенные к заказу\n"
+            "Это часть задания. Прочитай их до того, как писать код: "
+            "приложенный промпт, референс или модель имеют тот же вес, что и ТЗ.\n\n"
+            + uploads.prompt_block(files)
+            + "\n"
+        )
+
+    @staticmethod
     def _direction_section(concept) -> str:
         """Рамка проекта в мастер-промпте: направление и список запретов.
 
@@ -815,7 +835,16 @@ class PromptCompilerAgent:
         # to rediscover a rule that already cost a production bug.
         profile = self._control_profile(ctx)
         touch_layout = self._touch_layout(concept, profile)
-        desktop_controls = self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
+        # Спроектированная десктопная раскладка важнее жанрового шаблона — как и
+        # у тача: шаблон профиля остаётся запасным вариантом, когда UX-дизайнер
+        # раскладку не задал.
+        designed_desktop = (getattr(concept.ui_ux, "desktop_controls_layout", "") or "").strip()
+        desktop_controls = (
+            f"- **Раскладка этой игры** (спроектирована в MOBILE_CONTROLS.md рядом "
+            f"с мобильной): {designed_desktop}"
+            if designed_desktop
+            else self._DESKTOP_LAYOUTS.get(profile, self._DESKTOP_LAYOUTS["default"])
+        )
         control_verbs_rule = self._CONTROL_VERBS_RULE
         control_verbs = self._control_verbs_block(concept)
         log_agent("PromptCompiler", f"Control profile: {profile}")
@@ -823,6 +852,7 @@ class PromptCompilerAgent:
         ui_contract = self._ui_block(concept)
 
         direction_section = self._direction_section(concept)
+        attachments_section = self._attachments_section(ctx)
 
         critical_rules = self._platform_rules_block(concept)
         if not critical_rules:
@@ -888,6 +918,7 @@ class PromptCompilerAgent:
 - **Session Model**: {concept.session_model}
 
 {direction_section}
+{attachments_section}
 ---
 
 ## 2. TECHNOLOGY STACK & RENDERING ENGINE
@@ -1049,10 +1080,36 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 
 ---
 
-## 6. USER INTERFACE & MOBILE CONTROLS
+## 6. USER INTERFACE & CONTROLS (ДВЕ СХЕМЫ)
 Мобильное управление — обязательная часть поставки, а не «доделаем потом».
 Большинство игроков на Яндекс Играх / VK / Playgama заходят с телефона: игра без
 рабочего тач-управления не проходит приёмку, даже если на клавиатуре всё идеально.
+
+### Схем управления ровно две, и обе обязательны
+Десктопная (клавиатура + мышь) и мобильная (экранные органы). Обе написаны
+целиком и закрывают ВСЕ действия игры; активна в каждый момент ровно одна.
+Одна «универсальная» раскладка на оба устройства — самый дорогой дефект этого
+раздела: тач-слой поверх мыши мешает целиться на ПК, а действия на клавишах
+недоступны на телефоне. Так уже уехали две готовые игры.
+
+- **Режим выбирает площадка**: `bridge.device.type` (`mobile` / `tablet` →
+  тач, `desktop` → клавиатура; планшет считается тачем). `ontouchstart`,
+  `maxTouchPoints` и ширина экрана — запасной вариант для dev-сервера, где
+  моста нет, и только он.
+- **Неактивная схема не существует**: её слушатели сняты, её слой удалён из DOM
+  (`remove()`, а не `display: none`), её подсказки не показываются.
+- **Переключение на лету**, без перезагрузки: клавиша или `mousemove` с
+  ненулевой дельтой — десктоп, `pointerdown` с `pointerType === 'touch'` — тач.
+  При смене режима сначала отпускаются все зажатые оси и кнопки.
+- **Pointer lock — только в десктопной схеме.** На телефоне он либо не работает,
+  либо съедает первый тап.
+- **Ввод читается через один роутер**: игровые системы (`Player`, камера, бой)
+  берут состояние из него и не вешают `keydown`/`pointerdown` сами.
+- `?input=touch` и `?input=desktop` принудительно включают схему и отключают
+  автопереключение — этим обе раскладки проверяются на одной машине.
+
+Рецепт целиком, вместе с готовым `InputRouter`:
+`docs/ref/knowledge/ux/input_scheme_switching.md`. Приёмка: G11–G13.
 
 - **Orientation**: {concept.orientation.capitalize()}
 - **Safe Area Insets**: `padding: calc(18px + env(safe-area-inset-bottom))` и аналогично
@@ -1082,7 +1139,9 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 - **Размеры**: основная кнопка действия ≥ 96 px, второстепенные ≥ 64 px, зазор ≥ 12 px.
 - **Отладочный флаг** `?touch=1` принудительно включает мобильную раскладку на
   десктопе (и `?touch=0` выключает) — без него управление невозможно проверить.
-- Клавиатура и тач работают параллельно и не глушат друг друга.
+- Тач-слой создаётся и вставляется в DOM **только** в мобильном режиме:
+  `new TouchControls()` в конструкторе интерфейса без проверки устройства —
+  это и есть дефект, описанный выше.
 
 ### Desktop Controls
 {desktop_controls}

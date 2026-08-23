@@ -40,7 +40,7 @@ export class BotEnemy {
     }
   }
 
-  public update(dt: number): void {
+  public update(_dt: number): void {
     this.root.position.copy(this.position);
     this.root.rotation.y = this.yaw;
   }

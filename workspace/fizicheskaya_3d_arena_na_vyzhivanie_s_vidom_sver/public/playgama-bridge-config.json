@@ -1,0 +1,21 @@
+{
+  "platform": {
+    "advertisement": {
+      "interstitial": {
+        "enabled": true
+      },
+      "rewarded": {
+        "enabled": true
+      }
+    },
+    "leaderboard": {
+      "enabled": true
+    },
+    "payments": {
+      "enabled": false
+    },
+    "storage": {
+      "enabled": true
+    }
+  }
+}

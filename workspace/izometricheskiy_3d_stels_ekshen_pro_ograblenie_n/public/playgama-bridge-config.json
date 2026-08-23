@@ -1,0 +1,12 @@
+{
+  "interstitial": {
+    "enabled": true,
+    "minIntervalSeconds": 90
+  },
+  "rewarded": {
+    "enabled": true
+  },
+  "banner": {
+    "enabled": false
+  }
+}

@@ -22,8 +22,10 @@
 
     <button class="nav-btn active" data-view="studio"><span class="nav-icon">🚀</span> Студия генерации</button>
     <button class="nav-btn" data-view="projects"><span class="nav-icon">📁</span> Проекты и ТЗ</button>
+    <button class="nav-btn" data-view="favorites"><span class="nav-icon">⭐</span> Избранное<span class="nav-badge hidden" id="nav-fav-badge"></span></button>
     <button class="nav-btn" data-view="chats"><span class="nav-icon">💬</span> Чаты разработки</button>
     <button class="nav-btn" data-view="play"><span class="nav-icon">🌐</span> Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
+    <button class="nav-btn" data-view="demo"><span class="nav-icon">🧪</span> Демо-стенд<span class="nav-badge hidden" id="nav-demo-badge">●</span></button>
     <button class="nav-btn" data-view="quota"><span class="nav-icon">📊</span> Квоты агентов</button>
     <button class="nav-btn" data-view="settings"><span class="nav-icon">⚙️</span> Настройки</button>
 
@@ -53,7 +55,16 @@
 
         <div class="presets" id="studio-presets" style="margin-bottom:10px"></div>
 
-        <textarea id="studio-prompt" rows="3" placeholder="Опишите идею игры...">3D гладиаторский roguelike с активным рэгдоллом, расчленением и боссами на Яндекс Игры</textarea>
+        <textarea id="studio-prompt" rows="3" placeholder="Опишите идею игры. Промпт, референсы и модели можно приложить файлами — Ctrl+V или Drag&Drop.">3D гладиаторский roguelike с активным рэгдоллом, расчленением и боссами на Яндекс Игры</textarea>
+
+        <!-- Материалы заказа: промпт игры, референсы, модели. Файлы ждут в
+             предбаннике и переезжают в проект на старте прогона. -->
+        <div class="attach-bar hidden" id="studio-attachments"></div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn small" id="btn-studio-attach">📎 Приложить файл к заказу</button>
+          <span class="dim" id="studio-attach-hint">Промпт игры, референсы, 3D-модели — агент получит их вместе с ТЗ</span>
+        </div>
+        <input type="file" id="studio-file-input" multiple hidden />
 
         <div class="controls-grid" style="margin:12px 0">
           <label class="field">🤖 AI Provider<select id="sel-provider"></select></label>
@@ -186,6 +197,7 @@
               <button class="btn small" id="btn-validate">✅ Валидация</button>
               <span class="grow"></span>
               <button class="btn small" id="btn-rename-project" title="Переименовать">✏️</button>
+              <button class="btn small" id="btn-favorite-project">⭐ В избранное</button>
               <button class="btn small" id="btn-archive-project">📦 В архив</button>
               <button class="btn small danger" id="btn-delete-project">🗑 Удалить</button>
             </div>
@@ -204,6 +216,23 @@
             <button class="btn small" id="btn-doc-copy">📋 Копировать</button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ── Избранное ────────────────────────────────────────────────── -->
+    <section class="view" id="view-favorites">
+      <div class="panel grow scroll">
+        <div class="row spread">
+          <h2>⭐ Избранное <span class="dim">— игры, которые получились</span></h2>
+          <button class="btn small" id="btn-refresh-favorites">🔄 Обновить</button>
+        </div>
+        <p class="small dim" style="margin:6px 0 14px">
+          Полка для удачных проектов. Каталог игры остаётся на месте в
+          <code>workspace/</code> — переносится только пометка, поэтому чаты,
+          прогон и учёт токенов не рвутся. Добавить игру сюда можно звездой
+          «⭐ В избранное» в шапке проекта.
+        </p>
+        <div id="favorites-list"></div>
       </div>
     </section>
 
@@ -325,6 +354,42 @@
       </div>
     </section>
 
+    <!-- ── Демо-стенд базы знаний ───────────────────────────────────── -->
+    <!-- Стенд лежит в той же песочнице, что и игры, но проектом не является:
+         его карточку в витрине путали с выпущенной игрой. -->
+    <section class="view" id="view-demo">
+      <div class="panel">
+        <div class="row spread">
+          <h2>🧪 Демо-стенд базы знаний <span class="dim">— не игра, а проверочный стенд фабрики</span></h2>
+          <span class="small" id="demo-status" style="color:var(--text-muted)">● Сервер остановлен</span>
+        </div>
+        <p class="dim" style="margin:6px 0 0">
+          Здесь интерактивно проверяются все системы из <code>knowledge/</code>: контроллеры, физика,
+          шейдеры, интерфейс. Любое новое знание базы обязано приехать сюда работающим демо
+          (<code>docs/KNOWLEDGE_DEMOS_POLICY.md</code>). В списке проектов стенда нет намеренно —
+          это не выпущенная игра.
+        </p>
+        <div class="dim" style="margin-top:6px" id="demo-path"></div>
+
+        <div class="row" style="margin-top:10px">
+          <button class="btn ok big" id="btn-demo-start" style="flex:1">▶ ЗАПУСТИТЬ СТЕНД (npm run dev)</button>
+          <button class="btn primary" id="btn-demo-open">🖥 Открыть вкладку</button>
+          <button class="btn" id="btn-demo-folder">📂 Папка</button>
+          <button class="btn danger" id="btn-demo-stop">⏹ Стоп</button>
+        </div>
+        <div class="row" style="margin-top:8px" id="demo-pages"></div>
+      </div>
+
+      <div class="panel grow" style="padding:0;display:flex;flex-direction:column">
+        <div class="toolbar">
+          <strong class="small">📟 Лог стенда</strong>
+          <span class="grow"></span>
+          <button class="btn small" id="btn-demo-clear">🗑 Очистить лог</button>
+        </div>
+        <div class="console" id="demo-log"></div>
+      </div>
+    </section>
+
     <!-- ── Квоты ────────────────────────────────────────────────────── -->
     <section class="view" id="view-quota">
       <div class="panel grow scroll">
@@ -405,6 +470,26 @@
             <span class="small" id="fish-msg"></span>
           </div>
         </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>📚 База знаний в готовой игре</h3>
+          <div class="dim">
+            Пакет игры носит манифест и <code>scripts/fetch-knowledge.mjs</code>, а не копии документов:
+            рецепты подтягиваются из репозитория базы. Токен нужен, только если репозиторий приватный.
+            В папку игры он не попадает никогда — живёт в <code>.env</code> фабрики и уходит кодовому
+            агенту переменной окружения.
+          </div>
+          <label class="field">Репозиторий базы (<code>владелец/репозиторий</code>)
+            <input type="text" id="set-knowledge-repo" placeholder="EdikN/zavod2" />
+          </label>
+          <label class="field">Ветка или тег
+            <input type="text" id="set-knowledge-ref" placeholder="main" />
+          </label>
+          <label class="field">ZAVOD_KNOWLEDGE_TOKEN
+            <input type="password" id="set-knowledge-token" placeholder="токен GitHub — только для приватного репозитория" />
+          </label>
+          <div class="dim">Сохраняется кнопкой «💾 СОХРАНИТЬ НАСТРОЙКИ В .ENV» выше.</div>
+        </div>
       </div>
     </section>
 
@@ -419,8 +504,10 @@
       <button class="btn small icon-only" id="btn-close-brainstorm">✕</button>
     </div>
     <p class="dim">
-      ИИ придумает виральные концепты для Яндекс Игр / WebGL. Возьмите один вариант в студию
-      или отметьте несколько галочками и соберите ТЗ пакетом.
+      Работа в два захода: сначала ИИ ищет незанятые <strong>тематики</strong> — ремёсла, среды,
+      уклады, — и только потом выращивает из каждой игру, выводя механику из самой темы.
+      Все игры на Three.js. Возьмите один вариант в студию или отметьте несколько галочками
+      и соберите ТЗ пакетом.
     </p>
     <div class="row">
       <input type="text" id="brainstorm-hint" class="grow" placeholder="Пожелания / тема: 3D арена с физикой, idle кликер, roguelike..." />

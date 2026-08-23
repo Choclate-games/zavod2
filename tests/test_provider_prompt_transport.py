@@ -92,7 +92,29 @@ def test_cli_agent_structured_generation_raises_after_retries(monkeypatch):
     monkeypatch.setattr(agent, "run_once", junk)
     with pytest.raises(RuntimeError):
         agent.generate_structured("система", "запрос", KnowledgePlan)
-    assert len(calls) == 2  # одна повторная попытка, затем честная ошибка
+    assert len(calls) == 3  # два повтора, затем честная ошибка
+
+
+def test_cli_agent_survives_a_trailing_comma_on_the_first_try(monkeypatch):
+    """Живой отказ: «Illegal trailing comma before end of object».
+
+    Одна лишняя запятая стоила заказа целиком — две попытки, обе с той же
+    температурой, и прогон вставал. Ответ содержательно готов, и повторять
+    его незачем: разбор чинит синтаксис сам, а провайдер обращается к модели
+    ровно один раз.
+    """
+    agent = make_cli_agent("claude")
+    calls = []
+
+    def with_comma(prompt, cwd=None):
+        calls.append(prompt)
+        return '{"loop_pattern": "погоня", "summary": "коротко", "selections": [],}'
+
+    monkeypatch.setattr(agent, "run_once", with_comma)
+    plan = agent.generate_structured("система", "запрос", KnowledgePlan)
+
+    assert plan.loop_pattern == "погоня"
+    assert len(calls) == 1, "за починимую запятую заплатили вторым запросом к модели"
 
 
 def test_cli_agent_stages_prompt_into_a_file():

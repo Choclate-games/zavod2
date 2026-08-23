@@ -1,4 +1,4 @@
-﻿import { EntityManager } from '../entities/EntityManager';
+import { EntityManager } from '../entities/EntityManager';
 import { BALANCE } from '../balance';
 import { EventBus } from '../core/EventBus';
 
@@ -10,8 +10,8 @@ export class WaveSystem {
   public isWaveActive = false;
   private spawnTimer = 0;
   private spawnedInWave = 0;
-  private toSpawnInWave = BALANCE.waves.w1_count;
-  private spawnInterval = BALANCE.waves.w1_interval;
+  private toSpawnInWave: number = BALANCE.waves.w1_count;
+  private spawnInterval: number = BALANCE.waves.w1_interval;
   private intermissionTimer = 10;
 
   constructor(entities: EntityManager) {

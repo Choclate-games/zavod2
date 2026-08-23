@@ -71,6 +71,12 @@ class RunSession:
     created_at: str = ""
     game_dir: Optional[str] = None
     title: str = ""
+    # Чем был заказ: только спецификация или «под ключ». Хранится здесь,
+    # потому что продолжают прогон через сутки и из другого места — карточки
+    # прогона в студии к тому времени уже нет, а решать, доводить ли дело до
+    # кодового агента, всё равно надо. Без этого продолженный заказ «под ключ»
+    # молча заканчивался папкой документов.
+    kind: str = "spec"
 
     # ------------------------------------------------------------------ создание
 
@@ -80,14 +86,25 @@ class RunSession:
         return Path(output_base)
 
     @staticmethod
-    def _free_slug(raw_prompt: str, output_base: Path) -> str:
-        """Слаг проекта из идеи — до первого вызова модели.
+    def _free_slug(raw_prompt: str, output_base: Path, title: str = "") -> str:
+        """Слаг проекта — до первого вызова модели.
 
         Раньше слаг брался из названия концепции, а оно появлялось только после
         IdeaAnalyzer: до этого момента прогону негде было жить. Слаг из идеи
         известен сразу, и он же остаётся именем проекта — переименовывать
-        каталог на середине прогона дороже, чем смириться с именем от идеи."""
-        base = _slugify(raw_prompt)[:48] or "game_project"
+        каталог на середине прогона дороже, чем смириться с именем от идеи.
+
+        Если название игры известно заранее (заказ из брейнсторма приносит его
+        готовым), слаг берётся из него. Иначе — из первых слов заказа, и вот
+        почему это плохое имя: заказы модели начинаются с жанровой шапки
+        («Динамичный 3D мердж-экшен с видом сверху на…»), и пакет из десяти игр
+        давал десять каталогов, неразличимых в списке до сорок восьмого символа.
+        """
+        # Именно так, а не `_slugify(title) or _slugify(raw_prompt)`: на пустой
+        # строке slugify возвращает собственную заглушку «custom_mechanic», она
+        # истинна, и заказ терял имя вместе с текстом.
+        source = (title or "").strip() or raw_prompt
+        base = _slugify(source)[:48] or "game_project"
         slug, counter = base, 2
         while (Path(output_base) / slug).exists():
             slug = f"{base}_{counter:03d}"
@@ -101,9 +118,11 @@ class RunSession:
         output_base: Path,
         provider_name: str = "",
         mode: str = "standard",
+        title: str = "",
+        kind: str = "spec",
     ) -> "RunSession":
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        slug = cls._free_slug(raw_prompt, output_base)
+        slug = cls._free_slug(raw_prompt, output_base, title)
         run_id = f"{stamp}-{slug}"
 
         # Каталог проекта заводится сразу: чат обязан лежать внутри проекта,
@@ -122,7 +141,7 @@ class RunSession:
         session = cls(
             run_id=run_id, root=root, raw_prompt=raw_prompt,
             provider_name=provider_name, mode=mode, slug=slug,
-            chat_session_id=chat.id,
+            chat_session_id=chat.id, title=title, kind=kind,
             created_at=datetime.now().isoformat(timespec="seconds"),
         )
         session.save()
@@ -165,6 +184,10 @@ class RunSession:
             created_at=data.get("created_at", ""),
             game_dir=data.get("game_dir"),
             title=data.get("title", ""),
+            # Прогоны, начатые до появления поля, считаем спецификациями:
+            # достроить им игру можно кнопкой, а вот лишний запуск кодового
+            # агента по старому заказу человек не заказывал.
+            kind=data.get("kind") or "spec",
         )
 
     @classmethod
@@ -185,6 +208,7 @@ class RunSession:
                 "created_at": data.get("created_at", ""),
                 "provider_name": data.get("provider_name", ""),
                 "title": data.get("title", ""),
+                "kind": data.get("kind") or "spec",
                 "done": sum(1 for s in statuses.values() if s == STATUS_DONE),
                 "failed": [k for k, s in statuses.items() if s == STATUS_FAILED],
                 "finished": bool(data.get("game_dir")),
@@ -231,6 +255,7 @@ class RunSession:
             "steps": self.steps,
             "game_dir": self.game_dir,
             "title": self.title,
+            "kind": self.kind,
         }
         with self._write_lock:
             self.state_file.write_text(

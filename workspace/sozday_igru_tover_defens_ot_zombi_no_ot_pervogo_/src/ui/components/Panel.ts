@@ -1,4 +1,4 @@
-﻿export class Panel {
+export class Panel {
   public element: HTMLDivElement;
 
   constructor(title?: string, className?: string) {

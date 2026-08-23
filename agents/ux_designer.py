@@ -35,6 +35,13 @@ class UXLayout(BaseSafeModel):
         ),
     )
     mobile_controls_layout: str = Field(default="", description="Раскладка тач-управления под этот глагол игрока")
+    # Десктопная раскладка проектируется наравне с мобильной. Пока её здесь не
+    # было, кодовый агент придумывал клавиши сам — и приходил к одной гибридной
+    # схеме, которая не подходила ни ПК, ни телефону.
+    desktop_controls_layout: str = Field(
+        default="",
+        description="Раскладка клавиатуры и мыши под тот же глагол игрока: клавиши, кнопки мыши, нужен ли pointer lock",
+    )
     wireframes_ascii: str = Field(default="", description="ASCII-вайрфрейм игрового экрана")
     visual_language: str = Field(
         default="",
@@ -91,6 +98,10 @@ SYSTEM_PROMPT = (
     "по центру. Это и есть тот самый «примитивный интерфейс».\n"
     "- Раскладка тач-управления выводится из глагола игрока: газ и руль нажимаются одновременно, "
     "рисование трассы — это один палец по экрану, а не джойстик.\n"
+    "- Раскладок ДВЕ, и обе обязательны: mobile_controls_layout (экранные органы) и "
+    "desktop_controls_layout (клавиатура и мышь). Каждая закрывает все действия игры целиком — "
+    "действие, доступное только на одном устройстве, это дефект проектирования. Активную "
+    "раскладку выбирает bridge.device.type, поэтому ни одна из них не «упрощённая версия» другой.\n"
     "- Кнопки: основная >= 96 px, остальные >= 64 px, отступы через safe-area.\n"
     "ПРАВИЛА ВНЕШНЕГО ВИДА:\n"
     "- visual_language называй материалом мира игры: из чего сделаны панели и рамки — "
@@ -175,7 +186,7 @@ class UXDesignerAgent:
     """Designs the UI layout, visual language, mobile ergonomics, HUD and screen states."""
 
     _FILLABLE = (
-        "hud_elements", "screens", "mobile_controls_layout", "wireframes_ascii",
+        "hud_elements", "screens", "mobile_controls_layout", "desktop_controls_layout", "wireframes_ascii",
         "visual_language", "accent_roles", "typography", "components",
         "hud_anchors", "screen_flow", "feedback_moments", "diegetic_elements",
         "state_coverage",
@@ -324,7 +335,8 @@ class UXDesignerAgent:
                 f"{chain}. Виден ровно один экран; скрытый экран убирается через display: none, "
                 "иначе его кнопки продолжают ловить нажатия. Пауза и любая модалка "
                 "останавливают игровые часы и звуковую шину и возвращают их при закрытии. "
-                "Слой тач-управления показан только в игровом процессе и сбрасывает оси при скрытии."
+                "Слой тач-управления существует только в мобильном режиме (bridge.device.type), "
+                "показан только в игровом процессе и сбрасывает оси при скрытии."
             )
         if not ui.feedback_moments:
             ui.feedback_moments = [

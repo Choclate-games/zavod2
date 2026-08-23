@@ -1,0 +1,509 @@
+/*
+ * Единственное место со значениями: цвета, шрифты, шкала отступов, радиусы,
+ * длительности, слои. Экраны и компоненты читают только эти токены.
+ */
+
+:root {
+  /* Палитра: тёмно-графитовый инженерный HUD + закатные акценты */
+  --color-bg: #1A202C;
+  --color-surface: #232B3A;
+  --color-surface-raised: #2B3547;
+  --color-text: #E8EDF4;
+  --color-text-dim: #9AA7BC;
+  --color-accent: #00E5FF;
+  --color-danger: #FF1744;
+  --color-success: #FFC107;
+  --color-sunset: #FFA726;
+  --color-outline: #3A465C;
+
+  --scrim: rgba(13, 17, 26, 0.55);
+  --panel-veil: rgba(20, 26, 38, 0.72);
+  --accent-glow: rgba(0, 229, 255, 0.35);
+  --danger-glow: rgba(255, 23, 68, 0.35);
+
+  /* Гарнитуры: гротеск для интерфейса, моно для телеметрии */
+  --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-telemetry: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+
+  /* Шкала отступов */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 18px;
+  --space-5: 28px;
+  --space-6: 44px;
+
+  --radius-s: 6px;
+  --radius-m: 12px;
+  --radius-l: 20px;
+
+  --dur-fast: 120ms;
+  --dur-screen: 300ms;
+
+  /* Слои поверх канваса */
+  --z-canvas: 0;
+  --z-hud: 10;
+  --z-controls: 20;
+  --z-screens: 30;
+  --z-modal: 40;
+
+  /* Размеры зон нажатия НЕ масштабируются */
+  --tap-min: 64px;
+  --tap-primary: 96px;
+  --ui-scale: 1;
+
+  /* Измеренный вьюпорт и резерв под баннер площадки пишет UiRoot из JS */
+  --vp-w: 100vw;
+  --vp-h: 100vh;
+  --banner-height: 0px;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --ui-scale: 0.86;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --ui-scale: 0.74;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg);
+  font-family: var(--font-body);
+  color: var(--color-text);
+  touch-action: none;
+  user-select: none;
+}
+
+#game-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: var(--z-canvas);
+  touch-action: none;
+}
+
+/* ── слои интерфейса: прозрачны для ввода, интерактивны только листья ── */
+
+.ui-layer {
+  position: fixed;
+  inset: 0;
+  padding-bottom: var(--banner-height);
+  pointer-events: none;
+}
+
+.ui-layer > * {
+  pointer-events: none;
+}
+
+.layer-hud {
+  z-index: var(--z-hud);
+}
+
+.layer-controls {
+  z-index: var(--z-controls);
+}
+
+.layer-screens {
+  z-index: var(--z-screens);
+  inset: env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + var(--banner-height)) env(safe-area-inset-left);
+}
+
+.layer-modal {
+  z-index: var(--z-modal);
+}
+
+button,
+.btn {
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.card,
+[data-action] {
+  pointer-events: auto;
+}
+
+/* ── компоненты ────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: calc(var(--space-3) * var(--ui-scale)) var(--space-4);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--color-outline);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: clamp(14px, calc(16px * var(--ui-scale)), 18px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast), transform var(--dur-fast), border-color var(--dur-fast);
+}
+
+.btn:hover {
+  background: var(--color-surface-raised);
+  border-color: var(--color-accent);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.btn--primary {
+  min-width: var(--tap-primary);
+  min-height: var(--tap-primary);
+  border-color: var(--color-accent);
+  background: linear-gradient(180deg, var(--color-surface-raised), var(--color-surface));
+  box-shadow: 0 0 18px var(--accent-glow);
+  font-size: clamp(16px, calc(19px * var(--ui-scale)), 22px);
+}
+
+.btn--danger {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 14px var(--danger-glow);
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-dim);
+}
+
+.btn--icon {
+  min-width: var(--tap-min);
+  padding: var(--space-2);
+}
+
+.btn svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+
+.panel {
+  background: var(--panel-veil);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-l);
+  padding: calc(var(--space-4) * var(--ui-scale));
+  backdrop-filter: blur(6px);
+}
+
+.telemetry {
+  font-family: var(--font-telemetry);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+.num-slot {
+  display: inline-block;
+  min-width: 4ch;
+  text-align: right;
+  font-family: var(--font-telemetry);
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  width: clamp(120px, calc(200px * var(--ui-scale)), 260px);
+  height: 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--color-outline);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.meter__fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-success));
+  transition: transform 240ms ease-out;
+}
+
+.stars {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.stars svg {
+  width: 34px;
+  height: 34px;
+  color: var(--color-outline);
+}
+
+.stars .stars__lit {
+  color: var(--color-success);
+}
+
+.icon {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  vertical-align: middle;
+  fill: currentColor;
+}
+
+/* ── экраны ────────────────────────────────────────────────────────────── */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-screen) ease-out, visibility var(--dur-screen);
+  padding:
+    calc(var(--space-5) * var(--ui-scale) + env(safe-area-inset-top))
+    calc(var(--space-5) * var(--ui-scale) + env(safe-area-inset-right))
+    calc(var(--space-5) * var(--ui-scale) + env(safe-area-inset-bottom) + var(--banner-height))
+    calc(var(--space-5) * var(--ui-scale) + env(safe-area-inset-left));
+}
+
+.screen--visible {
+  visibility: visible;
+  opacity: 1;
+}
+
+.screen--hidden-hard {
+  display: none;
+}
+
+.screen__title {
+  margin: 0;
+  font-size: clamp(22px, calc(30px * var(--ui-scale)), 40px);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 12px var(--scrim);
+}
+
+.screen__subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-dim);
+  font-size: clamp(13px, calc(15px * var(--ui-scale)), 17px);
+}
+
+.veil-block {
+  background: var(--panel-veil);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-l);
+  padding: calc(var(--space-4) * var(--ui-scale)) calc(var(--space-5) * var(--ui-scale));
+}
+
+/* ── HUD ────────────────────────────────────────────────────────────────── */
+
+.hud-corner {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: calc(var(--space-3) * var(--ui-scale) + env(safe-area-inset-top))
+    calc(var(--space-3) * var(--ui-scale) + env(safe-area-inset-right))
+    calc(var(--space-3) * var(--ui-scale))
+    calc(var(--space-3) * var(--ui-scale) + env(safe-area-inset-left));
+}
+
+.hud-corner--tl { top: 0; left: 0; }
+.hud-corner--tr { top: 0; right: 0; }
+.hud-corner--br { bottom: calc(var(--space-3) + env(safe-area-inset-bottom) + var(--banner-height)); right: 0; }
+
+.hud-label {
+  font-size: clamp(11px, calc(12px * var(--ui-scale)), 14px);
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.charges {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.charge-pip {
+  width: 14px;
+  height: 34px;
+  border-radius: 4px;
+  border: 1px solid var(--color-outline);
+  background: var(--color-bg);
+}
+
+.charge-pip--loaded {
+  background: linear-gradient(180deg, var(--color-accent), var(--color-success));
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* ── тач-слой ──────────────────────────────────────────────────────────── */
+
+.touch-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-actions {
+  position: absolute;
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom) + var(--banner-height));
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 calc(var(--space-4) * var(--ui-scale));
+}
+
+.delay-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--panel-veil);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-m);
+}
+
+/* ── сетка выбора уровня ────────────────────────────────────────────────── */
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-2);
+  flex: 1;
+  min-height: 0;
+}
+
+.level-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: var(--tap-min);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--color-outline);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-family: var(--font-telemetry);
+  font-variant-numeric: tabular-nums;
+}
+
+.level-card:hover {
+  border-color: var(--color-accent);
+}
+
+.level-card--locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.level-card--locked:hover {
+  border-color: var(--color-outline);
+}
+
+/* ── модалки ───────────────────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  pointer-events: auto;
+}
+
+.modal-card {
+  max-width: min(520px, calc(var(--vp-w) - var(--space-6)));
+  max-height: calc(var(--vp-h) - var(--space-6) - var(--banner-height));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  text-align: center;
+}
+
+.modal-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+/* ── прогресс загрузки ─────────────────────────────────────────────────── */
+
+.progress-track {
+  width: min(340px, 70vw);
+  height: 10px;
+  border-radius: var(--radius-s);
+  background: var(--color-bg);
+  border: 1px solid var(--color-outline);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-success));
+  transition: transform 200ms ease-out;
+}
+
+/* ── доступность движения ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+/* ── портрет: HUD перестраивается в компактные ряды ─────────────────────── */
+
+@media (orientation: portrait) {
+  .meter {
+    width: clamp(96px, 32vw, 160px);
+  }
+
+  .hud-corner--tl,
+  .hud-corner--tr {
+    flex-direction: row;
+  }
+
+  .screen {
+    padding-left: calc(var(--space-4) * var(--ui-scale) + env(safe-area-inset-left));
+    padding-right: calc(var(--space-4) * var(--ui-scale) + env(safe-area-inset-right));
+  }
+
+  .level-grid {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  }
+}

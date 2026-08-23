@@ -199,6 +199,34 @@ watchdog, and Recast is loaded **only** when the game actually needs a navmesh.
     swallows button taps, and a held throttle survives an ad break otherwise.
     See `knowledge/ux/touch_controls.md`.
 
+## Input schemes: desktop and touch
+
+> Numbered from 83 because rules are cited by number elsewhere in the base and
+> renumbering would break those references. Read this section together with
+> "Touch controls" above.
+
+83. Every game ships **two complete control schemes** — keyboard + mouse and
+    on-screen touch — and exactly one of them is active. Every action of the
+    game is reachable in both; an action available only on one platform is a
+    design defect, not a platform limitation.
+84. The active scheme is chosen from **`bridge.device.type`**
+    (`'mobile' | 'tablet' | 'desktop'`, tablet counts as touch). Browser guesses
+    (`ontouchstart`, `maxTouchPoints`, `innerWidth`) are the fallback for the
+    dev server only, never the first source. `?input=touch` / `?input=desktop`
+    force a scheme and disable auto-switching, so both layouts are testable on
+    one machine.
+85. The inactive scheme **listens to nothing and is not in the DOM**. Building
+    the touch layer unconditionally (`new TouchControls()` with no device check)
+    is the single defect that has already shipped twice: transparent buttons
+    steal the mouse on desktop, and half the actions stay on keys that do not
+    exist on a phone. `display: none` does not count — remove the node. Pointer
+    lock exists in the desktop scheme only.
+86. The scheme switches **live**, without a reload: a key or a real `mousemove`
+    switches to desktop, a `pointerdown` with `pointerType === 'touch'` switches
+    back. Switching releases every held axis and button first, and re-renders the
+    control hints — "press **Space**" on a phone is an acceptance failure.
+    See `knowledge/ux/input_scheme_switching.md`.
+
 ## Physics vehicles
 
 60. A physics vehicle is **never** driven by writing `setLinvel()` every frame.

@@ -1,0 +1,13 @@
+{
+  "interstitial": {
+    "minimumDelay": 90
+  },
+  "banner": {
+    "enabled": true,
+    "position": "bottom"
+  },
+  "rewarded": {
+    "enabled": true
+  },
+  "platforms": {}
+}

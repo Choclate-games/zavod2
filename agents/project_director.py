@@ -147,8 +147,12 @@ class ProjectDirectorAgent:
         # подставляется позже — на этапе реализации, когда уже известно, ЧТО
         # реализуем (см. app/library.py).
         contract = fidelity.contract_block(ctx.raw_prompt)
+        # Приложенный к заказу промпт игры — часть задания, а не приложение к
+        # нему: рамку проекта нельзя выбирать, не прочитав его.
+        materials = ctx.attachments_brief()
         return (
             f"Идея пользователя (дословно): {ctx.raw_prompt}\n\n"
+            + (f"{materials}\n\n" if materials else "")
             + (f"{contract}\n\n" if contract else "")
             + (
             f"Недавно выпущенные проекты фабрики.\n"

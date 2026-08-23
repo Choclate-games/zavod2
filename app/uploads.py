@@ -1,10 +1,16 @@
 """
-Временная папка вложений чата: скриншоты и файлы, которые пользователь
-прикрепляет к задаче агенту.
+Временная папка вложений: скриншоты и файлы, которые пользователь прикрепляет
+к задаче агенту в чате — и к заказу игры в студии.
 
 Файлы кладутся внутрь проекта — `workspace/<slug>/.factory/uploads/`, — потому
 что кодовому агенту разрешено читать только каталог его игры (см. app/sandbox).
 Положи мы вложения в системный TEMP, агент до них просто не дотянулся бы.
+
+У вложений прогона есть отдельный шаг. Заказ игры прикладывают до того, как
+проект существует: слаг рождается вместе с прогоном, а промпт игры, референс
+или модель человек кладёт раньше. Такие файлы ждут в предбаннике
+(`workspace/.factory/uploads-staging/`) и копируются в проект первым же делом
+прогона — `adopt()`.
 
 Папка временная: всё старше `MAX_AGE_DAYS` (неделя) удаляется автоматически —
 при каждой загрузке и один раз при старте фабрики. Поэтому ссылки в промпте
@@ -27,6 +33,13 @@ from typing import Any, Dict, List, Optional
 from app.sandbox import SandboxViolation, ensure_inside_workspace, project_dir, workspace_root
 
 UPLOADS_DIRNAME = Path(".factory") / "uploads"
+
+# Предбанник для вложений прогона. Файл к заказу игры прикладывают ДО того, как
+# у проекта появится каталог: слаг рождается вместе с прогоном, а промпт игры,
+# модель или референс человек кладёт раньше. Поэтому такие вложения ждут здесь,
+# в служебной папке песочницы, и переезжают в проект первым же делом прогона
+# (`adopt`). Имя с точки — каталог не попадает в список проектов.
+STAGING_DIRNAME = Path(".factory") / "uploads-staging"
 
 # Неделя — срок жизни вложения. После него файл удаляется первой же уборкой.
 MAX_AGE_DAYS = 7
@@ -63,6 +76,13 @@ def uploads_dir(slug: str) -> Path:
     return directory
 
 
+def staging_dir() -> Path:
+    """Папка вложений, у которых ещё нет проекта."""
+    directory = ensure_inside_workspace(workspace_root() / STAGING_DIRNAME)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def relative_path(name: str) -> str:
     """Путь, который уходит агенту в промпт — всегда относительно корня игры."""
     return f"{UPLOADS_DIRNAME.as_posix()}/{name}"
@@ -91,27 +111,11 @@ def save(slug: str, filename: str, payload: str) -> Dict[str, Any]:
     base64. Так вложения долетают обычным JSON-запросом, без multipart и без
     лишней зависимости в requirements.
     """
-    raw = _decode(payload)
-    if not raw:
-        raise UploadError("Файл пустой — нечего прикреплять.")
-    if len(raw) > MAX_BYTES:
-        raise UploadError(
-            f"Файл больше {MAX_BYTES // (1024 * 1024)} МБ — уменьшите скриншот или "
-            f"положите файл в проект руками."
-        )
-
-    stem, suffix = _split_name(filename, raw)
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise UploadError(
-            f"Тип файла «{suffix or 'без расширения'}» не поддерживается. "
-            f"Прикрепляйте скриншоты, тексты, конфиги или модели."
-        )
-
+    raw, stem, suffix = _accept(filename, payload)
     cleanup()  # уборка привязана к загрузке: папка не переживает неделю простоя
 
     directory = uploads_dir(slug)
-    unique = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
-    name = f"{unique}-{stem}{suffix}"
+    name = f"{_stamp()}-{stem}{suffix}"
     (directory / name).write_bytes(raw)
     return _describe(directory / name)
 
@@ -137,6 +141,84 @@ def delete(slug: str, name: str) -> bool:
         return False
 
 
+# ── Предбанник: вложения прогона, у которых ещё нет проекта ─────────────────
+
+def save_staged(filename: str, payload: str) -> Dict[str, Any]:
+    """Кладёт вложение в предбанник — проекта для него ещё не существует."""
+    raw, stem, suffix = _accept(filename, payload)
+    cleanup()
+    directory = staging_dir()
+    name = f"{_stamp()}-{stem}{suffix}"
+    (directory / name).write_bytes(raw)
+    return _describe(directory / name, staged=True)
+
+
+def list_staged() -> List[Dict[str, Any]]:
+    try:
+        directory = staging_dir()
+    except SandboxViolation:
+        return []
+    files = [_describe(path, staged=True) for path in directory.iterdir() if path.is_file()]
+    return sorted(files, key=lambda f: f["modified_ts"], reverse=True)
+
+
+def resolve_staged(name: str) -> Optional[Path]:
+    safe = _safe_name(name)
+    if not safe or safe != name.strip():
+        return None
+    path = staging_dir() / safe
+    try:
+        ensure_inside_workspace(path)
+    except SandboxViolation:
+        return None
+    return path if path.is_file() else None
+
+
+def delete_staged(name: str) -> bool:
+    path = resolve_staged(name)
+    if not path:
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def adopt(slug: str, names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Кладёт вложения из предбанника в каталог проекта.
+
+    Зовётся первым делом прогона, как только у него появился слаг: путь в
+    промпте обязан быть относительным корню игры — кодовому агенту разрешено
+    читать только её каталог.
+
+    Копия, а не перенос. Пакетный заказ запускает десять прогонов из одного и
+    того же предбанника: перенос отдал бы файлы тому, кто стартовал первым, а
+    остальные девять получили бы заказ без материалов. Оригинал остаётся в
+    предбаннике и уходит либо по кнопке «✕», либо возрастной уборкой.
+
+    `names` — что забрать; `None` означает «всё, что лежит в предбаннике».
+    """
+    try:
+        source = staging_dir()
+        target = uploads_dir(slug)
+    except SandboxViolation:
+        return []
+
+    wanted = None if names is None else {n for n in names if n}
+    adopted: List[Dict[str, Any]] = []
+    for path in sorted(source.iterdir()):
+        if not path.is_file() or (wanted is not None and path.name not in wanted):
+            continue
+        destination = target / path.name
+        try:
+            destination.write_bytes(path.read_bytes())
+        except OSError:
+            continue
+        adopted.append(_describe(destination))
+    return adopted
+
+
 # ── Уборка ──────────────────────────────────────────────────────────────────
 
 def cleanup(force: bool = False) -> int:
@@ -159,8 +241,11 @@ def cleanup(force: bool = False) -> int:
     except OSError:
         return 0
 
-    for project in root.iterdir():
-        directory = project / UPLOADS_DIRNAME
+    # Предбанник стареет по тем же правилам: заказ, который так и не запустили,
+    # не должен держать стомегабайтную модель месяцами.
+    directories = [project / UPLOADS_DIRNAME for project in root.iterdir()]
+    directories.append(root / STAGING_DIRNAME)
+    for directory in directories:
         if not directory.is_dir():
             continue
         for path in directory.iterdir():
@@ -201,6 +286,69 @@ def prompt_block(files: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# Сколько текста вложений уезжает в промпт агентов спецификации целиком.
+# Они разговаривают с моделью запросом, а не файлами: открыть приложенный
+# «промпт игры» им нечем, и без врезки он для них не существует. Верхняя
+# граница нужна, чтобы чужой README на сто килобайт не вытеснил саму идею.
+BRIEF_CHARS_PER_FILE = 6000
+BRIEF_CHARS_TOTAL = 18000
+
+# Что имеет смысл вклеивать текстом. Модели и звук — нет: агенту спецификации
+# от их байтов пользы не будет, ему хватает имени и пути.
+TEXT_EXTENSIONS = {".txt", ".md", ".log", ".json", ".yaml", ".yml", ".csv",
+                   ".xml", ".html", ".css", ".js", ".jsx", ".ts", ".tsx",
+                   ".py", ".glsl", ".vert", ".frag", ".ini", ".toml"}
+
+
+def brief_block(files: List[Dict[str, Any]], root: Optional[Path] = None) -> str:
+    """Вложения так, как их видят агенты спецификации: перечень плюс текст.
+
+    Кодовому агенту достаточно путей — он открывает файлы сам (`prompt_block`).
+    Агенты спецификации файлов не открывают вовсе, поэтому текстовые вложения
+    вклеиваются сюда содержимым: приложенный «промпт игры» обязан участвовать в
+    концепции, а не остаться строкой в списке приложений.
+    """
+    if not files:
+        return ""
+    lines = [
+        "[МАТЕРИАЛЫ, ПРИЛОЖЕННЫЕ К ЗАКАЗУ]",
+        "Пользователь приложил к заказу файлы. Это часть задания, а не справка: "
+        "то, что в них написано, имеет тот же вес, что и текст идеи.",
+    ]
+    budget = BRIEF_CHARS_TOTAL
+    for item in files:
+        kind = "скриншот" if item.get("is_image") else "файл"
+        rel = item.get("rel") or item.get("original", "")
+        lines.append(f"- `{rel}` — {kind} «{item.get('original', '')}», "
+                     f"{_size_label(int(item.get('size') or 0))}")
+        if budget <= 0:
+            continue
+        text = _read_text(item, root)
+        if not text:
+            continue
+        excerpt = text[:min(BRIEF_CHARS_PER_FILE, budget)]
+        budget -= len(excerpt)
+        cut = "\n… (обрезано)" if len(text) > len(excerpt) else ""
+        lines.append(
+            f"\nСодержимое «{item.get('original', '')}»:\n```\n{excerpt}{cut}\n```"
+        )
+    return "\n".join(lines)
+
+
+def _read_text(item: Dict[str, Any], root: Optional[Path]) -> str:
+    """Текст вложения, если это текст и он читается. Иначе — пусто."""
+    name = item.get("name") or ""
+    if Path(name).suffix.lower() not in TEXT_EXTENSIONS:
+        return ""
+    path = Path(item["path"]) if item.get("path") else (Path(root) / name if root else None)
+    if not path or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
 def links_note(files: List[Dict[str, Any]]) -> str:
     """Короткая приписка к сообщению пользователя в ленте чата."""
     if not files:
@@ -209,6 +357,33 @@ def links_note(files: List[Dict[str, Any]]) -> str:
 
 
 # ── Внутреннее ──────────────────────────────────────────────────────────────
+
+def _accept(filename: str, payload: str) -> tuple:
+    """Общая приёмка содержимого: расшифровать, взвесить, проверить тип.
+
+    Одна на оба хранилища — проектное и предбанник. Разъехавшиеся правила
+    приёма означали бы, что файл, принятый до старта прогона, отвергается после.
+    """
+    raw = _decode(payload)
+    if not raw:
+        raise UploadError("Файл пустой — нечего прикреплять.")
+    if len(raw) > MAX_BYTES:
+        raise UploadError(
+            f"Файл больше {MAX_BYTES // (1024 * 1024)} МБ — уменьшите скриншот или "
+            f"положите файл в проект руками."
+        )
+    stem, suffix = _split_name(filename, raw)
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise UploadError(
+            f"Тип файла «{suffix or 'без расширения'}» не поддерживается. "
+            f"Прикрепляйте скриншоты, тексты, конфиги или модели."
+        )
+    return raw, stem, suffix
+
+
+def _stamp() -> str:
+    return f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
+
 
 def _decode(payload: str) -> bytes:
     text = (payload or "").strip()
@@ -249,7 +424,7 @@ def _safe_name(value: str) -> str:
     return cleaned.strip("-.") or ""
 
 
-def _describe(path: Path) -> Dict[str, Any]:
+def _describe(path: Path, staged: bool = False) -> Dict[str, Any]:
     try:
         stat = path.stat()
         size, modified = stat.st_size, stat.st_mtime
@@ -261,7 +436,10 @@ def _describe(path: Path) -> Dict[str, Any]:
     return {
         "name": path.name,
         "original": original,
-        "rel": relative_path(path.name),
+        # У вложения из предбанника пути внутри игры ещё нет: проект появится
+        # вместе с прогоном, и тогда `adopt` перепишет описание с настоящим rel.
+        "rel": "" if staged else relative_path(path.name),
+        "staged": staged,
         "size": size,
         "size_label": _size_label(size),
         "modified_ts": modified,

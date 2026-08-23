@@ -1,53 +1,94 @@
 # Бастион 13: Сапёр Периметра 🎮
 
-> **Бастион 13: Сапёр Периметра — это 3D Tower Defense от первого лица в атмосфере сурового дизельпанка. Вы не просто стреляете, а командуете огневой мощью бастиона: возводите пулеметные, огнеметные и крио-турели по слотам периметра, разносите энергоблоки, охлаждаете раскаленные докрасна стволы крио-спреем прямо под носом у накатывающей орды зомби и удерживаете рубеж до рассвета.**
+> **«Бастион 13: Сапёр Периметра» — это 3D Tower Defense от первого лица в атмосфере сурового дизельпанка. Вы управляете боевым инженером цитадели: монтируете и модернизируете пулеметные турели по слотам рубежа, доставляете тяжелые Overcharge-энергоячейки, охлаждаете раскаленные стволы крио-спреем под оглушительный выброс пара и лично удерживаете бруствер пневмо-клепальником против накатывающей орды зомби.**
 
 ---
 
-## 🌟 Project Overview
-- **Genre**: 3D Экшен-Стратегия / Tower Defense от первого лица (Дизельпанк Тактический FPS-Инженер / Оборона Периметра / Thermal Management TD)
-- **Renderer**: **THREEJS** + Rapier3D (@dimforge/rapier3d-compat ^0.20.0)
-- **Platform**: Playgama Bridge (Yandex Games / VK / Web)
-- **Orientation**: Landscape
-- **Target Audience**: Мужчины и женщины 16–45 лет, фанаты Tower Defense, дизельпанка и динамичных зомби-экшенов, ценящие тактическую глубину, управление ресурсами в реальном времени и напряженную атмосферу выживания.
-- **Core Hook**: В разгар боя пулеметная турель раскаляется докрасна и вот-вот взорвется прямо перед мордами десятков зомби; инженер на спринте влетает в амбразуру, заливает ствол шипящим крио-спреем под оглушительный выброс пара и в последний миг спасает сектор от прорыва.
+## 🌟 Обзор проекта
+- **Жанр**: 3D Экшен-Стратегия / Tower Defense от первого лица (Дизельпанк Тактический FPS-Инженер / Thermal Management TD)
+- **Стек**: Three.js (^0.174.0), Rapier3D (@dimforge/rapier3d-compat ^0.20.0), Web Audio API, TypeScript strict, Vite
+- **Платформа**: Playgama Bridge 2.x (Yandex Games / VK / Web)
+- **Ориентация**: Landscape
 
 ---
 
-## 📁 Package Directory Map
-```text
-workspace/sozday_igru_tover_defens_ot_zombi_no_ot_pervogo_/
-├── AGENTS.md                        # Инструкция для ИИ-агента (пишет фабрика)
-├── ACCEPTANCE.md                    # Приёмка: пронумерованные проверки готовности
-├── AI_DEVELOPER_PROMPT.md           # Definitive master prompt for coding agent
-├── balance.yaml                     # Числа игры: код читает их отсюда
-├── scripts/check-spec.mjs           # Статическая часть приёмки, без зависимостей
-├── scripts/smoke.mjs                # Сборка, запуск в браузере и проверка ввода
-├── DEVLOG.md                        # Журнал разработки, ведёт кодовый агент
-├── CHANGELOG.md                     # Changelog проекта, ведёт кодовый агент
-├── GAME_DATA.yaml                   # Machine-readable game metadata
-├── GAME_DESIGN_DOCUMENT.md          # Vision, player fantasy, game design
-├── GAMEPLAY_SPECIFICATION.md        # Combat, movement, spawning formulas
-├── TECHNICAL_SPECIFICATION.md       # TypeScript, Vite, physics, rendering
-├── ARCHITECTURE_DOCUMENT.md         # Module hierarchy, system layer flow
-├── PLAYGAMA_INTEGRATION.md          # Ads, Cloud Save, Leaderboards, SDK
-├── MONETIZATION.md                  # Rewarded & Interstitial ad architecture
-├── preview/
-│   └── concept_preview.png          # Gameplay visual concept mockup
-└── skills/
-    ├── GAME_SKILL.md                # Game domain instructions
-    ├── GAMEPLAY_SKILL.md            # Physics & combat coding rules
-    ├── RENDERER_SKILL.md            # WebGL / Three.js performance guide
-    ├── PLAYGAMA_SKILL.md            # Bridge SDK implementation guide
-    └── CONTROLS_SKILL.md            # Тач- и десктоп-управление
+## 🚀 Запуск и сборка
+```bash
+npm install       # установка зависимостей
+npm run dev       # запуск локального dev-сервера Vite (http://localhost:3000)
+npm run build     # строгая компиляция TypeScript и сборка релиза в dist/
+npm run preview   # локальный просмотр собранного релиза
+npm run check:spec# статическая приёмка и валидация спецификаций
+npm run smoke     # дымовой тест в реальном браузере Chromium
 ```
 
 ---
 
-## 🚀 How to Develop this Game
-1. Open `AI_DEVELOPER_PROMPT.md`.
-2. Feed the prompt into your AI coding assistant (Cursor / Antigravity / Claude).
-3. Follow the 5-phase roadmap in `DEVELOPMENT_ROADMAP.md`.
-4. Run `npm install && npm run dev` and check the game in the factory's built-in browser.
-5. Keep `DEVLOG.md` and `CHANGELOG.md` updated after every work session.
-6. Verify every deliverable against the **Definition of Done**.
+## 🎮 Управление
+
+### Клавиатура и мышь (Desktop)
+- `WASD` / `Стрелки` — перемещение инженера по боевой платформе
+- `Shift` (удержание) — тактический спринт (расходует выносливость)
+- `Мышь` (захват курсора) — обзор и прицеливание от первого лица
+- `[E]` (вблизи слота < 2.5 м) — монтаж пулемета Т1 (75 скрапа) / апгрейд Т2-Т3
+- `[E]` (на стойке генератора) — взять переносную Overcharge-ячейку в руки
+- `[E]` (на турели с ячейкой в руках) — установить батарею (+80% DPS на 25 с)
+- `[G]` — сбросить энергоячейку на настил
+- `[ПКМ]` / `[F]` (в упор к радиатору <= 2.2 м) — крио-охлаждение ствола соплом ранца
+- `[Q]` — бросок термического сигнального фаера по баллистической дуге
+- `[ЛКМ]` (удержание у бруствера < 1.8 м) — полевой ремонт клепальником (120 HP/с)
+- `[V]` — силовой пневматический удар клепальником (отталкивание орды на 3.5 м)
+- `[Esc]` / `[P]` — тактическая пауза и боевой формуляр настроек
+
+### Тач-управление (Mobile)
+- **Левая зона**: плавающий виртуальный джойстик перемещения
+- **Правая зона**: свободный свайп для поворота камеры и наведения
+- **Экранные кнопки**:
+  - `[ДЕЙСТВИЕ / МОНТАЖ / БАТАРЕЯ]` — контекстная кнопка взаимодействия над объектом
+  - `[КРИО-ЗАЛП]` — удержание для охлаждения ствола турели
+  - `[ФАЕР]` — бросок фаера в сектор
+  - `[СПРИНТ]` — переключатель ускоренного бега
+  - `[РЕМОНТ]` — удержание для сварки пробитого бруствера
+  - `[ПАУЗА]` — вызов формуляра настроек
+
+---
+
+## 📁 Структура каталогов
+```text
+src/
+├── main.ts                    # Bootstrap игры, Playgama Bridge lifecycle, game_ready
+├── balance.ts                 # Числа баланса, синхронизированные с balance.yaml
+├── vite-env.d.ts              # Объявления модулей и Vite типов
+├── core/
+│   ├── Game.ts                # Главный координатор и машина состояний
+│   ├── GameLoop.ts            # Фиксированный цикл 60 Гц с защитой от скачков dt
+│   └── EventBus.ts            # Типизированная шина событий
+├── platform/
+│   ├── PlaygamaService.ts     # Адаптер @playgama/bridge (Rewarded, Interstitial, lifecycle)
+│   └── StorageService.ts      # Сохранение по ключу player_blueprints с нормализацией
+├── physics/
+│   └── PhysicsWorld.ts        # Физический мир Rapier3D с коллизиями бастиона
+├── entities/
+│   ├── Player.ts              # FPS контроллер инженера, спринт, стамина, ранец
+│   └── EntityManager.ts       # Слоты турелей, бочки, бруствер, инстансинг орды зомби
+├── systems/
+│   ├── TurretSystem.ts        # Сектор 120°, автозахват, нагрев 4.2°C/с, клин JAMMED
+│   ├── ThermalSystem.ts       # Охлаждение 75°C/с, Overcharge ячейки, заправка ранца
+│   ├── CombatSystem.ts        # Цепная детонация бочек, термо-шок 1200, ремонт клепальником
+│   └── WaveSystem.ts          # 3 волны смены (25 -> 62 -> 110 + Хладо-Громила)
+├── rendering/
+│   ├── SceneManager.ts        # Three.js сцена, свет, камера, вьюмодель рук, травма
+│   ├── ProceduralModels.ts    # Процедурная геометрия дизельпанк-бастиона, турелей, бочек
+│   └── ParticleSystem.ts      # Инстансинг частиц (метель, пар, пламя, искры, взрывы)
+├── audio/
+│   └── AudioManager.ts        # Процедурный синтезатор звуков Web Audio
+└── ui/
+    ├── theme.css              # Токены палитры, масштаба, z-index и шрифтов
+    ├── icons.ts               # Инлайновые SVG иконки с currentColor
+    ├── UiRoot.ts              # Корневой контейнер интерфейса над канвасом
+    ├── ScreenRouter.ts        # Роутер 6 экранов с анимацией перехода
+    ├── Hud.ts                 # Оптимизированный HUD без пересборки DOM
+    ├── TouchControls.ts       # Тач-джойстик и зона обзора на Pointer Events
+    ├── components/            # Button, IconButton, Panel, Modal, Meter, Toast
+    └── screens/               # MainMenu, Armory, Gameplay, Pause, Victory, Defeat
+```

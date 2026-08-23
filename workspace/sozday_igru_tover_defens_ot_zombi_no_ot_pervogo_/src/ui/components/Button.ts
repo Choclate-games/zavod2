@@ -1,4 +1,4 @@
-﻿import { AudioManager } from '../../audio/AudioManager';
+import { AudioManager } from '../../audio/AudioManager';
 
 export interface ButtonOptions {
   label: string;

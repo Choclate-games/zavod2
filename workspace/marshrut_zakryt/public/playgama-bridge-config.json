@@ -1,0 +1,10 @@
+{
+  "debug": false,
+  "disableLoadingLogo": true,
+  "showLoadingText": true,
+  "game": {
+    "adaptToSafeArea": false
+  },
+  "device": {},
+  "storage": {}
+}

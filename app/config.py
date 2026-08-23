@@ -47,6 +47,10 @@ class AppConfig:
         # mechanics_cfg убран вместе с каталогом на 1024 механики: механики
         # придумывает модель, а готовый КОД подбирается по app/library.py.
         self.references_cfg = load_yaml(CONFIG_DIR / "references.yaml")
+        # Ниши с доказанным спросом: вокруг них генератор строит идеи. Это
+        # список категорий спроса, а не каталог концептов — правится руками
+        # под то, что видно в аналитике площадок.
+        self.niches_cfg = load_yaml(CONFIG_DIR / "niches.yaml")
         self.playgama_cfg = load_yaml(CONFIG_DIR / "playgama.yaml")
         
         # Стек конвейера. 2D временно отключено, а не удалено: знания по Pixi

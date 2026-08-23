@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Type
 import requests
 
 from providers.base import AIProvider, T
+from providers import json_output
 
 # Локальной подмены ответа здесь больше нет.
 #
@@ -71,7 +72,7 @@ class AnthropicProvider(AIProvider):
                 cleaned = cleaned.split("```json")[1].split("```")[0].strip()
             elif "```" in cleaned:
                 cleaned = cleaned.split("```")[1].split("```")[0].strip()
-            parsed = json.loads(cleaned)
+            parsed = json_output.loads(cleaned)
             return response_model.model_validate(parsed)
         except Exception as exc:
             raise RuntimeError(

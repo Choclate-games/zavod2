@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import sandbox
 from app.web.bus import bus
-from app.web.service import AGENT_KEYS, service
+from app.web.service import AGENT_KEYS, DEMO_SLUG, service
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -254,6 +254,12 @@ async def project_gate(slug: str, request: Request) -> Dict[str, Any]:
     return service.start_gate(_slug(slug), payload)
 
 
+@app.post("/api/projects/{slug}/favorite")
+async def project_favorite(slug: str, request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.set_project_favorite(_slug(slug), bool(payload.get("favorite", True)))
+
+
 @app.post("/api/projects/{slug}/archive")
 async def project_archive(slug: str, request: Request) -> Dict[str, Any]:
     payload = await _body(request)
@@ -400,6 +406,38 @@ def activity_dismiss(session_id: str) -> Dict[str, Any]:
 @app.post("/api/activity/clear")
 def activity_clear() -> Dict[str, Any]:
     return service.clear_activity()
+
+
+# ── Вложения заказа (прогон) ────────────────────────────────────────────────
+#
+# Отдельные роуты от чатовых: у заказа ещё нет проекта, поэтому нет и слага.
+# Файлы ждут в предбаннике песочницы и копируются в игру на старте прогона.
+
+@app.get("/api/studio/uploads")
+def studio_uploads_list() -> Dict[str, Any]:
+    return service.list_studio_uploads()
+
+
+@app.post("/api/studio/uploads")
+async def studio_uploads_save(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.save_studio_upload(
+        str(payload.get("name") or "attachment"),
+        str(payload.get("data") or ""),
+    )
+
+
+@app.get("/api/studio/uploads/file/{name}")
+def studio_uploads_file(name: str):
+    path = service.studio_upload_path(name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Вложение не найдено")
+    return FileResponse(path)
+
+
+@app.delete("/api/studio/uploads/file/{name}")
+def studio_uploads_delete(name: str) -> Dict[str, Any]:
+    return service.delete_studio_upload(name)
 
 
 # ── Вложения чата ───────────────────────────────────────────────────────────
@@ -575,6 +613,31 @@ async def play_window(slug: str, request: Request) -> Dict[str, Any]:
     payload = await _body(request)
     state = service.play_state(_slug(slug))
     return service.open_preview_window(slug, payload.get("url") or state.get("url") or "")
+
+
+# ── Демо-стенд базы знаний ──────────────────────────────────────────────────
+#
+# Стенд — не игра студии, поэтому у него свои роуты и своя кнопка в интерфейсе:
+# в списке проектов его карточку путали с выпущенной игрой.
+
+@app.get("/api/demo")
+def demo_state() -> Dict[str, Any]:
+    return service.demo_state()
+
+
+@app.post("/api/demo/start")
+def demo_start() -> Dict[str, Any]:
+    return service.start_demo()
+
+
+@app.post("/api/demo/stop")
+def demo_stop() -> Dict[str, Any]:
+    return service.stop_demo()
+
+
+@app.post("/api/demo/open-folder")
+def demo_open_folder() -> Dict[str, Any]:
+    return service.open_folder(sandbox.project_dir(DEMO_SLUG))
 
 
 # ── Квоты ───────────────────────────────────────────────────────────────────

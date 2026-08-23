@@ -54,6 +54,7 @@ from app.config import config
 from app.logging import log_warning
 from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
 from providers.base import AIProvider, T
+from providers import json_output
 # from providers.local import LocalAIProvider   # офлайн-режим отключён
 from providers.proc_stream import (
     env_seconds,
@@ -689,41 +690,44 @@ class CodingCLIAgent(AIProvider):
             f"Do not include any explanation or markdown before or after the JSON.\n\n"
             f"JSON Schema:\n{schema_str}\n"
         )
-        # Одна повторная попытка: срыв JSON у терминального агента — частая
-        # случайность. Если и она не помогла — это ошибка генерации, а не повод
-        # собрать концепт по локальному шаблону.
+        # Синтаксис ответа (лишняя запятая, комментарий, обрыв на полуслове)
+        # чинится на месте — см. providers.json_output, — поэтому сюда доходит
+        # уже содержательное расхождение со схемой. Его и повторяем: три
+        # захода, и каждый следующий знает, чем не понравился предыдущий.
+        # Голое «верни валидный JSON» модели не сообщает ничего, а ломается
+        # обычно одно поле из тридцати.
         last_error: Optional[Exception] = None
-        for attempt in (1, 2):
+        for attempt in (1, 2, 3):
             prompt = combined if attempt == 1 else (
-                combined + "\n[REMINDER] Предыдущий ответ не разобрался как JSON. "
-                "Верни ТОЛЬКО валидный JSON-объект по схеме, без пояснений и markdown.\n"
+                combined + "\n[REMINDER] Предыдущий ответ не подошёл под схему: "
+                + str(last_error)[:600]
+                + "\nИсправь ровно это и верни ТОЛЬКО валидный JSON-объект по схеме, "
+                  "без пояснений и markdown.\n"
             )
             try:
                 raw = self.run_once(prompt)
-                return response_model.model_validate(json.loads(_extract_json_string(raw)))
+                data = json_output.loads(raw, on_repair=lambda why: log_warning(
+                    f"[{self.title}] JSON пришёл с изъяном ({why}); починил и разобрал."))
+                return response_model.model_validate(data)
             except Exception as exc:
                 last_error = exc
-                if attempt == 1:
-                    log_warning(f"[{self.title}] Структурированный вывод не разобрался ({exc}); повторяю запрос.")
+                if attempt < 3:
+                    log_warning(f"[{self.title}] Структурированный вывод не разобрался "
+                                f"({str(exc)[:300]}); попытка {attempt + 1} из 3.")
         raise RuntimeError(
             f"{self.title}: модель не вернула валидный JSON для {response_model.__name__} "
-            f"после двух попыток ({last_error}). Генерация остановлена — "
+            f"после трёх попыток ({str(last_error)[:400]}). Генерация остановлена — "
             f"пакет документов по шаблону хуже, чем честная ошибка."
         )
 
 
 def _extract_json_string(text: str) -> str:
-    text = (text or "").strip()
-    match = re.search(r"```(?:json)?\s*(\{.*\}|\[.*\])\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        return text[start:end + 1].strip()
-    start_arr, end_arr = text.find("["), text.rfind("]")
-    if start_arr != -1 and end_arr > start_arr:
-        return text[start_arr:end_arr + 1].strip()
-    return text
+    """Совместимость: разбор JSON живёт в `providers.json_output`.
+
+    Имя оставлено, потому что на него ссылаются тесты и соседние провайдеры;
+    вся логика — включая починку сорванного ответа — теперь общая.
+    """
+    return json_output.extract(text)
 
 
 # ---------------------------------------------------------------------------
@@ -1031,7 +1035,7 @@ class KimiAgent(CodingCLIAgent):
     def discover_models(self, timeout_seconds: int = 60) -> List[str]:
         """Псевдонимы моделей из конфигурации CLI (`kimi provider list --json`)."""
         raw = self.run_cli(["provider", "list", "--json"], timeout_seconds)
-        data = json.loads(_extract_json_string(raw))
+        data = json_output.loads(raw)
         return [str(alias) for alias in (data.get("models") or {})]
 
     def print_flag(self) -> str:

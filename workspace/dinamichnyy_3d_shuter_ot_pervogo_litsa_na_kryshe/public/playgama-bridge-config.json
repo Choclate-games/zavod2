@@ -1,0 +1,21 @@
+{
+  "advertisement": {
+    "enabled": true,
+    "interstitial": {
+      "enabled": true
+    },
+    "rewarded": {
+      "enabled": true,
+      "placements": ["revive_run", "double_rewards"]
+    },
+    "banner": {
+      "enabled": false
+    }
+  },
+  "leaderboards": {
+    "enabled": true,
+    "boards": [
+      { "id": "global_storm_score", "isMain": true }
+    ]
+  }
+}

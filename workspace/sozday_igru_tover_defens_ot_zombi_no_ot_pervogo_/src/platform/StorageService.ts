@@ -1,4 +1,4 @@
-﻿import bridge from '@playgama/bridge';
+import bridge from '@playgama/bridge';
 
 export interface PlayerSaveData {
   blueprints: number;

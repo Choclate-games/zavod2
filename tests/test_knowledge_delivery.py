@@ -84,9 +84,29 @@ def test_no_token_anywhere_in_the_package(tmp_path, monkeypatch):
 def test_fetch_script_reads_token_from_environment_only():
     assert "process.env.ZAVOD_KNOWLEDGE_TOKEN" in FETCH_KNOWLEDGE_MJS
     assert "ghp_" not in FETCH_KNOWLEDGE_MJS
-    # Приватный репозиторий по raw-адресу не отдаётся: нужен Contents API.
+
+
+def test_public_base_goes_through_the_cdn_and_the_api_is_the_fallback():
+    """Порядок адресов, а не их наличие: раньше он был обратным.
+
+    Неавторизованный Contents API отдаёт шестьдесят запросов в час на IP. В
+    манифесте одной игры сорок с лишним файлов, а пакет фабрики поднимает до
+    десяти прогонов сразу — лимит выгорал на первой игре, остальные получали
+    HTTP 403 и собирались вообще без базы знаний. У raw.githubusercontent
+    такого счётчика нет, поэтому публичная база тянется через него, а
+    Contents API остаётся для приватного репозитория, где нужен токен.
+    """
+    assert "raw.githubusercontent.com" in FETCH_KNOWLEDGE_MJS
     assert "api.github.com/repos/" in FETCH_KNOWLEDGE_MJS
-    assert "raw.githubusercontent.com" not in FETCH_KNOWLEDGE_MJS
+    assert FETCH_KNOWLEDGE_MJS.index("let res = await requestRaw(") \
+        < FETCH_KNOWLEDGE_MJS.index("res = await requestApi(")
+    # Authorization уходит только на api.github.com: raw-запрос заголовка не несёт.
+    assert "if (useToken) headers.Authorization" in FETCH_KNOWLEDGE_MJS
+    raw_fn = FETCH_KNOWLEDGE_MJS[
+        FETCH_KNOWLEDGE_MJS.index("async function requestRaw"):
+        FETCH_KNOWLEDGE_MJS.index("async function requestApi")
+    ]
+    assert "Authorization" not in raw_fn
 
 
 def test_fetch_script_counts_bytes_not_characters():
@@ -120,3 +140,42 @@ def test_library_file_lists_the_whole_catalog(tmp_path):
     text = (_package(tmp_path) / "LIBRARY.md").read_text(encoding="utf-8")
     for entry in library.load():
         assert entry.path in text, f"{entry.path} потерялся из LIBRARY.md"
+
+
+# ── Манифест не должен обещать игре несуществующие файлы ────────────────────
+
+
+def test_manifest_drops_paths_that_are_not_on_disk(tmp_path):
+    """Ссылки на документы приходят от модели, и она их иногда выдумывает.
+
+    «knowledge/math/ballistics_and_trajectories.md» — реальный случай из
+    выпущенной игры. В манифесте такая строка означает гарантированный HTTP
+    404, а если она помечена обязательной, загрузка базы падает целиком и
+    кодовый агент садится писать игру без правил фабрики.
+    """
+    ctx = GenerationContext(raw_prompt="снайпер", output_base_dir=tmp_path)
+    concept = _concept()
+    concept.skills = [SkillDoc(
+        skill_id="ui", filename="UI_SKILL.md",
+        knowledge_refs=["ux/ui_design_system.md",
+                        "math/ballistics_and_trajectories.md"],
+    )]
+    ctx.concept = concept
+    ctx.game_dir = tmp_path
+    OutputGenerator._write_manifest(ctx, tmp_path)
+
+    paths = {f["path"] for f in json.loads(
+        (tmp_path / "knowledge.manifest.json").read_text(encoding="utf-8"))["files"]}
+    assert "knowledge/ux/ui_design_system.md" in paths
+    assert "knowledge/math/ballistics_and_trajectories.md" not in paths
+
+
+def test_every_path_the_factory_offers_really_exists():
+    """Обязательные документы фабрики лежат на диске — иначе игра их не получит."""
+    from app import knowledge
+    from app.config import config
+
+    required = [knowledge.CRITICAL_RULES_FILE, *knowledge.MANDATORY_TOPICS]
+    missing = [name for name in required
+               if not (config.knowledge_dir / name).exists()]
+    assert not missing, f"нет в knowledge/: {missing}"

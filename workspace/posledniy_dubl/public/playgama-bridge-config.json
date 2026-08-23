@@ -1,0 +1,10 @@
+{
+  "ads": {
+    "interstitial": {
+      "enabled": true
+    },
+    "rewarded": {
+      "enabled": true
+    }
+  }
+}

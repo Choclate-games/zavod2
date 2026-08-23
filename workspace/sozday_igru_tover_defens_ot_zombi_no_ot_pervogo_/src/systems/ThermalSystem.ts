@@ -1,4 +1,4 @@
-﻿import { EntityManager } from '../entities/EntityManager';
+import { EntityManager } from '../entities/EntityManager';
 import { Player, PlayerInputState } from '../entities/Player';
 import { BALANCE } from '../balance';
 import { AudioManager } from '../audio/AudioManager';
@@ -34,7 +34,7 @@ export class ThermalSystem {
         this.player.isCarryingCell = true;
         this.entities.generatorCellsAvailable--;
         AudioManager.playOvercharge();
-        EventBus.emit('OVERCHARGE_CELL_PICKED');
+        EventBus.emit('OVERCHARGE_CELL_PICKED', undefined);
         EventBus.emit('TOAST_SHOW', { message: 'Энергоячейка взята! Доставьте в слот турели.', type: 'info' });
       }
     }

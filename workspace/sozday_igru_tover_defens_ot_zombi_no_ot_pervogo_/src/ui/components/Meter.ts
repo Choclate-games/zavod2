@@ -1,4 +1,4 @@
-﻿export class Meter {
+export class Meter {
   public element: HTMLDivElement;
   private barFill: HTMLDivElement;
   private valueLabel: HTMLSpanElement;
