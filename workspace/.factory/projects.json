@@ -172,10 +172,17 @@
     "title": ""
   },
   "sozday_igru_po_tipu_cs_go_s_kartoy_dust_2_vyboro": {
+    "rating": 2,
+    "archived": true,
+    "created_at": "2026-08-23T03:02:14",
+    "archived_at": "2026-08-23T09:35:52",
+    "title": "Dust 2: Ретейк и Дуэли"
+  },
+  "hochu_3d_igru_pro_kurera_na_kryshah_starogo_goro": {
     "rating": 0,
     "archived": false,
-    "created_at": "2026-08-23T03:02:14",
+    "created_at": "2026-08-23T09:40:47",
     "archived_at": "",
-    "title": "Dust 2: Ретейк и Дуэли"
+    "title": "Черепичный Спринт: Чистый Флоу"
   }
 }
