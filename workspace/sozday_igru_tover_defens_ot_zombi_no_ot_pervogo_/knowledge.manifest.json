@@ -1,0 +1,233 @@
+{
+  "repo": "EdikN/zavod2",
+  "ref": "main",
+  "game": "sozday_igru_tover_defens_ot_zombi_no_ot_pervogo_",
+  "note": "node scripts/fetch-knowledge.mjs — положит всё это в docs/ref/. Отдельный файл: node scripts/fetch-knowledge.mjs <путь>.",
+  "files": [
+    {
+      "path": "knowledge/CRITICAL_RULES.md",
+      "why": "запреты, которые дороже всего нарушить",
+      "required": true
+    },
+    {
+      "path": "knowledge/playgama/game_ready_and_loading.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/playgama/auth_and_player.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/playgama/storage_and_cloud.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/playgama/ads_integration.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/playgama/banners_and_layout.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/compliance/yandex_moderation.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/ux/localization_system.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/ux/touch_controls.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/ux/ui_design_system.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/ux/ui_implementation.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/FACTORY_LESSONS.md",
+      "why": "обязательный документ платформы и интерфейса",
+      "required": true
+    },
+    {
+      "path": "knowledge/threejs/instanced_mesh_crowds.md",
+      "why": "нужен скиллу skills/instanced_zombie_horde.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/mobile/dual_stick_fps_touch.md",
+      "why": "нужен скиллу skills/mobile_fps_touch_controls.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/playgama/sdk_best_practices.md",
+      "why": "нужен скиллу skills/playgama_bridge_integration.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/performance_guide.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/adaptive_quality.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/procedural_mesh_builder.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/tower_defense_core.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/fps_controller_and_shooting.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/physics_integration.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/mobile_shaders.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/game_map_and_world_design.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/procedural_character_rig.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/threejs/juice_and_vfx_pool.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/audio/procedural_sound_synthesizer.md",
+      "why": "нужен скиллу RENDERER_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/stack/README.md",
+      "why": "нужен скиллу STACK_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/stack/rapier3d.md",
+      "why": "нужен скиллу STACK_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/stack/postprocessing.md",
+      "why": "нужен скиллу STACK_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/mechanics/grid_building.md",
+      "why": "нужен скиллу BUILDING_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/patterns/builder_defense_loop.md",
+      "why": "нужен скиллу PROJECT_KNOWLEDGE_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/mechanics/chain_reaction.md",
+      "why": "нужен скиллу PROJECT_KNOWLEDGE_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/audio/web_audio_and_muting.md",
+      "why": "нужен скиллу PROJECT_KNOWLEDGE_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/monetization/rewarded_ads_patterns.md",
+      "why": "нужен скиллу PROJECT_KNOWLEDGE_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "knowledge/monetization/interstitial_best_practices.md",
+      "why": "нужен скиллу PROJECT_KNOWLEDGE_SKILL.md",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/towerDefense.ts",
+      "why": "готовый код: Tower defense: контракт волн, приоритет целей, экономика.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/world/shooterRagdoll.ts",
+      "why": "готовый код: Рэгдолл трупа БЕЗ физического движка: точки, связки, верле.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/world/ragdoll.ts",
+      "why": "готовый код: Рэгдолл на Rapier: семь тел, шесть сферических суставов.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/demos/TowerDefenseDemo.ts",
+      "why": "готовый код: Демо TowerDefense: как towerDefense собирается в живую сцену",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/stealthSensing.ts",
+      "why": "готовый код: Стелс: конус зрения, шкала подозрения, шум.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/world/boxerRagdoll.ts",
+      "why": "готовый код: Рэгдолл ИЗ САМОГО ПЕРСОНАЖА, а не из капсул-заменителей.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/arcadeCar.ts",
+      "why": "готовый код: Аркадная модель машины — общая для игрока и соперников.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/fightAnimStates.ts",
+      "why": "готовый код: Список анимаций бойца в одном месте: чем вызывается и сколько длится.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/flowField.ts",
+      "why": "готовый код: Флоу-филд и строй для RTS.",
+      "required": false
+    },
+    {
+      "path": "workspace/knowledge-showcase/src/game/gridBuilding.ts",
+      "why": "готовый код: Grid & Base Building logic module (pure TS, independent of Three.js)",
+      "required": false
+    }
+  ]
+}

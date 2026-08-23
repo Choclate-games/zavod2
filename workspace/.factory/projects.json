@@ -219,5 +219,19 @@
     "created_at": "2026-08-23T12:24:13",
     "archived_at": "2026-08-23T12:51:41",
     "title": "Метро-Балансир: Час Пик"
+  },
+  "sozday_igru_po_tipu_cs_go": {
+    "rating": 0,
+    "archived": false,
+    "created_at": "2026-08-23T13:37:31",
+    "archived_at": "",
+    "title": "Ван-Тап: Дуэли на Крыше"
+  },
+  "sozday_igru_tover_defens_ot_zombi_no_ot_pervogo_": {
+    "rating": 0,
+    "archived": false,
+    "created_at": "2026-08-23T13:37:44",
+    "archived_at": "",
+    "title": "Бастион 13: Сапёр Периметра"
   }
 }

@@ -727,13 +727,14 @@ class FactoryService:
 
             data = self._read_yaml(sandbox.docs_dir(game_dir.name) / "GAME_DATA.yaml")
             title = data.get("title", game_dir.name)
-            renderer_final = data.get("renderer", renderer or "threejs")
 
             coder_title = AGENT_LABELS.get(coder_key, coder_key)
-            self.update_progress(96, f"⚡ ЭТАП 2: Запуск {coder_key.upper()} для генерации кода игры...")
+            self.update_progress(96, f"⚡ ЭТАП 2: {coder_key.upper()} собирает игру по фазам...")
             self.append_log(
-                f"\n{'─' * 65}\n⚡ ЗАПУСК {coder_title}: Создание структуры и исходного кода "
-                f"игры в {game_dir.name}\n{'─' * 65}\n"
+                LINE_THIN
+                + f"⚡ {coder_title} строит игру в {game_dir.name} фазами: ядро, "
+                + "содержание, оболочка, доводка. Каждую принимает фабрика — "
+                + "сборкой, запуском в браузере и проверками." + BR + LINE_THIN
             )
 
             sandbox.ensure_project_docs(game_dir, title)

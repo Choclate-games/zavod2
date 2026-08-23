@@ -1,0 +1,109 @@
+_readme: 'Числа этой игры. Код читает их отсюда и не содержит литералов: правка баланса
+  не должна быть правкой кода. Поле value хранит значение с единицей измерения так,
+  как его задал дизайнер; note объясняет, что ломается при отклонении.'
+slug: sozday_igru_po_tipu_cs_go
+performance:
+  target_fps: 60
+  max_draw_calls: 60
+  max_triangles: 35000
+  bundle_size_budget_mb: 4.0
+session:
+  model: Матч Best of 5 (до 3 побед) из 5 раундов по 10–15 секунд каждый; суммарная
+    длительность полной сессии — ровно 60–90 секунд с моментальной сменой сторон и
+    позиций спавна.
+  win: Выиграть 3 раунда из 5 в дуэльной серии (Best of 5), уничтожив противника точным
+    выстрелом в голову или корпус быстрее, чем истечет 15-секундный таймер раунда.
+  lose: Погибнуть от выстрела противника в 3 раундах серии, упасть с края крыши небоскреба
+    в бездну или допустить истечение 15-секундного таймера (при ничьей по времени
+    оба дуэлянта получают поражение за пассивность).
+  difficulty_curve: 'Экспоненциально-адаптивная кривая реакции: в первых матчах боты
+    реагируют с задержкой 450–600 мс с базовым контр-стрейфом; по мере роста победной
+    серии противники сокращают окно прицеливания до 180–220 мс, активно используют
+    ложные стрейфы (джог-пики) и прострелы через легкие профлисты строительных лесов.'
+mechanics:
+  kontr_streyf_s_aktivnym_gasheniem_inertsii_precisi:
+    name: Контр-стрейф с активным гашением инерции (Precision Counter-Strafe)
+    parameters:
+      vremya_aktivnogo_gasheniya_skorosti_t_counter_stop:
+        value: 0.08 с
+        note: Если увеличить до 0.20 с — игра превратится в «ватный» медленный шутер;
+          если уменьшить до 0.02 с — исчезнет скилл-чекинг тайминга контр-стрейфа.
+      maksimalnaya_skorost_streyfa_v_max:
+        value: 6.2 м/с
+        note: Если увеличить — пикающий игрок получит непреодолимое преимущество (peeker's
+          advantage); если уменьшить — пики станут легкой добычей для стоячего кемпера.
+      porog_tochnosti_nulevoy_skorosti_v_accuracy_thresh:
+        value: 0.35 м/с
+        note: Если сделать строже (<0.1 м/с) — на тачскрине будет невозможно стрелять;
+          если сделать мягче (>1.5 м/с) — обесценится механика остановки.
+      okno_idealnogo_vystrela_posle_ostanovki_t_perfect_:
+        value: 0.22 с
+        note: Время до того, как стоячего дуэлянта срежет реакция противника. Увеличение
+          делает игру казуальной, уменьшение — хардкорным пиксель-хантингом.
+  van_tap_hedshot_so_sryvom_kaski_one_tap_helmet_kno:
+    name: Ван-Тап хедшот со срывом каски (One-Tap Helmet Knockoff)
+    parameters:
+      radius_hitboksa_golovy_r_head_hitbox:
+        value: 0.11 м
+        note: Если увеличить до 0.16 м — хедшоты станут случайными и обесценят скилл;
+          если уменьшить до 0.07 м — дуэли превратятся в бесконечную фрустрацию.
+      dlitelnost_slow_mo_triumfa_t_slowmo:
+        value: 0.35 с
+        note: Если увеличить — собьется динамика сверхбыстрого матча; если убрать
+          — игрок не успеет рассмотреть отлетающую в бездну каску.
+      uron_v_golovu_desert_eagle_dmg_headshot:
+        value: 140 HP
+        note: Гарантирует 1-hit-kill против базовых 100 HP противника даже через легкую
+          преграду.
+      fizicheskiy_impuls_otryva_kaski_p_helmet_impulse:
+        value: 18.5 кг*м/с
+        note: Задает кинематографичную параболу полета каски в сторону заката над
+          крышей.
+  pozitsionnyy_pik_i_pred_pritselivanie_angle_peekin:
+    name: Позиционный пик и пред-прицеливание (Angle Peeking & Pre-Aim)
+    parameters:
+      shirina_standartnogo_ukrytiya_w_pillar:
+        value: 1.2 м
+        note: Определяет дистанцию стрейфа, необходимую для полного выхода из тени
+          укрытия.
+      vysota_linii_gorizonta_golov_y_head_level:
+        value: 1.65 м
+        note: Фиксированная константа арены; малейшее отклонение прицела по вертикали
+          требует времени на доводку.
+      tayming_jiggle_pika_t_jiggle_cycle:
+        value: 0.24 с
+        note: Если увеличить — игрок не успеет спрятаться до ответного выстрела бота;
+          если уменьшить — плечо персонажа не покажется из-за угла.
+      shtraf_k_skorosti_pri_zadevanii_kraya_ukrytiya:
+        value: 0.0 м/с (скользящий коллайдер)
+        note: Идеально гладкие физические материалы предотвращают застревание игрока
+          в геометрии при стрейфе.
+  taymer_forsirovannogo_kontakta_15_second_rooftop_p:
+    name: Таймер форсированного контакта (15-Second Rooftop Pressure)
+    parameters:
+      dlitelnost_raunda_t_round_max:
+        value: 15.0 с
+        note: Если увеличить до 30 с — дуэли потеряют адреналин и станут скучными;
+          если уменьшить до 8 с — игроки не успеют выполнить даже один тактический
+          маневр.
+      porog_kriticheskogo_davleniya_t_critical_threshold:
+        value: 4.0 с
+        note: Запускает панический звуковой таймер и активирует агрессивный раш бота.
+      shtraf_za_nichyu_po_taymeru_draw_loss_penalty:
+        value: -50 очков рейтинга обоим
+        note: Исключает стратегию пассивного затягивания времени и кемпинга.
+  prostrel_legkih_ukrytiy_i_dzhog_pik_wallbang_jiggl:
+    name: Прострел легких укрытий и джог-пик (Wallbang & Jiggle-Bait)
+    parameters:
+      koeffitsient_probitiya_legkih_materialov_k_wallban:
+        value: 0.65 (65% урона)
+        note: Ван-тап через профлист из Deagle наносит 140 * 0.65 = 91 HP (критично
+          ранит, требуя добивания), из AWP — 100% летально.
+      maksimalnaya_tolschina_probivaemogo_obekta_d_max_p:
+        value: 0.20 м
+        note: Стальные двутавры непробиваемы (0% урона), строительные фанерные щиты
+          и профнастил пробиваемы.
+      zaderzhka_sbrosa_otdachi_deagle_posle_vystrela_t_d:
+        value: 0.42 с
+        note: Окно уязвимости промахнувшегося врага, которое наказывает забайтивший
+          игрок.
