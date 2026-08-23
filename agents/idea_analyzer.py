@@ -1,5 +1,5 @@
 import re
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.models import GameConcept
 from app.logging import log_agent
@@ -61,7 +61,7 @@ class IdeaAnalyzerAgent:
             "двух соседних механик одного жанра и есть жанровый шаблон.\n"
             "- Готовый код фабрики на этом этапе не важен: сначала решается, во что играем. "
             "Что из придуманного уже написано, подберётся позже.\n"
-            f"\n{anticliche.ban_block(ctx.raw_prompt)}\n"
+            f"\n{anticliche.ban_block(ctx.raw_prompt)}\n\n{fidelity.contract_block(ctx.raw_prompt)}\n"
             "LANGUAGE REQUIREMENT:\n"
             "- All descriptive texts, title, genre, subgenre, player_fantasy, core hook, unique_value_proposition, "
             "vision, elevator_pitch, win/lose conditions, and mechanics MUST be written in RUSSIAN (на русском языке)!\n"

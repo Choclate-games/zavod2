@@ -12,7 +12,7 @@ from pydantic import Field
 
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from agents.project_director import ProjectDirectorAgent
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.logging import log_agent
 from app.models import BaseSafeModel
@@ -92,7 +92,7 @@ class GameDesignerAgent:
             f"Исходная идея пользователя: {ctx.raw_prompt}\n\n"
             f"{direction}\n\n"
             f"Заполнить нужно только эти поля: {', '.join(missing)}\n\n"
-            f"{anticliche.ban_block(ctx.raw_prompt)}"
+            f"{anticliche.ban_block(ctx.raw_prompt)}\n\n{fidelity.contract_block(ctx.raw_prompt)}"
         )
 
     @staticmethod

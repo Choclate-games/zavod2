@@ -10,7 +10,7 @@ from typing import List
 from pydantic import Field
 
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.logging import log_agent
 from app.models import BaseSafeModel, RewardedAdPlacement
@@ -83,5 +83,5 @@ class MonetizationDesignerAgent:
             f"Прогрессия: {c.progression_summary}\n"
             f"Механики (источник дефицита для награды):\n{mechanics or '- не заданы'}\n"
             f"Исходная идея пользователя: {ctx.raw_prompt}\n\n"
-            f"{anticliche.ban_block(ctx.raw_prompt)}"
+            f"{anticliche.ban_block(ctx.raw_prompt)}\n\n{fidelity.contract_block(ctx.raw_prompt)}"
         )

@@ -72,6 +72,26 @@ const stubs = scan(codeFiles, /\b(TODO|FIXME)\b|not implemented|Not implemented/
 stubs.length ? fail('A3', 'В коде остались TODO / FIXME / заглушки', stubs)
              : pass('A3', 'Заглушек и TODO в коде нет')
 
+/* ── A5: импорт не-кода объявлен ───────────────────────────────────────── */
+// Живой случай: main.ts начинался с `import './ui/theme.css'`, объявления
+// модуля в проекте не было, и `tsc` валил сборку на первой строке. Через
+// `npm run dev` игра при этом открывалась — vite типы не проверяет, — поэтому
+// поломку замечали только при попытке собрать релиз.
+const importText = codeFiles.map(read).join('\n')
+const assetImports = [...importText.matchAll(/(?:^|\n)\s*import\s+(?:[^'"\n]*from\s+)?['"]([^'"]+\.(?:css|scss|glsl|vert|frag|png|jpg|svg|json5))['"]/g)]
+  .map((m) => m[1])
+if (!assetImports.length) {
+  pass('A5', 'Импортов не-кода нет — объявлять нечего')
+} else {
+  // extname('vite-env.d.ts') — это '.ts', поэтому фильтр по суффиксу, а не по расширению.
+  const declarations = walk(SRC, ['.ts']).filter((f) => f.endsWith('.d.ts')).map(read).join('\n')
+  const declared = /vite\/client/.test(declarations) || /declare\s+module\s+['"][^'"]*\*/.test(declarations)
+  declared
+    ? pass('A5', `Импорты не-кода объявлены (${assetImports.length})`)
+    : fail('A5', 'Импорт не-кода без объявления — tsc уронит сборку: нужен src/vite-env.d.ts с /// <reference types="vite/client" />',
+           [...new Set(assetImports)].map((i) => `import '${i}'`))
+}
+
 /* ── B1: литералы цвета вне темы ───────────────────────────────────────── */
 if (!existsSync(THEME)) {
   fail('B1', 'Нет src/ui/theme.css — единственного места со значениями токенов')
@@ -133,6 +153,23 @@ if (!rewarded.length) {
   const guarded = /['"]rewarded['"]/.test(codeFiles.map(read).join('\n'))
   if (guarded) pass('C6', "Награда привязана к состоянию 'rewarded'")
   else fail('C6', "Rewarded есть, а проверки state === 'rewarded' нет: награда выдастся за закрытую рекламу")
+}
+
+/* ── C12: конфиг моста лежит в сборке ──────────────────────────────────── */
+// Живой случай: игра звала bridge.initialize(), мост шёл за
+// ./playgama-bridge-config.json, получал 404 и валился. Файл описан в базе
+// знаний, но его никто не требовал, и в пакет он не попал ни разу.
+const bridgeText = codeFiles.map(read).join('\n')
+const usesBridge = /@playgama\/bridge|playgama-bridge/.test(bridgeText)
+if (!usesBridge) {
+  skip('C12', 'Мост площадки не подключён — конфигу взяться неоткуда')
+} else {
+  const config = ['public/playgama-bridge-config.json', 'playgama-bridge-config.json',
+                  'dist/playgama-bridge-config.json']
+    .map((rel) => join(ROOT, rel)).find((file) => existsSync(file))
+  config
+    ? pass('C12', `Конфиг моста на месте (${relative(ROOT, config)})`)
+    : fail('C12', 'Нет public/playgama-bridge-config.json — bridge.initialize() поймает 404 и площадка не ответит')
 }
 
 /* ── C5: одна точка сохранения ─────────────────────────────────────────── */
@@ -367,8 +404,10 @@ for (const r of results) {
   }
 }
 
-console.log('\nОстальное из ACCEPTANCE.md статически не проверяется и остаётся человеку:')
-console.log('  A1 сборка · A2 консоль · B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры · G8–G10 глаголы, вертикаль и мёртвые методы')
+console.log('\nСборку, консоль, живой кадр и телефон проверяет не этот скрипт:')
+console.log('  node scripts/smoke.mjs — A1, A2 и S1–S6. Зелёный check-spec без зелёного smoke ничего не значит.')
+console.log('\nОстальное из ACCEPTANCE.md не проверяется машиной и остаётся человеку:')
+console.log('  B7–B12 вьюпорт и экраны · C2–C4, C7–C11 площадка · D геймплей · E кадры · G8–G10 глаголы, вертикаль и мёртвые методы')
 
 if (failed.length) {
   console.error(`\nПровалено проверок: ${failed.length}. Игра не готова.`)

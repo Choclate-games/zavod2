@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -212,6 +213,11 @@ class RunSession:
         """Файл чата прогона — обычного чата проекта."""
         return chat_store.session_path(self.slug, self.chat_session_id)
 
+    # Шаги, не зависящие друг от друга, идут одновременно (app.pipeline), а
+    # чат проекта и файл состояния — это чтение-правка-запись одного файла.
+    # Без замка две параллельные реплики затирали друг друга.
+    _write_lock = threading.RLock()
+
     def save(self) -> None:
         payload = {
             "run_id": self.run_id,
@@ -226,9 +232,10 @@ class RunSession:
             "game_dir": self.game_dir,
             "title": self.title,
         }
-        self.state_file.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        with self._write_lock:
+            self.state_file.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
     def is_done(self, step_key: str) -> bool:
         return self.steps.get(step_key) == STATUS_DONE
@@ -343,10 +350,11 @@ class RunSession:
         падать на записи в журнал не должен."""
         if not (self.slug and self.chat_session_id):
             return
-        session = chat_store.load_session(self.slug, self.chat_session_id)
-        if session is None:
-            return
-        chat_store.append_message(self.slug, session, "assistant", text)
+        with self._write_lock:
+            session = chat_store.load_session(self.slug, self.chat_session_id)
+            if session is None:
+                return
+            chat_store.append_message(self.slug, session, "assistant", text)
 
 
 def _chat_title(output_base: Path) -> str:

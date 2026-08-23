@@ -18,7 +18,7 @@ from pydantic import Field
 
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from agents.project_director import ProjectDirectorAgent
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.logging import log_agent
 from app.models import BaseSafeModel
@@ -418,5 +418,5 @@ class UXDesignerAgent:
             f"Механики и ввод:\n{mechanics or '- механики ещё не заданы'}\n"
             f"{('Арт-дирекция (интерфейс обязан быть из этого же материала):' + chr(10) + art_brief + chr(10)) if art_brief else ''}"
             f"Исходная идея пользователя: {ctx.raw_prompt}\n\n{direction}\n\n"
-            f"{anticliche.ban_block(ctx.raw_prompt)}"
+            f"{anticliche.ban_block(ctx.raw_prompt)}\n\n{fidelity.contract_block(ctx.raw_prompt)}"
         )

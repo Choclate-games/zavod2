@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Tuple
 import yaml
@@ -62,15 +63,20 @@ class Pipeline:
              lambda ctx: ReferenceAnalystAgent().run(ctx)),
             ("mechanics_architect", "[magenta]Mechanics Architect: Designing formulas, input, and feedback...",
              lambda ctx: MechanicsArchitectAgent().run(ctx)),
-            # Раньше каждому проекту доставались все документы threejs и stack.
-            ("knowledge_curator", "[magenta]Knowledge Curator: Подбор документов базы знаний...",
-             lambda ctx: KnowledgeCuratorAgent().run(ctx)),
+            # Три шага без обращения к модели идут первыми: они дешёвые, а
+            # renderer_selector пишет tech_spec.renderer, который читает
+            # technical_architect. Заодно они не разрывают пачку ниже.
             ("renderer_selector", "[magenta]Renderer Selector: Configuring Three.js stack...",
              lambda ctx: RendererSelectorAgent().run(ctx)),
             ("technical_architect", "[magenta]Technical Architect: Designing TypeScript & system layers...",
              lambda ctx: TechnicalArchitectAgent().run(ctx)),
             ("playgama_specialist", "[magenta]Playgama Specialist: Integrating Bridge SDK, ads, & cloud save...",
              lambda ctx: PlaygamaSpecialistAgent().run(ctx)),
+            # Пачка «оснастка»: три запроса к модели, растущие из готовых
+            # механик и не читающие друг друга, — идут одновременно.
+            # Раньше каждому проекту доставались все документы threejs и stack.
+            ("knowledge_curator", "[magenta]Knowledge Curator: Подбор документов базы знаний...",
+             lambda ctx: KnowledgeCuratorAgent().run(ctx)),
             ("monetization_designer", "[magenta]Monetization Designer: Designing Rewarded & Interstitial flow...",
              lambda ctx: MonetizationDesignerAgent().run(ctx)),
             ("art_director", "[magenta]Art Director: Formulating lighting, camera angle, and aesthetics...",
@@ -85,6 +91,41 @@ class Pipeline:
              lambda ctx: SelfCritiqueAgent().run(ctx)),
         ]
 
+    # Шаги, которые можно вести одновременно. Ключ — шаг, значение — имя группы;
+    # соседние шаги одной группы уходят в общий пул потоков.
+    #
+    # Прогон стоит ровно столько, сколько идут запросы к модели, а их девять и
+    # шли они цепочкой — хотя половина ни в чём друг от друга не зависит.
+    # `game_designer` дописывает опоры сессии, `reference_analyst` собирает
+    # референсы: они читают одну и ту же концепцию и пишут в разные её поля.
+    # То же со второй группой — подбор документов базы, экономика и арт-дирекция
+    # растут из механик и не смотрят друг на друга.
+    #
+    # Чего в группах нет и почему: `renderer_selector` пишет `tech_spec.renderer`,
+    # который читает `technical_architect`; `ux_designer` строит бриф из
+    # `concept.art`, то есть ждёт арт-директора. Порядок здесь — не привычка,
+    # а зависимость по данным.
+    PARALLEL_GROUPS = {
+        "game_designer": "замысел",
+        "reference_analyst": "замысел",
+        "knowledge_curator": "оснастка",
+        "monetization_designer": "оснастка",
+        "art_director": "оснастка",
+    }
+
+    @staticmethod
+    def _grouped(steps):
+        """Режет таблицу шагов на пачки: подряд идущие шаги одной группы — вместе."""
+        batches = []
+        for step in steps:
+            key = step[0]
+            group = Pipeline.PARALLEL_GROUPS.get(key, "")
+            if group and batches and batches[-1][0] == group:
+                batches[-1][1].append(step)
+            else:
+                batches.append((group, [step]))
+        return batches
+
     @staticmethod
     def run_step_table(ctx, session, steps, on_step=None) -> None:
         """Прогоняет таблицу шагов через сессию: пропуск готовых, снимки, пауза.
@@ -97,33 +138,70 @@ class Pipeline:
         steps: (ключ, заголовок, действие) — заголовок нужен для чата сессии.
         on_step: вызывается перед шагом, (индекс, всего, ключ, заголовок)."""
         total = len(steps)
-        for index, (key, title, action) in enumerate(steps, start=1):
-            if session is not None and session.is_done(key):
-                continue
+        position = {key: index for index, (key, _t, _a) in enumerate(steps, start=1)}
+
+        def announce(key, title):
             if on_step:
-                on_step(index, total, key, title)
+                on_step(position.get(key, 0), total, key, title)
             if session is not None:
                 session.begin_step(key, title)
-            try:
-                action(ctx)
-            except RunPaused:
-                if session is not None:
-                    session.fail_step(key, "провайдер не ответил после всех повторов")
-                raise
-            except Exception as exc:
-                # Не связанная с провайдером ошибка — тоже не теряем прогон:
-                # шаг помечен, снимок предыдущего шага на диске.
-                if session is not None:
-                    session.fail_step(key, f"{type(exc).__name__}: {exc}")
-                raise
+
+        def finish(key):
+            if session is None:
+                return
+            session.complete_step(key, ctx)
+            # Название игры появляется в середине прогона (IdeaAnalyzer).
+            # Как только оно есть — чат и проект переезжают под него, чтобы
+            # человек искал «Тактику Прорыва», а не слаг своей же реплики.
+            concept = getattr(ctx, "concept", None)
+            if concept is not None and getattr(concept, "title", ""):
+                session.adopt_title(concept.title)
+
+        def blame(key, exc):
             if session is not None:
-                session.complete_step(key, ctx)
-                # Название игры появляется в середине прогона (IdeaAnalyzer).
-                # Как только оно есть — чат и проект переезжают под него, чтобы
-                # человек искал «Тактику Прорыва», а не слаг своей же реплики.
-                concept = getattr(ctx, "concept", None)
-                if concept is not None and getattr(concept, "title", ""):
-                    session.adopt_title(concept.title)
+                reason = ("провайдер не ответил после всех повторов"
+                          if isinstance(exc, RunPaused) else f"{type(exc).__name__}: {exc}")
+                session.fail_step(key, reason)
+
+        for _group, batch in Pipeline._grouped(steps):
+            pending = [(key, title, action) for key, title, action in batch
+                       if session is None or not session.is_done(key)]
+            if not pending:
+                continue
+
+            if len(pending) == 1:
+                key, title, action = pending[0]
+                announce(key, title)
+                try:
+                    action(ctx)
+                except Exception as exc:
+                    # Не связанная с провайдером ошибка — тоже не теряем прогон:
+                    # шаг помечен, снимок предыдущего шага на диске.
+                    blame(key, exc)
+                    raise
+                finish(key)
+                continue
+
+            # Пачка идёт разом. Снимок концепции пишется уже после того, как
+            # все вернулись: иначе два потока сохраняли бы полуготовое
+            # состояние друг поверх друга.
+            for key, title, _action in pending:
+                announce(key, title)
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                futures = {pool.submit(action, ctx): key for key, _title, action in pending}
+                outcome = {futures[f]: f for f in futures}
+            failure = None
+            for key, _title, _action in pending:
+                error = outcome[key].exception()
+                if error is None:
+                    finish(key)
+                elif failure is None:
+                    failure = (key, error)
+            if failure is not None:
+                # Уцелевшие шаги уже отмечены готовыми: продолжение прогона
+                # переспросит модель только о том, что действительно упало.
+                blame(*failure)
+                raise failure[1]
 
     def run(
         self,

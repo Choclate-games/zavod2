@@ -82,6 +82,18 @@ export class ScreenRouter {
     #stack: ScreenId[] = []
     #views = new Map<ScreenId, ScreenView>()
 
+    constructor(private readonly layer: HTMLElement) {}
+
+    // Регистрация — это ВСТАВКА В ДОКУМЕНТ, а не запись в словарь. Экран,
+    // созданный в памяти и не попавший в слой, живёт своей жизнью: роутер
+    // честно зовёт show(), show() честно ставит display: block, и на экране
+    // по-прежнему нет ничего. Ошибок в консоли при этом тоже нет.
+    register(id: ScreenId, view: ScreenView) {
+        this.#views.set(id, view)
+        view.root.hidden = true
+        this.layer.appendChild(view.root)   // ← без этой строки игра выглядит как сцена без меню
+    }
+
     async go(id: ScreenId, opts: { replace?: boolean } = {}) {
         if (id === this.#current) return
         const prev = this.#current ? this.#views.get(this.#current) : null
@@ -106,6 +118,10 @@ export class ScreenRouter {
 
 Rules the router enforces so screens cannot drift apart:
 
+- Регистрация вставляет корень экрана в слой. Словарь `#views` — это адресная
+  книга, а не документ: пока `appendChild` не вызван, экрана на странице нет.
+  Проверяется одной строкой в консоли: `document.getElementById('screens').children.length`
+  обязано равняться числу зарегистрированных экранов, а не нулю.
 - Exactly one screen is visible. Hiding is `display: none` after the exit
   transition — an invisible-but-present screen keeps its buttons tappable.
 - Screens do not navigate each other directly; they emit intents and the router
@@ -361,6 +377,7 @@ project's own check script:
 
 ## 11. Чек-лист «интерфейс собран»
 
+- [ ] Корень каждого экрана вставлен в слой при регистрации: `#screens` содержит столько детей, сколько экранов
 - [ ] Слои разложены по контейнерам, контейнер прозрачен для ввода, `auto` только на листьях
 - [ ] Перетаскивание по центру канваса управляет игрой: ни один слой не съел указатель
 - [ ] `scrollTop` остаётся `0` после свайпа по странице

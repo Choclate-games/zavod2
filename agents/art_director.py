@@ -11,7 +11,7 @@ from pydantic import Field
 
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from agents.project_director import ProjectDirectorAgent
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.logging import log_agent
 from app.models import BaseSafeModel
@@ -155,5 +155,5 @@ class ArtDirectorAgent:
             f"Что игрок делает руками:\n{mechanics or '- механики ещё не заданы'}\n"
             f"Узнаваемая сцена проекта: {c.direction.signature_scene or '—'}\n"
             f"Исходная идея пользователя: {ctx.raw_prompt}\n\n{direction}\n\n"
-            f"{anticliche.ban_block(ctx.raw_prompt)}"
+            f"{anticliche.ban_block(ctx.raw_prompt)}\n\n{fidelity.contract_block(ctx.raw_prompt)}"
         )

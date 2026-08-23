@@ -13,7 +13,7 @@
 from typing import List
 
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
-from app import anticliche, knowledge
+from app import anticliche, fidelity, knowledge
 from app.context import GenerationContext
 from app.logging import log_agent
 from app.models import DirectionOption, ProjectDirection
@@ -43,8 +43,15 @@ SYSTEM_PROMPT = (
     "ставят за меню игры — он должен работать и без единой кнопки поверх него. "
     "«Красивый мир в ярких цветах» — не кадр.\n\n"
     "ПРАВИЛА:\n"
-    "- Уважай замысел пользователя: направление обязано остаться его идеей, а не подменять её другой.\n"
-    "- Не выбирай направление за то, что оно привычное. Ценнее то, которое трудно спутать с чужой игрой.\n"
+    "- ЗАКАЗ ВЫШЕ ОРИГИНАЛЬНОСТИ. Жанр, ракурс и главное действие, названные пользователем, "
+    "сохраняются во всех трёх направлениях. Оригинальность живёт в мире, твисте, форме сессии "
+    "и цели — не в подмене жанра. Если пользователь назвал игру-референс, он назвал жанр: "
+    "взять оттуда антураж и выбросить жанр — это невыполненный заказ.\n"
+    "- Причина отказа «на телефоне это неудобно» недопустима: у фабрики есть документы про "
+    "управление на телефоне для каждого жанра, и неудобство означает, что документ не открыт. "
+    "Отвергай направление за слабую игру, а не за трудность реализации.\n"
+    "- Не выбирай направление за то, что оно привычное. Ценнее то, которое трудно спутать с чужой игрой, "
+    "— но только среди тех, что заказ сохранили.\n"
     "- Каждое направление обязано быть выполнимо в браузере: одна сцена Three.js, понятное управление "
     "с телефона, первая осмысленная секунда без обучения.\n"
     "- control_scheme пиши от главного действия: если игрок целится и стреляет точечно, "
@@ -90,13 +97,17 @@ class ProjectDirectorAgent:
         # перебирать. Механики она сочиняет сама, а готовый код фабрики
         # подставляется позже — на этапе реализации, когда уже известно, ЧТО
         # реализуем (см. app/library.py).
+        contract = fidelity.contract_block(ctx.raw_prompt)
         return (
             f"Идея пользователя (дословно): {ctx.raw_prompt}\n\n"
+            + (f"{contract}\n\n" if contract else "")
+            + (
             f"Недавно выпущенные проекты фабрики — их формулу повторять нельзя:\n"
             f"{recent_summary(ctx.output_base_dir)}\n\n"
             f"Индекс базы знаний фабрики (для knowledge_hints, пути только отсюда):\n"
             f"{knowledge.index_markdown()}\n\n"
             f"{anticliche.ban_block(ctx.raw_prompt)}"
+            )
         )
 
     @staticmethod
@@ -119,6 +130,12 @@ class ProjectDirectorAgent:
                 (o for o in options if o.id == direction.selected_id), options[0] if options else None
             )
             direction.selected_name = selected.name if selected else ""
+        # Верность заказу проверяется до всего остального: если выбор перенесён,
+        # узнаваемая сцена и запреты обязаны относиться уже к новому направлению.
+        direction, rescue_note = fidelity.enforce(direction, ctx.raw_prompt)
+        if rescue_note:
+            log_agent("ProjectDirector", rescue_note)
+
         if not direction.signature_scene:
             selected = next((o for o in options if o.id == direction.selected_id), None)
             direction.signature_scene = selected.spectacle if selected else ""

@@ -9,6 +9,7 @@ from app.slugs import _slugify
 from app.context import GenerationContext
 from app.logging import log_agent, log_success, log_info
 from generators.check_spec_script import CHECK_SPEC_MJS
+from generators.smoke_script import SMOKE_MJS
 from generators.fetch_knowledge_script import FETCH_KNOWLEDGE_MJS
 from generators.document_generator import DocumentGenerator
 from generators.skill_generator import SkillGenerator
@@ -67,6 +68,15 @@ class OutputGenerator:
         check_script = scripts_dir / "check-spec.mjs"
         check_script.write_text(CHECK_SPEC_MJS, encoding="utf-8")
         ctx.generated_files.append(check_script)
+
+        # 2b'. Дымовой запуск.
+        # Статическая приёмка не умеет открыть игру, и пакет мог быть зелёным по
+        # всем пунктам, не запускаясь вовсе. scripts/smoke.mjs собирает проект,
+        # открывает его в настоящем браузере и трогает управление — это
+        # единственная проверка фабрики, которая видит то же, что игрок.
+        smoke_script = scripts_dir / "smoke.mjs"
+        smoke_script.write_text(SMOKE_MJS, encoding="utf-8")
+        ctx.generated_files.append(smoke_script)
 
         # 2c. База знаний по требованию: манифест плюс загрузчик.
         # Раньше пакет носил в себе двести килобайт дословных копий, и один и
