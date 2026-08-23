@@ -1,4 +1,4 @@
-from app import anticliche
+from app import anticliche, fidelity
 from app.context import GenerationContext
 from app.logging import log_agent, log_warning, log_success
 
@@ -44,8 +44,13 @@ class SelfCritiqueAgent:
         # Теперь пункты фабрики добавляются ВСЕГДА. Пункты модели — про эту
         # игру, пункты фабрики — про площадку и интерфейс; они не заменяют друг
         # друга и не конкурируют.
+        # Якоря заказа идут в приёмку первыми. Промпт агенты читают по-разному,
+        # а список того, без чего работа не принимается, читают все — и человек
+        # тоже. «Игра осталась шутером от первого лица» — проверяемый пункт,
+        # в отличие от пожелания в системном промпте директора.
         own = [item for item in concept.definition_of_done if str(item).strip()]
-        mandatory = self._definition_of_done(concept)
+        order = fidelity.acceptance_items(ctx.raw_prompt or concept.raw_prompt)
+        mandatory = order + self._definition_of_done(concept)
         if not own:
             issues_found.append("Definition of Done was empty.")
         merged = list(own)
@@ -58,6 +63,22 @@ class SelfCritiqueAgent:
                 f"(платформа, интерфейс, производительность)."
             )
         concept.definition_of_done = merged
+
+        # 3b. Заказ, потерянный по дороге.
+        # Директор мог выбрать верное направление, а следующий агент — расширить
+        # его до соседнего жанра: правило живёт в промпте, а промпт читают
+        # по-разному. Здесь оно проверяется словами уже написанной концепции.
+        drifted = fidelity.concept_keeps(concept, ctx.raw_prompt or concept.raw_prompt)
+        if drifted:
+            issues_found.append(
+                "Концепция потеряла то, что пользователь назвал сам: "
+                + "; ".join(a.label for a in drifted)
+            )
+            log_warning(
+                "[SelfCritique] Заказ потерян по дороге: "
+                + "; ".join(a.label for a in drifted)
+                + ". Пункты приёмки на это добавлены, но проверьте концепцию глазами."
+            )
 
         # 4. Check Mobile ergonomics
         if not concept.mobile.safe_area_handling:

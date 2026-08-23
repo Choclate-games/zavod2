@@ -130,3 +130,197 @@ def test_director_prompt_puts_the_order_above_originality():
     index_order = SYSTEM_PROMPT.index("ЗАКАЗ ВЫШЕ ОРИГИНАЛЬНОСТИ")
     index_original = SYSTEM_PROMPT.index("трудно спутать с чужой игрой")
     assert index_order < index_original, "правило верности обязано стоять раньше правила про оригинальность"
+
+
+# --------------------------------------------------------------- заказ выше оригинальности
+
+def test_a_named_genre_survives_the_ban_on_repeating_recent_projects():
+    """Правило против однообразия работало до первого повторного заказа.
+
+    «Не повторяй недавние проекты: другое семейство жанра» означало, что шутер,
+    заказанный после шутера, обязан перестать быть шутером."""
+    rule = fidelity.repetition_rule(COD_PROMPT)
+    assert "СМЕНЕ НЕ ПОДЛЕЖИТ" in rule
+    assert "мир" in rule and "твист" in rule
+
+
+def test_without_a_named_genre_the_ban_stays_as_strict_as_before():
+    rule = fidelity.repetition_rule("хочу что-нибудь уютное")
+    assert "другое семейство жанра" in rule
+
+
+def test_neither_agent_tells_the_model_that_the_named_genre_is_taken():
+    """Список недавних проектов доезжает до модели только вместе с правилом чтения."""
+    import inspect
+
+    from agents import idea_analyzer, project_director
+
+    for module in (project_director, idea_analyzer):
+        source = inspect.getsource(module)
+        assert "fidelity.repetition_rule" in source, f"{module.__name__} отдаёт список недавних без правила"
+        assert "жанр и формулу сессии повторять нельзя" not in source
+        assert "их формулу повторять нельзя" not in source
+
+
+def test_the_order_becomes_acceptance_not_just_a_wish():
+    items = fidelity.acceptance_items(COD_PROMPT)
+    assert items, "якоря заказа обязаны стать пунктами приёмки"
+    assert any("первого лица" in item for item in items)
+    assert any("call of duty" in item for item in items)
+
+
+def test_a_quiet_prompt_adds_no_acceptance_items():
+    assert fidelity.acceptance_items("хочу что-нибудь уютное") == []
+
+
+def test_originality_is_not_scored_against_the_order():
+    """Модель прямо написала: «снижение оригинальности за опору на Call of Duty»."""
+    import inspect
+
+    from agents import idea_analyzer
+
+    source = inspect.getsource(idea_analyzer)
+    assert "originality оценивает мир, твист и связку механик" in source
+
+
+def test_drift_is_caught_on_the_written_concept():
+    """Директор мог выбрать верно, а следующий агент — расширить до соседнего жанра."""
+    from app.models import GameConcept, MechanicSpec
+
+    drifted = GameConcept(
+        title="AC-130: Ночной Тепловизор",
+        genre="Аркадный авиасимулятор огневой поддержки",
+        core_loop="Навести прицел тепловизора, взять упреждение, сменить калибр",
+        mechanics=[MechanicSpec(name="Баллистика орбиты", description="Снаряды летят с задержкой")],
+    )
+    lost = fidelity.concept_keeps(drifted, COD_PROMPT)
+    assert any("первого лица" in a.label for a in lost)
+
+    honest = GameConcept(
+        title="Гонка Вооружений",
+        genre="Арена-шутер от первого лица",
+        core_loop="Стрейфить, целиться через мушку и стрелять на опережение",
+        mechanics=[MechanicSpec(name="Смена ствола за фраг", description="Новое оружие после каждого убийства",
+                                player_interaction="Ходить, целиться, стрелять")],
+    )
+    assert fidelity.concept_keeps(honest, COD_PROMPT) == []
+
+
+def test_the_critic_puts_the_order_into_the_definition_of_done():
+    from agents.critic import SelfCritiqueAgent
+    from app.context import GenerationContext
+    from app.models import GameConcept
+
+    ctx = GenerationContext(raw_prompt=COD_PROMPT, output_base_dir=__import__("pathlib").Path("workspace"))
+    ctx.concept = GameConcept(title="Гонка Вооружений", genre="Арена-шутер от первого лица",
+                              definition_of_done=["Игра собирается"])
+    SelfCritiqueAgent().run(ctx)
+
+    joined = " ".join(ctx.concept.definition_of_done)
+    assert "Игра осталась тем, что просили" in joined
+    assert "Игра собирается" in joined, "пункты модели не должны пропадать"
+
+
+def test_the_director_asks_again_when_every_direction_lost_the_order():
+    """Переносить выбор некуда — значит надо переспросить, а не писать чужую игру."""
+    from pathlib import Path
+
+    from agents.project_director import ProjectDirectorAgent
+    from app.context import GenerationContext
+
+    class TwoAnswers:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_structured(self, system_prompt, user_prompt, response_model, temperature=0.5):
+            self.calls += 1
+            if self.calls == 1:
+                return ProjectDirection(
+                    options=[DirectionOption(id="D1", name="Ферма на орбите", pitch="Сажать морковь",
+                                             core_verb="сажать", camera="сверху")],
+                    selected_id="D1", selected_name="Ферма на орбите",
+                )
+            assert "ПРЕДЫДУЩИЙ ОТВЕТ НЕ ПРИНЯТ" in user_prompt
+            return ProjectDirection(
+                options=[DirectionOption(id="D1", name="Тесный терминал",
+                                         pitch="Арена-шутер от первого лица",
+                                         core_verb="ходить, целиться и стрелять",
+                                         camera="от первого лица с вьюмоделью")],
+                selected_id="D1", selected_name="Тесный терминал",
+            )
+
+    provider = TwoAnswers()
+    ctx = GenerationContext(raw_prompt=COD_PROMPT, output_base_dir=Path("workspace"))
+    ctx.ai_provider = provider
+    direction = ProjectDirectorAgent().run(ctx)
+
+    assert provider.calls == 2, "потерянный заказ обязан вызвать переспрос"
+    assert direction.selected_name == "Тесный терминал"
+
+
+def test_a_direction_that_kept_the_order_is_not_asked_twice():
+    """Переспрос стоит запроса к модели — он только для настоящей потери."""
+    from pathlib import Path
+
+    from agents.project_director import ProjectDirectorAgent
+    from app.context import GenerationContext
+
+    class OneAnswer:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_structured(self, system_prompt, user_prompt, response_model, temperature=0.5):
+            self.calls += 1
+            return _cod_direction()
+
+    provider = OneAnswer()
+    ctx = GenerationContext(raw_prompt=COD_PROMPT, output_base_dir=Path("workspace"))
+    ctx.ai_provider = provider
+    direction = ProjectDirectorAgent().run(ctx)
+
+    assert provider.calls == 1
+    assert direction.selected_id == "D2", "выбор обязан переехать на шутер без переспроса"
+
+
+def test_the_order_is_the_first_section_of_the_acceptance(tmp_path):
+    """Раздел 0 стоит раньше сборки: сначала «та ли это игра», потом «работает ли»."""
+    from agents.critic import SelfCritiqueAgent
+    from generators.output_generator import OutputGenerator
+    from tests.test_master_prompt import make_ctx, shooter_concept
+
+    concept = shooter_concept()
+    concept.raw_prompt = COD_PROMPT
+    ctx = make_ctx(concept)
+    ctx.raw_prompt = COD_PROMPT
+    ctx.output_base_dir = tmp_path
+    ctx.game_dir = tmp_path / concept.slug
+    SelfCritiqueAgent().run(ctx)
+    acceptance = (OutputGenerator().generate_package(ctx) / "ACCEPTANCE.md").read_text(encoding="utf-8")
+
+    assert "## 0. Заказ" in acceptance
+    assert acceptance.index("## 0. Заказ") < acceptance.index("## A. Сборка")
+    assert "**O1**" in acceptance
+
+
+def test_a_prompt_without_a_named_genre_gets_no_order_section(tmp_path):
+    from agents.critic import SelfCritiqueAgent
+    from generators.output_generator import OutputGenerator
+    from tests.test_master_prompt import make_ctx, shooter_concept
+
+    concept = shooter_concept()
+    concept.raw_prompt = "хочу что-нибудь уютное и медитативное"
+    ctx = make_ctx(concept)
+    ctx.raw_prompt = concept.raw_prompt
+    ctx.output_base_dir = tmp_path
+    ctx.game_dir = tmp_path / concept.slug
+    SelfCritiqueAgent().run(ctx)
+    acceptance = (OutputGenerator().generate_package(ctx) / "ACCEPTANCE.md").read_text(encoding="utf-8")
+
+    assert "## 0. Заказ" not in acceptance, "рамки нет — раздела быть не должно"
+
+
+def test_check_spec_refuses_to_close_a_project_with_an_open_order():
+    from generators.check_spec_script import CHECK_SPEC_MJS
+
+    assert "'O1'" in CHECK_SPEC_MJS
+    assert "Заказ пользователя не закрыт" in CHECK_SPEC_MJS

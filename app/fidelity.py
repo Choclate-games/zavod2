@@ -222,3 +222,59 @@ def enforce(direction, raw_prompt: str):
         f"({', '.join(a.label for a in lost)}). " + (direction.selection_reason or "")
     ).strip()
     return direction, f"Выбор перенесён с «{was}» на «{rescue.name}»: заказ требовал {', '.join(a.label for a in lost)}."
+
+def repetition_rule(raw_prompt: str) -> str:
+    """Как читать список недавних проектов, чтобы не потерять заказ.
+
+    Правило «не повторяй недавние проекты: другое семейство жанра» появилось
+    против однообразия и работало ровно до первого повторного заказа. Попросив
+    шутер после шутера, пользователь получал что угодно, кроме шутера: фабрика
+    считала жанр занятым. Разнообразие живёт в мире и формуле, а не в подмене
+    того, что заказали."""
+    if anchors_for(raw_prompt) or named_references(raw_prompt):
+        return (
+            "Список ниже — против повторов, а не против заказа. Отличаться обязаны мир, "
+            "твист, форма сессии, цель и подача. ЖАНР, НАЗВАННЫЙ ПОЛЬЗОВАТЕЛЕМ, СМЕНЕ НЕ "
+            "ПОДЛЕЖИТ, даже если игра того же жанра уже выходила: два шутера с разными "
+            "мирами — это два проекта, а шутер, подменённый чем-то другим, — это ноль."
+        )
+    return (
+        "Жанр пользователь не назвал — значит выбор жанра за тобой, и здесь повтор "
+        "формулы недавних проектов запрещён: другое семейство жанра, другой глагол, другой мир."
+    )
+
+
+def acceptance_items(raw_prompt: str) -> List[str]:
+    """Якоря заказа в виде пунктов приёмки.
+
+    Самое надёжное место для контракта — не промпт, а список того, без чего
+    работа не принимается: его читает и кодовый агент, и человек."""
+    items = [
+        f"Игра осталась тем, что просили: {anchor.label}."
+        for anchor in anchors_for(raw_prompt)
+    ]
+    refs = named_references(raw_prompt)
+    if refs:
+        items.append(
+            "Игру узнают как то, о чём просили (" + ", ".join(refs) + "): "
+            "жанр и главное действие те же, мир и твист — свои."
+        )
+    return items
+
+
+def concept_keeps(concept, raw_prompt: str) -> List[Anchor]:
+    """Какие якоря потеряла уже написанная концепция.
+
+    Директор мог выбрать верное направление, а следующий агент — расширить его
+    до соседнего жанра. Проверяется тем же способом: словами самой концепции."""
+    anchors = anchors_for(raw_prompt)
+    if not anchors:
+        return []
+    text = " ".join(str(part or "") for part in (
+        getattr(concept, "genre", ""), getattr(concept, "subgenre", ""),
+        getattr(concept, "player_fantasy", ""), getattr(concept, "core_loop", ""),
+        getattr(concept, "hook", ""), getattr(concept, "title", ""),
+        " ".join(f"{m.name} {m.description} {m.player_interaction}" for m in getattr(concept, "mechanics", [])),
+        getattr(getattr(concept, "art", None), "camera_perspective", ""),
+    )).lower()
+    return [a for a in anchors if not any(word in text for word in a.keep)]

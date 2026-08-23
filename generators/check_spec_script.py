@@ -393,6 +393,28 @@ if (!existsSync(ACCEPTANCE)) {
   }
 }
 
+/* ── O1: заказ пользователя закрыт ─────────────────────────────────────── */
+// Раздел 0 приёмки — то, что пользователь назвал сам. Оставленный пустым, он
+// означает ровно то, что уже случалось: игра сделана хорошо и не про то.
+// Отказ здесь тоже допустим, но только вслух: `- [~]` и строка причины.
+if (!existsSync(ACCEPTANCE)) {
+  skip('O1', 'ACCEPTANCE.md отсутствует — заказ проверить негде')
+} else {
+  const orderSection = read(ACCEPTANCE).split(/^## 0\. /m)[1]
+  if (!orderSection) {
+    skip('O1', 'Пользователь не называл жанр — раздела заказа в приёмке нет')
+  } else {
+    const body = orderSection.split(/^## /m)[0]
+    const open = body.split('\n').filter((l) => /^\s*-\s*\[\s*\]/.test(l))
+    const done = (body.match(/^\s*-\s*\[[xX]\]/gm) || []).length
+    const waived = (body.match(/^\s*-\s*\[~\]/gm) || []).length
+    open.length
+      ? fail('O1', `Заказ пользователя не закрыт: ${open.length} пункт(ов) без отметки`,
+             open.slice(0, 6).map((l) => l.trim().replace(/^-\s*\[\s*\]\s*/, '')))
+      : pass('O1', `Заказ пользователя закрыт: сделано ${done}, объяснённых отказов ${waived}`)
+  }
+}
+
 /* ── вывод ─────────────────────────────────────────────────────────────── */
 const failed = results.filter((r) => r.ok === false)
 for (const r of results) {

@@ -15,7 +15,7 @@ from typing import List
 from agents.model_call import RU_SYSTEM_SUFFIX, ask_model
 from app import anticliche, fidelity, knowledge
 from app.context import GenerationContext
-from app.logging import log_agent
+from app.logging import log_agent, log_warning
 from app.models import DirectionOption, ProjectDirection
 from app.project_memory import recent_summary
 
@@ -61,7 +61,7 @@ SYSTEM_PROMPT = (
     "направлением: это рабочие ограничения, по которым другие агенты сверяются, а не "
     "список красивых фраз.\n"
     "- knowledge_hints заполняй ТОЛЬКО путями из предложенного индекса базы знаний, дословно.\n"
-    "- Не повторяй проекты из списка недавних: другое семейство жанра, другой глагол, другой мир."
+    "- Список недавних проектов читай по правилу, приложенному к нему в задании: он против повторов, а не против заказа."
     + RU_SYSTEM_SUFFIX
 )
 
@@ -76,6 +76,7 @@ class ProjectDirectorAgent:
             ctx, "ProjectDirector", SYSTEM_PROMPT, self._brief(ctx), ProjectDirection
         )
         direction = self._normalize(direction, ctx)
+        direction = self._insist_on_the_order(ctx, direction)
 
         ctx.direction = direction
         if ctx.concept is not None:
@@ -91,6 +92,54 @@ class ProjectDirectorAgent:
     # ------------------------------------------------------------------ helpers
 
     @staticmethod
+    def _insist_on_the_order(ctx: GenerationContext, direction: ProjectDirection) -> ProjectDirection:
+        """Один переспрос, если заказ потеряли ВСЕ направления.
+
+        `fidelity.enforce` переносит выбор на вариант, который заказ удержал, —
+        и этого хватает, пока такой вариант есть. Когда модель написала три
+        направления и ни в одном нет того, что просил пользователь, переносить
+        нечего: молча писать ТЗ в этом случае означает выдать чужую игру, что
+        уже случалось. Спрашиваем ещё раз, назвав потерянное поимённо."""
+        lost = fidelity.lost_by(
+            ProjectDirectorAgent.selected_option(direction) or DirectionOption(),
+            fidelity.anchors_for(ctx.raw_prompt),
+        ) if direction.options else []
+        if not lost:
+            return direction
+
+        log_agent(
+            "ProjectDirector",
+            "Заказ потеряли все направления — переспрашиваю: " + "; ".join(a.label for a in lost),
+        )
+        retry = ask_model(
+            ctx, "ProjectDirector", SYSTEM_PROMPT,
+            ProjectDirectorAgent._brief(ctx) + "\n\n" + (
+                "ПРЕДЫДУЩИЙ ОТВЕТ НЕ ПРИНЯТ. Ни одно из предложенных направлений не сохранило то, "
+                "что пользователь назвал сам:\n"
+                + "\n".join(f"- {a.label}" for a in lost)
+                + "\n\nПерепиши все три направления так, чтобы каждое это удерживало. Различаться "
+                "они обязаны миром, твистом, формой сессии и целью. Направление, в котором этого "
+                "нет, — это не смелый ход, а невыполненный заказ."
+            ),
+            ProjectDirection,
+        )
+        if retry is None or not retry.options:
+            log_agent("ProjectDirector", "Переспрос не дал вариантов — остаётся первый ответ")
+            return direction
+        retry = ProjectDirectorAgent._normalize(retry, ctx)
+        still_lost = fidelity.lost_by(
+            ProjectDirectorAgent.selected_option(retry) or DirectionOption(),
+            fidelity.anchors_for(ctx.raw_prompt),
+        )
+        if still_lost:
+            log_warning(
+                "[ProjectDirector] Заказ не удержан и после переспроса: "
+                + "; ".join(a.label for a in still_lost)
+                + ". Спецификация пишется дальше, но проверьте направление глазами."
+            )
+        return retry
+
+    @staticmethod
     def _brief(ctx: GenerationContext) -> str:
         # Каталога механик здесь нет намеренно. Список готовых связок сужает
         # мышление до выбора из меню: модель перестаёт придумывать и начинает
@@ -102,7 +151,8 @@ class ProjectDirectorAgent:
             f"Идея пользователя (дословно): {ctx.raw_prompt}\n\n"
             + (f"{contract}\n\n" if contract else "")
             + (
-            f"Недавно выпущенные проекты фабрики — их формулу повторять нельзя:\n"
+            f"Недавно выпущенные проекты фабрики.\n"
+            f"{fidelity.repetition_rule(ctx.raw_prompt)}\n"
             f"{recent_summary(ctx.output_base_dir)}\n\n"
             f"Индекс базы знаний фабрики (для knowledge_hints, пути только отсюда):\n"
             f"{knowledge.index_markdown()}\n\n"

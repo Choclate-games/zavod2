@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Callable
+from app import fidelity
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
@@ -266,6 +267,20 @@ workspace/{c.slug}/
         ) or "main_menu, gameplay, session_end"
 
         knowledge_checklists = self._knowledge_checklists(c)
+        # Заказ идёт нулевым разделом — раньше всего остального. Пункт «игра
+        # осталась шутером от первого лица» не проверяется скриптом, но именно
+        # он отделяет выполненную работу от красиво сделанной чужой игры.
+        order_items = fidelity.acceptance_items(c.raw_prompt)
+        order_block = ""
+        if order_items:
+            order_block = (
+                "## 0. Заказ\n\n"
+                "Пользователь назвал жанр и главное действие сам. Это не пожелание, "
+                "а рамка задачи: игра, не прошедшая этот раздел, не принимается, "
+                "насколько бы хороша она ни была сама по себе.\n\n"
+                + "\n".join(f"- [ ] **O{n}** · {item}" for n, item in enumerate(order_items, start=1))
+                + "\n\n---\n\n"
+            )
 
         boards = c.playgama.leaderboards[0] if c.playgama.leaderboards else "таблица лидеров не используется"
         save_key = c.playgama.cloud_save_keys[0] if c.playgama.cloud_save_keys else f"{c.slug}_save_v1"
@@ -275,8 +290,10 @@ workspace/{c.slug}/
 
 Готовность игры определяется этим файлом, а не ощущением. Каждый пункт — либо
 команда с ожидаемым результатом, либо факт, который видно на экране. Пока хотя
-бы один пункт раздела **A–C** красный, игра не готова: это не качество, это
-работоспособность.
+бы один пункт разделов **0–C** красный, игра не готова. Раздел **0** — то, что
+пользователь заказал: игра, не прошедшая его, не принимается вообще, какой бы
+удачной она ни вышла сама по себе. Разделы **A–C** — работоспособность, а не
+качество.
 
 Автоматическая часть запускается одной командой:
 
@@ -290,7 +307,7 @@ node scripts/smoke.mjs             # или npm run smoke — единствен
 
 ---
 
-## A. Сборка и типы
+{order_block}## A. Сборка и типы
 
 - [ ] **A1** · `npm run build` завершается с кодом 0 и без единой ошибки TypeScript. Проверяется `smoke`.
 - [ ] **A2** · Игра открывается без единой ошибки в консоли браузера. Проверяется `smoke`.
@@ -409,7 +426,7 @@ CSS. Ни один из этих дефектов не виден в отчёт�
 Прогон приёмки записывается в `DEVLOG.md` строкой вида:
 
 ```text
-2026-01-01 приёмка: A1–A5 ✅, S1–S7 ✅, B1–B12 ✅, C1–C12 ✅, D1–D5 ✅, E1–E5 частично (E1 на телефоне 48 FPS), F1–F4 ✅, G1–G10 ✅, H1 ✅ (2 осознанных отказа)
+2026-01-01 приёмка: O1 ✅, A1–A5 ✅, S1–S7 ✅, B1–B12 ✅, C1–C12 ✅, D1–D5 ✅, E1–E5 частично (E1 на телефоне 48 FPS), F1–F4 ✅, G1–G10 ✅, H1 ✅ (2 осознанных отказа)
 ```
 
 Пункт, который не проходит, честнее оставить красным с объяснением, чем
