@@ -92,6 +92,13 @@ class AppConfig:
         self.gui_host = os.getenv("GUI_HOST", "127.0.0.1")
         self.gui_port = int(os.getenv("GUI_PORT", "7860"))
 
+        # Сколько прогонов студии идут одновременно. Каждая идея — свой прогон
+        # со своим журналом; заказанные сверх лимита ждут очереди.
+        try:
+            self.studio_max_parallel = max(1, int(os.getenv("STUDIO_MAX_PARALLEL", "10")))
+        except ValueError:
+            self.studio_max_parallel = 10
+
         # Fish Audio TTS: озвучка реплик и голосов игры. Ключ берётся с fish.audio
         # (раздел API Keys). Генерацию запускает только человек — см.
         # providers/fish_audio.py.

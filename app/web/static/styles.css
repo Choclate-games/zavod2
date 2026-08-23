@@ -702,6 +702,96 @@ textarea {
 
 /* ── Студия генерации ─────────────────────────────────────────────────── */
 
+/* Полоса прогонов: сколько идей делается прямо сейчас. */
+.run-strip {
+  margin-bottom: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.run-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-panel-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.run-cards {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+}
+.run-card {
+  flex: 0 0 230px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--text-dim);
+  border-radius: var(--radius);
+  padding: 8px 9px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.run-card:hover { background: var(--bg-card-hover); }
+.run-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+.run-card.running { border-left-color: var(--accent); }
+.run-card.queued { border-left-color: var(--text-dim); }
+.run-card.done { border-left-color: var(--ok); }
+.run-card.failed { border-left-color: var(--err); }
+.run-card.paused { border-left-color: var(--warn); }
+.run-card.stopped { border-left-color: var(--warn); }
+.run-card .run-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.run-card .run-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-card .run-act {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.run-card .run-act:hover { background: var(--err-bg); color: var(--err); }
+.run-card .run-step {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-card .run-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.run-card .progress { flex: 1; height: 4px; }
+.run-badge {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .presets {
   display: flex;
   gap: 6px;

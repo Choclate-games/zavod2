@@ -29,6 +29,7 @@ import yaml
 
 from app import chat_store, notify, project_meta, sandbox, snapshots, uploads
 from app.chat_jobs import ChatJobManager
+from app.studio_jobs import StudioJob, StudioJobManager
 from app.config import BASE_DIR, config
 from app.context import GenerationContext
 from app.game_runner import DevServer, read_scripts, detect_start_command, open_internal_browser
@@ -238,13 +239,23 @@ class FactoryService:
         self.chat_jobs = ChatJobManager()
 
         # ── Студия ──
-        self.generation_running = False
-        self.stop_requested = False
+        # Прогонов может идти сколько угодно сразу: у каждого свой журнал,
+        # прогресс и «Стоп» (app/studio_jobs.py). Поля ниже — общий журнал
+        # студии: туда идёт всё, что не привязано к конкретному прогону
+        # (анализ концепта, брейнсторм, системные сообщения).
         self.progress_percent = 0
         self.progress_step = "● Студия готова к созданию игры"
         self.started_at: Optional[float] = None
         self.studio_logs: List[str] = []
         self._studio_lock = threading.Lock()
+        self._global_stop = False
+        # Текущий прогон потока: журнал агентов сам находит свою карточку,
+        # поэтому пайплайн и агенты остались без правок.
+        self._job_local = threading.local()
+        self.studio_jobs = StudioJobManager(
+            max_parallel=config.studio_max_parallel,
+            on_change=self._publish_job,
+        )
 
         # ── Игра (dev-серверы по проектам) ──
         self.play: Dict[str, Dict[str, Any]] = {}
@@ -270,53 +281,138 @@ class FactoryService:
     def _on_global_log_event(self, level: str, message: str) -> None:
         self.append_log(f"[{level}] {message}")
 
+    # ── Привязка потока к прогону ──
+    #
+    # Пайплайн зовёт `append_log` / `update_progress` из десятков мест, а часть
+    # шагов идёт пачкой в пуле потоков. Вместо того чтобы протаскивать журнал
+    # параметром через всю фабрику, поток помечается своим прогоном — и запись
+    # сама попадает в нужную карточку.
+
+    def _bind_job(self, job):
+        self._job_local.job = job
+
+    def _current_job(self):
+        return getattr(self._job_local, "job", None)
+
+    def _publish_job(self, job) -> None:
+        bus.publish("studio.job", job=job.snapshot())
+
+    @property
+    def generation_running(self) -> bool:
+        """Совместимость: «в студии что-то идёт» — теперь это «есть прогоны»."""
+        return self.studio_jobs.running_count() > 0
+
+    @property
+    def stop_requested(self) -> bool:
+        """Стоп у каждого прогона свой; вне прогона — общий флаг студии."""
+        job = self._current_job()
+        return job.should_stop() if job else self._global_stop
+
     def append_log(self, message: str) -> None:
         line = message if message.endswith("\n") else message + "\n"
+        job = self._current_job()
+        if job is not None:
+            job.log(line)
+            bus.publish("studio.log", line=line, job_id=job.id)
+            return
         with self._studio_lock:
             self.studio_logs.append(line)
             if len(self.studio_logs) > MAX_STUDIO_LOG_LINES:
                 del self.studio_logs[:-MAX_STUDIO_LOG_LINES]
-        bus.publish("studio.log", line=line)
+        bus.publish("studio.log", line=line, job_id=None)
 
     def update_progress(self, percent: int, step: str) -> None:
+        job = self._current_job()
+        if job is not None:
+            job.progress(percent, step)
+            self._publish_job(job)
+            return
         self.progress_percent = percent
         self.progress_step = step
         bus.publish("studio.progress", percent=percent, step=step)
 
     def studio_state(self) -> Dict[str, Any]:
-        elapsed = int(time.time() - self.started_at) if (self.started_at and self.generation_running) else 0
+        """Общий журнал студии плюс карточки всех прогонов."""
         with self._studio_lock:
             logs = "".join(self.studio_logs)
+        jobs = self.studio_jobs.snapshots()
+        active = [j for j in jobs if j["active"]]
         return {
-            "running": self.generation_running,
+            "running": bool(active),
             "percent": self.progress_percent,
             "step": self.progress_step,
-            "elapsed": elapsed,
+            "elapsed": max((j["elapsed"] for j in active), default=0),
             "logs": logs,
+            "jobs": jobs,
+            "active_count": len(active),
+            "max_parallel": self.studio_jobs.max_parallel,
         }
 
-    def clear_logs(self) -> None:
+    def job_state(self, job_id: str) -> Dict[str, Any]:
+        job = self.studio_jobs.get(job_id)
+        if not job:
+            return {"status": "error", "message": "Прогон не найден."}
+        return {"status": "ok", "job": job.snapshot(with_logs=True)}
+
+    def stop_job(self, job_id: str) -> Dict[str, Any]:
+        if not self.studio_jobs.stop(job_id):
+            return {"status": "error", "message": "Прогон уже завершён."}
+        return {"status": "success"}
+
+    def close_job(self, job_id: str) -> Dict[str, Any]:
+        """Закрыть карточку завершённого прогона."""
+        if not self.studio_jobs.close(job_id):
+            return {"status": "error", "message": "Нельзя закрыть работающий прогон."}
+        bus.publish("studio.jobs_changed")
+        return {"status": "success"}
+
+    def close_finished_jobs(self) -> Dict[str, Any]:
+        removed = self.studio_jobs.close_finished()
+        bus.publish("studio.jobs_changed")
+        return {"status": "success", "removed": removed}
+
+    def clear_logs(self, job_id: Optional[str] = None) -> None:
+        if job_id:
+            job = self.studio_jobs.get(job_id)
+            if job:
+                job.clear_log()
+                bus.publish("studio.logs_cleared", job_id=job_id)
+            return
         with self._studio_lock:
             self.studio_logs.clear()
-        bus.publish("studio.logs_cleared")
+        bus.publish("studio.logs_cleared", job_id=None)
 
     def stop_generation(self) -> None:
-        self.stop_requested = True
-        self.append_log("\n⏹️ [STOP] Пользователь остановил выполнение.")
-        self.update_progress(self.progress_percent, "● Остановлено пользователем")
+        """«Стоп» в шапке студии: гасит все идущие прогоны разом."""
+        stopped = self.studio_jobs.stop_all()
+        self._global_stop = True
+        suffix = f" ({stopped} прогон(ов))." if stopped else "."
+        self.append_log("\n⏹️ [STOP] Пользователь остановил выполнение" + suffix)
 
-    def _begin_generation(self, step: str) -> None:
-        self.generation_running = True
-        self.stop_requested = False
-        self.started_at = time.time()
-        self.update_progress(5, step)
-        bus.publish("studio.state", running=True)
-
-    def _end_generation(self) -> None:
-        self.generation_running = False
-        bus.publish("studio.state", running=False)
-        bus.publish("projects.changed")
-        bus.publish("quota.changed")
+    def _run_job(self, job, body) -> None:
+        """Тело прогона в его потоке: привязка журнала, паузы, общий финал."""
+        self._bind_job(job)
+        self._global_stop = False
+        try:
+            body(job)
+        except RunPaused as paused:
+            job.status = "paused"
+            self._report_pause(paused)
+        except Exception as exc:
+            # Прерванный по кнопке прогон — не «ошибка», а осознанная остановка.
+            if job.should_stop():
+                job.status = "stopped"
+                self.update_progress(job.percent, "● Остановлен пользователем")
+                self.append_log(f"⏹️ Прогон остановлен: {exc}")
+            else:
+                job.status = "failed"
+                job.error = str(exc)
+                self.update_progress(0, "Ошибка генерации")
+                self.append_log(f"❌ ОШИБКА: {exc}")
+        finally:
+            self._bind_job(None)
+            bus.publish("projects.changed")
+            bus.publish("quota.changed")
 
     # =====================================================================
     # Студия: пайплайн спецификаций
@@ -375,9 +471,14 @@ class FactoryService:
 
     def run_spec_pipeline(self, prompt: str, renderer: Optional[str], provider: str,
                           mode: str, image_provider: str, label: str = "",
-                          resume_run_id: Optional[str] = None) -> Path:
-        """Полный прогон агентов спецификации (синхронно, в рабочем потоке)."""
+                          resume_run_id: Optional[str] = None,
+                          job: Optional[StudioJob] = None) -> Path:
+        """Полный прогон агентов спецификации (синхронно, в рабочем потоке).
+
+        `job` — карточка прогона в студии: в неё уходят журнал и прогресс, а
+        имя игры, слаг и run_id проставляются по ходу пайплайна."""
         tag = f"{label} " if label else ""
+        self._bind_job(job)
         # Метка времени старта: каталог игры появится только в конце пайплайна,
         # а токены агенты жгут с первой минуты. По этой метке расход потом
         # переписывается на слаг проекта (reassign_project).
@@ -393,6 +494,11 @@ class FactoryService:
         else:
             session = RunSession.start(prompt, config.output_dir, provider, mode)
             self.append_log(f"{tag}Прогон {session.run_id} | чат: {session.chat_file}")
+
+        if job is not None:
+            job.run_id = session.run_id
+            job.slug = session.slug
+            self._publish_job(job)
 
         self.append_log(
             f"{tag}Запуск пайплайна спецификаций | Провайдер: {provider} | "
@@ -418,6 +524,9 @@ class FactoryService:
             """После некоторых шагов в журнал уходит своя строка — она и была
             главной причиной, по которой веб держал свою копию пайплайна."""
             def runner(ctx):
+                # Пачка шагов идёт в пуле потоков: помечаем поток прогоном,
+                # иначе его журнал ушёл бы в общий.
+                self._bind_job(job)
                 action(ctx)
                 if key == "project_director" and ctx.direction and ctx.direction.selected_name:
                     self.append_log(
@@ -426,6 +535,12 @@ class FactoryService:
                     )
                 elif key == "idea_analyzer" and ctx.concept:
                     self.append_log(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")
+                    if job is not None and ctx.concept.title:
+                        # Карточка прогона переименовывается в название игры,
+                        # как только оно появилось.
+                        job.title = ctx.concept.title
+                        job.slug = getattr(ctx.session, "slug", job.slug)
+                        self._publish_job(job)
                 elif key == "knowledge_curator" and ctx.concept:
                     plan = ctx.concept.knowledge_plan
                     self.append_log(
@@ -456,6 +571,9 @@ class FactoryService:
 
         sandbox.ensure_project_docs(game_dir, ctx.concept.title)
         session.finish(game_dir)
+        if job is not None:
+            job.slug = game_dir.name
+            self._publish_job(job)
         bus.publish("runs.changed")
 
         moved = self.agent_usage_tracker.reassign_project(pipeline_started, game_dir.name)
@@ -503,10 +621,23 @@ class FactoryService:
             "chat": "\n\n---\n\n".join(m["text"] for m in messages),
         }
 
+    def _job_title(self, prompt: str, fallback: str = "Новый прогон") -> str:
+        """Имя карточки до того, как игра получила название."""
+        text = " ".join((prompt or "").split())
+        if not text:
+            return fallback
+        return text if len(text) <= 60 else text[:57] + "…"
+
+    def _launch_job(self, *, kind: str, title: str, prompt: str, provider: str,
+                    mode: str, body) -> StudioJob:
+        """Ставит прогон в очередь студии; тело идёт в его собственном потоке."""
+        return self.studio_jobs.start(
+            kind=kind, title=title, prompt=prompt, provider=provider, mode=mode,
+            work=lambda job: self._run_job(job, body),
+        )
+
     def continue_run(self, run_id: str, opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Продолжить приостановленный прогон прямо из веба."""
-        if self.generation_running:
-            return {"status": "busy", "message": "Генерация уже идёт."}
         opts = opts or {}
         try:
             session = RunSession.load(run_id, config.output_dir)
@@ -515,27 +646,24 @@ class FactoryService:
 
         provider = opts.get("provider") or session.provider_name or self.default_agent()
         image_provider = opts.get("image_provider") or "qwen"
-        self._begin_generation(f"Продолжаю прогон {session.run_id}...")
 
-        def run() -> None:
-            try:
-                game_dir = self.run_spec_pipeline(
-                    session.raw_prompt, None, provider, session.mode, image_provider,
-                    resume_run_id=session.run_id,
-                )
-                self.update_progress(100, "✅ Спецификация готова!")
-                self.append_log(f"УСПЕХ! Прогон {session.run_id} доведён до конца: workspace/{game_dir.name}")
-                bus.publish("studio.done", slug=game_dir.name)
-            except RunPaused as paused:
-                self._report_pause(paused)
-            except Exception as exc:
-                self.update_progress(0, "Ошибка генерации")
-                self.append_log(f"❌ ОШИБКА: {exc}")
-            finally:
-                self._end_generation()
+        def body(job: StudioJob) -> None:
+            job.run_id = session.run_id
+            job.slug = session.slug
+            self.update_progress(5, f"Продолжаю прогон {session.run_id}...")
+            game_dir = self.run_spec_pipeline(
+                session.raw_prompt, None, provider, session.mode, image_provider,
+                resume_run_id=session.run_id, job=job,
+            )
+            self.update_progress(100, "✅ Спецификация готова!")
+            self.append_log(f"УСПЕХ! Прогон {session.run_id} доведён до конца: workspace/{game_dir.name}")
+            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
 
-        threading.Thread(target=run, daemon=True).start()
-        return {"status": "started", "run_id": session.run_id}
+        job = self._launch_job(
+            kind="spec", title=self._job_title(session.title or session.raw_prompt),
+            prompt=session.raw_prompt, provider=provider, mode=session.mode, body=body,
+        )
+        return {"status": "started", "run_id": session.run_id, "job_id": job.id}
 
     def _report_pause(self, paused: RunPaused) -> None:
         """Пауза — это не ошибка: всё сделанное лежит в сессии."""
@@ -548,9 +676,11 @@ class FactoryService:
         bus.publish("runs.changed")
 
     def start_spec_generation(self, opts: Dict[str, Any]) -> Dict[str, Any]:
-        """Только документация: 25+ файлов спецификации."""
-        if self.generation_running:
-            return {"status": "busy", "message": "Генерация уже идёт."}
+        """Только документация: 25+ файлов спецификации.
+
+        Прогонов может идти сколько угодно сразу — очередь и лимит держит
+        StudioJobManager, поэтому кнопка больше не блокируется.
+        """
         prompt = (opts.get("prompt") or "").strip()
         if not prompt:
             return {"status": "error", "message": "Поле идеи игры не должно быть пустым."}
@@ -560,29 +690,20 @@ class FactoryService:
         mode = opts.get("mode") or "standard"
         image_provider = opts.get("image_provider") or "qwen"
 
-        self._begin_generation("Инициализация пайплайна спецификаций...")
+        def body(job: StudioJob) -> None:
+            self.update_progress(5, "Инициализация пайплайна спецификаций...")
+            game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode,
+                                              image_provider, job=job)
+            self.update_progress(100, "✅ Спецификация готова!")
+            self.append_log(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
+            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
 
-        def run() -> None:
-            try:
-                game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode, image_provider)
-                self.update_progress(100, "✅ Спецификация готова!")
-                self.append_log(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
-                bus.publish("studio.done", slug=game_dir.name)
-            except RunPaused as paused:
-                self._report_pause(paused)
-            except Exception as exc:
-                self.update_progress(0, "Ошибка генерации")
-                self.append_log(f"❌ ОШИБКА: {exc}")
-            finally:
-                self._end_generation()
-
-        threading.Thread(target=run, daemon=True).start()
-        return {"status": "started"}
+        job = self._launch_job(kind="spec", title=self._job_title(prompt), prompt=prompt,
+                               provider=provider, mode=mode, body=body)
+        return {"status": "started", "job_id": job.id}
 
     def start_full_game(self, opts: Dict[str, Any]) -> Dict[str, Any]:
         """Под ключ: спецификация + кодогенерация терминальным агентом."""
-        if self.generation_running:
-            return {"status": "busy", "message": "Генерация уже идёт."}
         prompt = (opts.get("prompt") or "").strip()
         if not prompt:
             return {"status": "error", "message": "Поле идеи игры не должно быть пустым."}
@@ -596,139 +717,97 @@ class FactoryService:
         coder_key = provider if provider in AGENT_KEYS else self.default_agent()
         model = opts.get("model") or None
 
-        self._begin_generation("Инициализация мульти-агентного пайплайна...")
+        def body(job: StudioJob) -> None:
+            self.update_progress(5, "Инициализация мульти-агентного пайплайна...")
+            self.append_log(
+                f"\n{'═' * 65}\n🚀 ЗАПУСК ПОЛНОЙ РАЗРАБОТКИ ИГРЫ ПОД КЛЮЧ\n"
+                f"Провайдер: {provider} | Рендерер: {renderer or 'auto'} | "
+                f"Превью: {image_provider} | Режим: {mode}\n{'═' * 65}\n"
+            )
+            if job.should_stop():
+                return
+            game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode,
+                                              image_provider, job=job)
+            bus.publish("projects.changed")
+            if job.should_stop():
+                return
 
-        def run() -> None:
-            try:
+            data = self._read_yaml(sandbox.docs_dir(game_dir.name) / "GAME_DATA.yaml")
+            title = data.get("title", game_dir.name)
+            renderer_final = data.get("renderer", renderer or "threejs")
+
+            coder_title = AGENT_LABELS.get(coder_key, coder_key)
+            self.update_progress(96, f"⚡ ЭТАП 2: Запуск {coder_key.upper()} для генерации кода игры...")
+            self.append_log(
+                f"\n{'─' * 65}\n⚡ ЗАПУСК {coder_title}: Создание структуры и исходного кода "
+                f"игры в {game_dir.name}\n{'─' * 65}\n"
+            )
+
+            sandbox.ensure_project_docs(game_dir, title)
+            task_prompt = sandbox.build_agent_prompt(
+                task=CODE_TASK_PROMPT.format(renderer=renderer_final),
+                directory=game_dir,
+                title=title,
+            )
+
+            provider_obj = self.agent_provider(coder_key, model=model, yolo=True)
+            code, _out = provider_obj.stream_run(
+                prompt=task_prompt,
+                on_line=self.append_log,
+                yolo=True,
+                cwd=game_dir,
+                stop_check_fn=job.should_stop,
+            )
+
+            if code == 0:
+                self.update_progress(100, "🎉 Игра успешно создана!")
                 self.append_log(
-                    f"\n{'═' * 65}\n🚀 ЗАПУСК ПОЛНОЙ РАЗРАБОТКИ ИГРЫ ПОД КЛЮЧ\n"
-                    f"Провайдер: {provider} | Рендерер: {renderer or 'auto'} | "
-                    f"Превью: {image_provider} | Режим: {mode}\n{'═' * 65}\n"
+                    f"\n{'═' * 65}\n✅ УСПЕХ! Проект игры создан в workspace/{game_dir.name}\n"
+                    f"▶ Вкладка «🌐 Играть» запустит его в браузере.\n{'═' * 65}\n"
                 )
-                if self.stop_requested:
-                    return
-                game_dir = self.run_spec_pipeline(prompt, renderer, provider, mode, image_provider)
-                bus.publish("projects.changed")
-                if self.stop_requested:
-                    return
-
-                data = self._read_yaml(sandbox.docs_dir(game_dir.name) / "GAME_DATA.yaml")
-                title = data.get("title", game_dir.name)
-                renderer_final = data.get("renderer", renderer or "threejs")
-
-                coder_title = AGENT_LABELS.get(coder_key, coder_key)
-                self.update_progress(96, f"⚡ ЭТАП 2: Запуск {coder_key.upper()} для генерации кода игры...")
-                self.append_log(
-                    f"\n{'─' * 65}\n⚡ ЗАПУСК {coder_title}: Создание структуры и исходного кода "
-                    f"игры в {game_dir.name}\n{'─' * 65}\n"
+                sandbox.append_devlog(
+                    game_dir,
+                    f"Генерация кода агентом {coder_key.upper()}",
+                    f"- **Задача**: сборка игрового каркаса по спецификации.\n"
+                    f"- **Сделано**: агент отработал этап кодогенерации (код выхода {code}).\n"
+                    f"- **Следующий шаг**: запустить `npm run dev` и проверить игру в браузере.",
                 )
+            else:
+                self.update_progress(100, f"Завершено с кодом {code}")
+            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
 
-                sandbox.ensure_project_docs(game_dir, title)
-                task_prompt = sandbox.build_agent_prompt(
-                    task=CODE_TASK_PROMPT.format(renderer=renderer_final),
-                    directory=game_dir,
-                    title=title,
-                )
-
-                provider_obj = self.agent_provider(coder_key, model=model, yolo=True)
-                code, _out = provider_obj.stream_run(
-                    prompt=task_prompt,
-                    on_line=self.append_log,
-                    yolo=True,
-                    cwd=game_dir,
-                    stop_check_fn=lambda: self.stop_requested,
-                )
-
-                if code == 0:
-                    self.update_progress(100, "🎉 Игра успешно создана!")
-                    self.append_log(
-                        f"\n{'═' * 65}\n✅ УСПЕХ! Проект игры создан в workspace/{game_dir.name}\n"
-                        f"▶ Вкладка «🌐 Играть» запустит его в браузере.\n{'═' * 65}\n"
-                    )
-                    sandbox.append_devlog(
-                        game_dir,
-                        f"Генерация кода агентом {coder_key.upper()}",
-                        f"- **Задача**: сборка игрового каркаса по спецификации.\n"
-                        f"- **Сделано**: агент отработал этап кодогенерации (код выхода {code}).\n"
-                        f"- **Следующий шаг**: запустить `npm run dev` и проверить игру в браузере.",
-                    )
-                else:
-                    self.update_progress(100, f"Завершено с кодом {code}")
-                bus.publish("studio.done", slug=game_dir.name)
-            except RunPaused as paused:
-                self._report_pause(paused)
-            except Exception as exc:
-                self.update_progress(0, "Ошибка генерации")
-                self.append_log(f"\n❌ ОШИБКА: {exc}\n")
-            finally:
-                self._end_generation()
-
-        threading.Thread(target=run, daemon=True).start()
-        return {"status": "started"}
+        job = self._launch_job(kind="full", title=self._job_title(prompt), prompt=prompt,
+                               provider=provider, mode=mode, body=body)
+        return {"status": "started", "job_id": job.id}
 
     def start_batch_generation(self, ideas: List[Dict[str, str]], opts: Dict[str, Any]) -> Dict[str, Any]:
-        """Пакетная генерация ТЗ по нескольким идеям брейнсторма."""
-        if self.generation_running:
-            return {"status": "busy", "message": "Генерация уже идёт."}
+        """Пакет идей брейнсторма: каждая идея — свой прогон, идут параллельно."""
         if not ideas:
             return {"status": "error", "message": "Не выбрано ни одной идеи."}
 
-        renderer = self._renderer(opts)
-        provider = opts.get("provider") or "agy"
-        mode = opts.get("mode") or "standard"
-        image_provider = opts.get("image_provider") or "qwen"
-        total = len(ideas)
+        kind = "full" if (opts.get("kind") == "full") else "spec"
+        started: List[str] = []
+        for idea in ideas:
+            payload = dict(opts)
+            payload["prompt"] = idea.get("prompt_seed") or idea.get("title") or ""
+            # Рендерер идеи важнее выбранного в студии: брейнсторм уже решил,
+            # 2D это или 3D.
+            if idea.get("renderer"):
+                payload["renderer"] = idea["renderer"]
+            if not payload["prompt"].strip():
+                continue
+            result = (self.start_full_game(payload) if kind == "full"
+                      else self.start_spec_generation(payload))
+            if result.get("job_id"):
+                started.append(result["job_id"])
 
-        self._begin_generation(f"Пакетная генерация: 0/{total}")
+        if not started:
+            return {"status": "error", "message": "Ни одну идею не удалось запустить."}
         self.append_log(
-            f"\n📦 Пакетная генерация ТЗ: {total} идей | Провайдер: {provider} | Режим: {mode}"
+            f"\n📦 Пакет: заказано {len(started)} прогонов | "
+            f"одновременно в работе до {self.studio_jobs.max_parallel}"
         )
-
-        def run() -> None:
-            done: List[str] = []
-            failed: List[str] = []
-            try:
-                for index, idea in enumerate(ideas, start=1):
-                    if self.stop_requested:
-                        self.append_log(f"⏹️ Очередь остановлена: обработано {index - 1} из {total}.")
-                        break
-                    title = idea.get("title") or f"Идея {index}"
-                    label = f"[{index}/{total}]"
-                    self.append_log(f"\n{'─' * 60}\n{label} {title}\n{'─' * 60}")
-                    # Рендерер идеи важнее выбранного в студии: брейнсторм уже
-                    # решил, 2D это или 3D.
-                    idea_renderer = idea.get("renderer") or renderer
-                    try:
-                        game_dir = self.run_spec_pipeline(
-                            idea["prompt_seed"], idea_renderer, provider, mode,
-                            image_provider, label=label,
-                        )
-                        done.append(game_dir.name)
-                        self.append_log(f"{label} ✅ Готово: workspace/{game_dir.name}")
-                        bus.publish("projects.changed")
-                    except RunPaused as paused:
-                        # Пакетная генерация не должна вставать целиком из-за
-                        # одной идеи: этот прогон приостановлен и продолжается
-                        # из чата своего проекта, остальные идут дальше.
-                        failed.append(title)
-                        self._report_pause(paused)
-                    except Exception as exc:
-                        failed.append(title)
-                        self.append_log(f"{label} ❌ ОШИБКА: {exc}")
-
-                self.update_progress(100, f"✅ Пакет завершён: {len(done)} из {total}")
-                self.append_log(
-                    f"\n📦 ИТОГ: готово {len(done)} из {total}. "
-                    f"Проекты: {', '.join(done) if done else '—'}"
-                    + (f"\n⚠️ С ошибкой: {', '.join(failed)}" if failed else "")
-                )
-                if done:
-                    bus.publish("studio.done", slug=done[0])
-            finally:
-                self._end_generation()
-
-        threading.Thread(target=run, daemon=True).start()
-        return {"status": "started", "total": total}
+        return {"status": "started", "total": len(started), "job_ids": started}
 
     def analyze_idea(self, prompt: str, provider: str) -> Dict[str, Any]:
         """Быстрый анализ идеи без записи файлов."""
@@ -1151,7 +1230,9 @@ class FactoryService:
             "failed": failed,
             "finished": bool(session.game_dir),
             "can_continue": bool(failed) and not session.game_dir,
-            "running": self.generation_running,
+            # Работает ли именно этот прогон: параллельных теперь много.
+            "running": any(j.run_id == session.run_id and j.active
+                           for j in self.studio_jobs.all_jobs()),
         }
 
     def create_chat(self, slug: str) -> Dict[str, Any]:

@@ -1,0 +1,10 @@
+{
+  "platforms": {
+    "yandex": {
+      "suggest_rate": true
+    },
+    "vk": {},
+    "crazy_games": {},
+    "game_distribution": {}
+  }
+}

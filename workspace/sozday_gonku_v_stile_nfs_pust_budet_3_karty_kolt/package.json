@@ -1,0 +1,23 @@
+{
+  "name": "night-syndicate-duels-and-contracts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check:spec": "node scripts/check-spec.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "@playgama/bridge": "^2.0.0",
+    "three": "^0.173.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.173.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}

@@ -75,14 +75,26 @@
             <strong id="studio-step" style="color:var(--accent)">● Студия готова к созданию игры</strong>
           </div>
           <div class="row">
+            <span class="run-badge hidden" id="studio-jobs-count" title="Прогонов в работе"></span>
             <button class="btn small" id="btn-toggle-log">📟 Журнал</button>
             <span class="small" style="color:var(--warn)" id="studio-timer">⏱️ 00:00</span>
             <span class="small muted" id="studio-pct">0%</span>
-            <button class="btn small danger" id="btn-stop-studio">⏹ Стоп</button>
+            <button class="btn small danger" id="btn-stop-studio" title="Остановить все прогоны">⏹ Стоп всё</button>
           </div>
         </div>
 
         <div class="progress" style="margin-bottom:10px"><div id="studio-progress"></div></div>
+
+        <!-- Прогоны студии: каждая идея делается своим прогоном, все сразу. -->
+        <div class="run-strip hidden" id="run-strip">
+          <div class="run-strip-head">
+            <strong class="small">🧵 Прогоны студии</strong>
+            <span class="dim small" id="run-strip-hint"></span>
+            <span class="grow"></span>
+            <button class="btn small" id="btn-close-finished" title="Убрать завершённые карточки">🧹 Убрать готовые</button>
+          </div>
+          <div class="run-cards" id="run-cards"></div>
+        </div>
 
         <div class="stage">
           <!-- Витрина игр -->
@@ -111,8 +123,9 @@
           <!-- Журнал -->
           <div class="stage-pane hidden" id="studio-log-pane" style="display:flex;flex-direction:column;flex:1;min-height:0">
             <div class="toolbar">
-              <strong class="small">⚡ Журнал выполнения &amp; поток CLI</strong>
+              <strong class="small" id="studio-log-title">⚡ Журнал выполнения &amp; поток CLI</strong>
               <span class="grow"></span>
+              <button class="btn small" id="btn-log-global" title="Показать общий журнал студии">🧾 Общий</button>
               <label class="check"><input type="checkbox" id="chk-studio-autoscroll" checked /> Автоскролл</label>
               <button class="btn small" id="btn-copy-log">📋 Копировать</button>
               <button class="btn small" id="btn-clear-log">🗑 Очистить</button>

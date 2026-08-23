@@ -135,13 +135,42 @@ async def studio_analyze(request: Request) -> Dict[str, Any]:
 
 @app.post("/api/studio/stop")
 def studio_stop() -> Dict[str, Any]:
+    """Остановить все прогоны студии разом."""
     service.stop_generation()
     return {"status": "success"}
 
 
+@app.get("/api/studio/jobs")
+def studio_jobs() -> Dict[str, Any]:
+    """Карточки прогонов: сколько идей делается прямо сейчас."""
+    return {"jobs": service.studio_jobs.snapshots(),
+            "max_parallel": service.studio_jobs.max_parallel}
+
+
+@app.get("/api/studio/jobs/{job_id}")
+def studio_job(job_id: str) -> Dict[str, Any]:
+    return service.job_state(job_id)
+
+
+@app.post("/api/studio/jobs/{job_id}/stop")
+def studio_job_stop(job_id: str) -> Dict[str, Any]:
+    return service.stop_job(job_id)
+
+
+@app.post("/api/studio/jobs/{job_id}/close")
+def studio_job_close(job_id: str) -> Dict[str, Any]:
+    return service.close_job(job_id)
+
+
+@app.post("/api/studio/jobs/close-finished")
+def studio_jobs_close_finished() -> Dict[str, Any]:
+    return service.close_finished_jobs()
+
+
 @app.post("/api/studio/logs/clear")
-def studio_clear_logs() -> Dict[str, Any]:
-    service.clear_logs()
+async def studio_clear_logs(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    service.clear_logs(payload.get("job_id"))
     return {"status": "success"}
 
 

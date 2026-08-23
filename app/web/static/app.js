@@ -51,6 +51,11 @@ const state = {
   quotaTimer: null,
   timerHandle: null,
   elapsed: 0,
+  jobs: [],            // карточки прогонов студии (идут параллельно)
+  jobSel: null,        // чей журнал показан; null — общий журнал студии
+  maxParallel: 10,
+  globalPercent: 0,
+  globalStep: "",
   streamBubble: null,
   streamRaw: "",   // потоковый текст текущего ответа для markdown-рендера
   streamBubbles: [],   // потоковые пузыри текущего ответа — их заменит финальная версия
@@ -172,6 +177,22 @@ function renderMarkdown(src) {
 }
 
 /* ── Студия ───────────────────────────────────────────────────────────── */
+/*
+ * Прогонов идёт сколько угодно сразу: каждая идея — своя карточка со своим
+ * журналом, прогрессом, таймером и «Стоп». Полоса прогресса и журнал в шапке
+ * показывают выбранную карточку; «Общий журнал» — то, что не привязано ни к
+ * одному прогону (анализ концепта, брейнсторм, системные сообщения).
+ */
+
+const RUN_KIND_ICON = { spec: "📄", full: "🚀" };
+const RUN_STATUS_TEXT = {
+  queued: "в очереди",
+  running: "идёт",
+  done: "готово",
+  failed: "ошибка",
+  paused: "пауза",
+  stopped: "остановлен",
+};
 
 function studioOpts(extra = {}) {
   return {
@@ -184,7 +205,169 @@ function studioOpts(extra = {}) {
   };
 }
 
-function appendStudioLog(text) {
+function jobById(id) {
+  return state.jobs.find((job) => job.id === id) || null;
+}
+
+function selectedJob() {
+  return state.jobSel ? jobById(state.jobSel) : null;
+}
+
+function fmtElapsed(seconds) {
+  const m = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const s = String(Math.floor(seconds % 60)).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function jobElapsed(job) {
+  // Живой таймер: снимок дал точку отсчёта, дальше считаем в браузере.
+  if (!job.active) return job.elapsed || 0;
+  const base = job._t0 || (job._t0 = Date.now() - (job.elapsed || 0) * 1000);
+  return Math.floor((Date.now() - base) / 1000);
+}
+
+function upsertJob(job) {
+  const index = state.jobs.findIndex((j) => j.id === job.id);
+  if (index >= 0) {
+    // Точку отсчёта таймера не сбрасываем — иначе он дёргался бы на каждом шаге.
+    job._t0 = state.jobs[index]._t0;
+    state.jobs[index] = job;
+  } else {
+    state.jobs.push(job);
+  }
+  if (!job.active) job._t0 = null;
+  // Ничего не выбрано, а прогон пошёл — показываем его журнал сразу.
+  if (!state.jobSel && job.active) { selectJob(job.id); return; }
+  renderRuns();
+  if (job.id === state.jobSel) syncStudioHead();
+}
+
+function setJobs(jobs) {
+  state.jobs = jobs || [];
+  if (state.jobSel && !jobById(state.jobSel)) state.jobSel = null;
+  if (!state.jobSel) {
+    const active = state.jobs.find((j) => j.active);
+    if (active) state.jobSel = active.id;
+  }
+  renderRuns();
+  syncStudioHead();
+}
+
+/* Журнал показывает выбранный прогон; переключение перечитывает его с сервера. */
+async function selectJob(jobId, reload = true) {
+  state.jobSel = jobId || null;
+  renderRuns();
+  syncStudioHead();
+  const box = $("studio-log");
+  if (!jobId) {
+    const st = await api("/api/studio/state");
+    box.textContent = st.logs || "";
+    box.scrollTop = box.scrollHeight;
+    return;
+  }
+  if (!reload) return;
+  const res = await api(`/api/studio/jobs/${jobId}`);
+  box.textContent = (res.job && res.job.logs) || "";
+  box.scrollTop = box.scrollHeight;
+}
+
+function syncStudioHead() {
+  const job = selectedJob();
+  const icon = job ? (RUN_KIND_ICON[job.kind] || "🧵") : "⚡";
+  $("studio-log-title").textContent = job
+    ? `${icon} Журнал прогона: ${job.title}`
+    : "⚡ Общий журнал студии";
+  const percent = job ? job.percent : state.globalPercent;
+  const step = job ? job.step : state.globalStep;
+  $("studio-progress").style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+  $("studio-pct").textContent = `${percent || 0}%`;
+  if (step) $("studio-step").textContent = step;
+  $("studio-timer").textContent = `⏱️ ${fmtElapsed(job ? jobElapsed(job) : 0)}`;
+
+  const active = state.jobs.filter((j) => j.active).length;
+  const badge = $("studio-jobs-count");
+  badge.textContent = active ? `🧵 ${active} в работе` : "";
+  badge.classList.toggle("hidden", !active);
+}
+
+function renderRuns() {
+  const strip = $("run-strip");
+  const box = $("run-cards");
+  strip.classList.toggle("hidden", state.jobs.length === 0);
+  box.innerHTML = "";
+  if (!state.jobs.length) return;
+
+  const active = state.jobs.filter((j) => j.active).length;
+  const queued = state.jobs.filter((j) => j.status === "queued").length;
+  $("run-strip-hint").textContent = queued
+    ? `${active} в работе, из них ${queued} ждут слота (лимит ${state.maxParallel})`
+    : `${active} в работе (лимит ${state.maxParallel})`;
+
+  // Свежие прогоны — слева: только что заказанное видно сразу.
+  [...state.jobs].reverse().forEach((job) => {
+    const card = el("div", `run-card ${job.status}${job.id === state.jobSel ? " sel" : ""}`);
+    card.onclick = () => selectJob(job.id);
+
+    const head = el("div", "run-title");
+    head.appendChild(el("span", "", RUN_KIND_ICON[job.kind] || "🧵"));
+    head.appendChild(el("span", "run-name", esc(job.title)));
+    const act = el("button", "run-act", job.active ? "⏹" : "✕");
+    act.title = job.active ? "Остановить прогон" : "Убрать карточку";
+    act.onclick = async (event) => {
+      event.stopPropagation();
+      if (job.active) {
+        await api(`/api/studio/jobs/${job.id}/stop`, { method: "POST" });
+      } else {
+        await api(`/api/studio/jobs/${job.id}/close`, { method: "POST" });
+        if (state.jobSel === job.id) selectJob(null);
+        await loadJobs();
+      }
+    };
+    head.appendChild(act);
+    card.appendChild(head);
+
+    card.appendChild(el("div", "run-step", esc(job.step || RUN_STATUS_TEXT[job.status] || "")));
+
+    const foot = el("div", "run-foot");
+    const bar = el("div", "progress");
+    const fill = el("div");
+    fill.style.width = `${Math.max(0, Math.min(100, job.percent || 0))}%`;
+    bar.appendChild(fill);
+    foot.appendChild(bar);
+    foot.appendChild(el("span", "run-pct", `${job.percent || 0}%`));
+    const timer = el("span", "run-time", `⏱️ ${fmtElapsed(jobElapsed(job))}`);
+    timer.dataset.job = job.id;
+    foot.appendChild(timer);
+    card.appendChild(foot);
+
+    if (job.slug && !job.active) {
+      const open = el("button", "btn small", "📁 Открыть ТЗ");
+      open.style.marginTop = "6px";
+      open.onclick = (event) => { event.stopPropagation(); selectProject(job.slug); };
+      card.appendChild(open);
+    }
+    box.appendChild(card);
+  });
+}
+
+/* Один общий тикер на все карточки: перерисовывать их целиком раз в секунду
+ * ни к чему — обновляем только цифры таймеров. */
+function ensureRunTicker() {
+  if (state.timerHandle) return;
+  state.timerHandle = setInterval(() => {
+    if (!state.jobs.some((j) => j.active)) return;
+    document.querySelectorAll(".run-time[data-job]").forEach((node) => {
+      const job = jobById(node.dataset.job);
+      if (job) node.textContent = `⏱️ ${fmtElapsed(jobElapsed(job))}`;
+    });
+    const sel = selectedJob();
+    if (sel) $("studio-timer").textContent = `⏱️ ${fmtElapsed(jobElapsed(sel))}`;
+  }, 1000);
+}
+
+function appendStudioLog(text, jobId) {
+  // Показываем только журнал выбранного прогона: остальные копятся на сервере.
+  if ((jobId || null) !== (state.jobSel || null)) return;
   const box = $("studio-log");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   box.appendChild(document.createTextNode(text));
@@ -192,27 +375,10 @@ function appendStudioLog(text) {
 }
 
 function setStudioProgress(percent, step) {
-  $("studio-progress").style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  $("studio-pct").textContent = `${percent}%`;
-  if (step) $("studio-step").textContent = step;
-}
-
-function setStudioRunning(running) {
-  ["btn-create-full", "btn-create-spec", "btn-analyze"].forEach((id) => { $(id).disabled = running; });
-  if (running) {
-    showLogPane(true);
-    if (!state.timerHandle) {
-      state.timerHandle = setInterval(() => {
-        state.elapsed += 1;
-        const m = String(Math.floor(state.elapsed / 60)).padStart(2, "0");
-        const s = String(state.elapsed % 60).padStart(2, "0");
-        $("studio-timer").textContent = `⏱️ ${m}:${s}`;
-      }, 1000);
-    }
-  } else if (state.timerHandle) {
-    clearInterval(state.timerHandle);
-    state.timerHandle = null;
-  }
+  // Прогресс без прогона — общий журнал студии.
+  state.globalPercent = percent;
+  state.globalStep = step;
+  if (!state.jobSel) syncStudioHead();
 }
 
 function showLogPane(visible) {
@@ -222,13 +388,20 @@ function showLogPane(visible) {
   if (!visible) loadGallery();
 }
 
+async function loadJobs() {
+  const res = await api("/api/studio/jobs");
+  state.maxParallel = res.max_parallel || state.maxParallel;
+  setJobs(res.jobs);
+}
+
 async function loadStudioState() {
   const st = await api("/api/studio/state");
-  $("studio-log").textContent = st.logs || "";
-  $("studio-log").scrollTop = $("studio-log").scrollHeight;
-  setStudioProgress(st.percent, st.step);
-  state.elapsed = st.elapsed || 0;
-  setStudioRunning(st.running);
+  state.globalPercent = st.percent || 0;
+  state.globalStep = st.step || "";
+  state.maxParallel = st.max_parallel || 10;
+  setJobs(st.jobs || []);
+  await selectJob(state.jobSel, true);
+  ensureRunTicker();
 }
 
 function sortProjects(projects, mode) {
@@ -2090,17 +2263,19 @@ function connectEvents() {
 function handleEvent(topic, data) {
   switch (topic) {
     case "studio.log":
-      appendStudioLog(data.line);
+      appendStudioLog(data.line, data.job_id);
       break;
     case "studio.progress":
       setStudioProgress(data.percent, data.step);
       break;
-    case "studio.state":
-      if (data.running) state.elapsed = 0;
-      setStudioRunning(data.running);
+    case "studio.job":
+      upsertJob(data.job);
+      break;
+    case "studio.jobs_changed":
+      loadJobs();
       break;
     case "studio.logs_cleared":
-      $("studio-log").textContent = "";
+      if ((data.job_id || null) === (state.jobSel || null)) $("studio-log").textContent = "";
       break;
     case "studio.done":
       toast("Студия", `Проект готов: ${data.slug}`, "ok",
@@ -2204,13 +2379,27 @@ function bindStudio() {
     presets.appendChild(btn);
   });
 
-  $("btn-create-full").onclick = async () => {
-    const res = await api("/api/studio/generate", { body: studioOpts({ kind: "full", model: $("chat-model").value }) });
-    if (res.status === "error" || res.status === "busy") toast("Студия", res.message, "warn");
+  const launch = async (body) => {
+    const res = await api("/api/studio/generate", { body });
+    if (res.status !== "started") {
+      toast("Студия", res.message || "Не удалось запустить", "warn");
+      return;
+    }
+    // Новый прогон сразу становится выбранным: журнал показывает именно его.
+    showLogPane(true);
+    $("studio-log").textContent = "";
+    state.jobSel = res.job_id;
+    await loadJobs();
+    ensureRunTicker();
   };
-  $("btn-create-spec").onclick = async () => {
-    const res = await api("/api/studio/generate", { body: studioOpts({ kind: "spec" }) });
-    if (res.status === "error" || res.status === "busy") toast("Студия", res.message, "warn");
+  $("btn-create-full").onclick = () =>
+    launch(studioOpts({ kind: "full", model: $("chat-model").value }));
+  $("btn-create-spec").onclick = () => launch(studioOpts({ kind: "spec" }));
+  $("btn-log-global").onclick = () => selectJob(null);
+  $("btn-close-finished").onclick = async () => {
+    await api("/api/studio/jobs/close-finished", { method: "POST" });
+    if (state.jobSel && !jobById(state.jobSel)) selectJob(null);
+    await loadJobs();
   };
   $("btn-analyze").onclick = async () => {
     showLogPane(true);
@@ -2219,7 +2408,8 @@ function bindStudio() {
   };
   $("btn-stop-studio").onclick = () => api("/api/studio/stop", { method: "POST" });
   $("btn-toggle-log").onclick = () => showLogPane($("studio-log-pane").classList.contains("hidden"));
-  $("btn-clear-log").onclick = () => api("/api/studio/logs/clear", { method: "POST" });
+  $("btn-clear-log").onclick = () =>
+    api("/api/studio/logs/clear", { body: { job_id: state.jobSel } });
   $("btn-copy-log").onclick = async () => {
     await navigator.clipboard.writeText($("studio-log").textContent);
     toast("Журнал", "Скопирован в буфер обмена", "ok");
@@ -2243,9 +2433,15 @@ function bindStudio() {
     if (!ideas.length) return;
     closeBrainstorm();
     showView("studio");
-    $("studio-prompt").value = ideas[0].prompt_seed;
+    showLogPane(true);
     const res = await api("/api/studio/batch", { body: studioOpts({ ideas }) });
-    if (res.status !== "started") toast("Пакет", res.message || "Не удалось запустить", "warn");
+    if (res.status !== "started") {
+      toast("Пакет", res.message || "Не удалось запустить", "warn");
+      return;
+    }
+    toast("Пакет", `Заказано прогонов: ${res.total}`, "ok");
+    await loadJobs();
+    ensureRunTicker();
   };
 }
 
