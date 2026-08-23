@@ -55,4 +55,4 @@ export const BALANCE = {
     jumpVelocityY: 9.5,
     gravity: 24.0,
   },
-} as const
+}

@@ -1,5 +1,6 @@
 import { audioManager } from '../../audio/AudioManager'
 import { events } from '../../core/EventBus'
+import type { ContractInfo } from '../../core/types'
 import { storageService } from '../../platform/StorageService'
 import { GuildContractDispatchSystem } from '../../systems/GuildContractDispatchSystem'
 import { createButton, type ButtonHandle } from '../components/Button'
@@ -188,13 +189,17 @@ export class MainMenuScreen {
 
     this.root.appendChild(actions)
 
-    // Listen to currency changes
+    // Listen to currency and contract changes
     events.on('CURRENCY_UPDATED', (payload: { shillings: number }) => {
       this.shillingsText.textContent = `${payload.shillings}`
     })
+
+    events.on('CONTRACT_SELECTED', (contract: ContractInfo) => {
+      this.updateContract(contract)
+    })
   }
 
-  public updateContract(contract: ReturnType<GuildContractDispatchSystem['getActiveContract']>): void {
+  public updateContract(contract: ContractInfo): void {
     this.contractTitleEl.textContent = contract.name
     this.contractDistEl.textContent = `${contract.distance} м`
     this.contractRewardEl.textContent = `${contract.reward} шилл.`

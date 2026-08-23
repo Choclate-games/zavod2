@@ -4,7 +4,7 @@ import { events } from '../core/EventBus'
 export class PlaygamaService {
   private static instance: PlaygamaService | null = null
   private initialized = false
-  private gameReadySent = false
+  private isReadyDispatched = false
   private interstitialCooldown = 90
   private lastInterstitialTime = 0
   private rewardedInProgress = false
@@ -19,11 +19,11 @@ export class PlaygamaService {
   public async initialize(): Promise<void> {
     if (this.initialized) return
 
-    // 15-second watchdog to ensure game_ready is sent even on network / SDK failures
+    // 15-second watchdog to ensure ready signal is sent even on network / SDK failures
     setTimeout(() => {
-      if (!this.gameReadySent) {
-        console.warn('[PlaygamaService] Boot watchdog fired; sending game_ready fallback.')
-        this.setGameReady()
+      if (!this.isReadyDispatched) {
+        console.warn('[PlaygamaService] Boot watchdog fired; sending ready fallback.')
+        this.markReady()
       }
     }, 15000)
 
@@ -53,16 +53,16 @@ export class PlaygamaService {
     }
   }
 
-  public setGameReady(): void {
-    if (this.gameReadySent) return
-    this.gameReadySent = true
+  public markReady(): void {
+    if (this.isReadyDispatched) return
+    this.isReadyDispatched = true
     try {
       bridge.platform.sendMessage('game_ready')
     } catch {}
     try {
       bridge.platform.sendMessage('in_game_loading_stopped')
     } catch {}
-    console.log('[PlaygamaService] game_ready signal dispatched.')
+    console.log('[PlaygamaService] ready signal dispatched.')
   }
 
   public isRewardedSupported(): boolean {
@@ -113,7 +113,9 @@ export class PlaygamaService {
       try {
         if (bridge.advertisement && bridge.EVENT_NAME?.REWARDED_STATE_CHANGED) {
           bridge.advertisement.on(bridge.EVENT_NAME.REWARDED_STATE_CHANGED, stateHandler)
-          bridge.advertisement.showRewarded({ placement })
+          if (typeof (bridge.advertisement as any).showRewarded === 'function') {
+            (bridge.advertisement as any).showRewarded(placement)
+          }
         } else {
           // Local fallback for testing: simulate rewarded video
           setTimeout(() => {

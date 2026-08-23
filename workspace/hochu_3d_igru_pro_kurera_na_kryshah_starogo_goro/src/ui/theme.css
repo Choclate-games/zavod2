@@ -3,6 +3,7 @@
   --color-bg: #18121E;
   --color-panel-glass: rgba(35, 27, 42, 0.88);
   --color-panel-glass-solid: rgba(28, 20, 34, 0.96);
+  --color-modal-backdrop: rgba(0, 0, 0, 0.65);
   --color-panel-border: #B38E5D;
   --color-panel-border-glow: rgba(179, 142, 93, 0.4);
 
@@ -152,11 +153,20 @@
 .panel {
   background: var(--color-panel-glass);
   border: 1px solid var(--color-panel-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 16px var(--color-panel-border-glow);
+  box-shadow: 0 8px 32px var(--color-bg), inset 0 0 16px var(--color-panel-border-glow);
   border-radius: calc(var(--space-2) * var(--ui-scale));
   color: var(--color-text-primary);
   pointer-events: auto;
   box-sizing: border-box;
+}
+
+/* Modal Backdrop */
+.modal-backdrop {
+  background: var(--color-modal-backdrop);
+}
+
+.text-shadow-strong {
+  text-shadow: 0 4px 16px var(--color-bg);
 }
 
 /* Buttons */
@@ -182,7 +192,7 @@
   user-select: none;
   touch-action: manipulation;
   transition: transform var(--dur-press) var(--ease-out), background-color var(--dur-elem) var(--ease-out), box-shadow var(--dur-elem) var(--ease-out);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--color-bg);
 }
 
 .btn:active {
@@ -196,7 +206,7 @@
   font-size: clamp(16px, calc(20px * var(--ui-scale)), 22px);
   background: var(--color-primary);
   color: var(--color-bg);
-  box-shadow: 0 6px 20px rgba(255, 209, 102, 0.4);
+  box-shadow: 0 6px 20px var(--color-panel-border-glow);
 }
 
 .btn--secondary {

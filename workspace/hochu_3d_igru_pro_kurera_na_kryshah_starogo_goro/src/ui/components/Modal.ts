@@ -21,7 +21,6 @@ export function showModal(options: ModalOptions): void {
   backdrop.style.display = 'flex'
   backdrop.style.alignItems = 'center'
   backdrop.style.justifyContent = 'center'
-  backdrop.style.background = 'rgba(0, 0, 0, 0.65)'
   backdrop.style.pointerEvents = 'auto'
   backdrop.style.zIndex = 'var(--z-modal)'
   backdrop.style.padding = 'calc(var(--space-4) * var(--ui-scale))'

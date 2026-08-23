@@ -131,12 +131,11 @@ export class GameplayHudScreen {
 
     // --- Center Zone: Dynamic Action Feedback Popup ---
     this.actionFeedbackEl = document.createElement('div')
-    this.actionFeedbackEl.className = 'action-feedback'
+    this.actionFeedbackEl.className = 'action-feedback text-shadow-strong'
     this.actionFeedbackEl.style.fontFamily = 'var(--font-display)'
     this.actionFeedbackEl.style.fontSize = 'clamp(20px, calc(26px * var(--ui-scale)), 32px)'
     this.actionFeedbackEl.style.fontWeight = '700'
     this.actionFeedbackEl.style.letterSpacing = '2px'
-    this.actionFeedbackEl.style.textShadow = '0 4px 16px rgba(0,0,0,0.8)'
     this.actionFeedbackEl.style.opacity = '0'
     this.actionFeedbackEl.style.transform = 'scale(0.8)'
     this.actionFeedbackEl.style.transition = 'opacity 150ms ease-out, transform 150ms ease-out'

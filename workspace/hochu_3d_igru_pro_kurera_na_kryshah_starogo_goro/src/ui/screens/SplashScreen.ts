@@ -16,12 +16,12 @@ export class SplashScreen {
     header.style.marginTop = 'calc(var(--space-8) * var(--ui-scale))'
 
     const title = document.createElement('h1')
+    title.className = 'text-shadow-strong'
     title.textContent = 'ЧЕРЕПИЧНЫЙ СПРИНТ'
     title.style.fontFamily = 'var(--font-display)'
     title.style.color = 'var(--color-primary)'
     title.style.fontSize = 'clamp(24px, calc(32px * var(--ui-scale)), 42px)'
     title.style.letterSpacing = '2px'
-    title.style.textShadow = '0 4px 16px rgba(0,0,0,0.8)'
 
     const subtitle = document.createElement('p')
     subtitle.textContent = 'ЧИСТЫЙ ФЛОУ'
