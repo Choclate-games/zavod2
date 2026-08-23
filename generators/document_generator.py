@@ -50,33 +50,40 @@ class DocumentGenerator:
         log_success(f"Successfully rendered {len(generators)} specification documents.")
 
     def _gen_direction(self, ctx: GenerationContext) -> str:
-        """Решение о том, чем стал проект, и какие знания он получил.
+        """Рамка проекта и знания, которые он получил.
 
-        Документ существует, чтобы решение было видно человеку: раньше выбор
-        направления не принимался вовсе, а состав базы знаний был зашит в код,
-        и проверить, почему игра вышла похожей на предыдущую, было негде."""
+        Документ существует, чтобы рамка была видна человеку: состав базы знаний
+        когда-то был зашит в код, и проверить, почему игра вышла похожей на
+        предыдущую, было негде.
+
+        Раздела с отвергнутыми направлениями здесь больше нет. Пока директор
+        писал три варианта, их разбор был содержанием; теперь направление одно и
+        растёт прямо из промпта, а список «чем это могло бы быть» кодовый агент
+        читает как разрешение сделать что-то другое."""
         c = ctx.concept
         d = c.direction
         plan = c.knowledge_plan
 
-        options = "\n\n".join(
-            f"### {o.id or '—'}. {o.name}"
-            f"\n- **Питч**: {o.pitch}"
-            f"\n- **Глагол игрока**: {o.core_verb}"
-            f"\n- **Форма сессии**: {o.session_shape}"
-            f"\n- **Камера**: {o.camera}"
-            f"\n- **Управление**: {o.control_scheme}"
-            f"\n- **Мир**: {o.world}"
-            f"\n- **Чем не сводится к шаблону**: {o.why_not_generic}"
-            f"\n- **Главный риск**: {o.biggest_risk}"
-            f"\n- **Объём работ**: {o.production_cost}"
-            + (f"\n- **Выбрано**: да" if o.id == d.selected_id else "")
-            for o in d.options
-        ) or "_Варианты не сформированы: ИИ-провайдер был недоступен на этом прогоне._"
+        option = next((o for o in d.options if o.id == d.selected_id),
+                      d.options[0] if d.options else None)
+        frame = "\n".join(
+            f"- **{label}**: {value}"
+            for label, value in (
+                ("Питч", option.pitch),
+                ("Глагол игрока", option.core_verb),
+                ("Форма сессии", option.session_shape),
+                ("Камера", option.camera),
+                ("Управление", option.control_scheme),
+                ("Мир и материал", option.world),
+                ("Чем не сводится к шаблону жанра", option.why_not_generic),
+                ("Главный риск", option.biggest_risk),
+                ("Объём работ", option.production_cost),
+            )
+            if value
+        ) if option else "_Рамка не сформирована: ИИ-провайдер был недоступен на этом прогоне._"
 
         bans = "\n".join(f"- {item}" for item in d.what_it_is_not) or "- (запреты не заданы)"
         musts = "\n".join(f"- {item}" for item in d.non_negotiables) or "- (не задано)"
-        rejected = "\n".join(f"- {item}" for item in d.rejected_reasons) or "- (не задано)"
 
         knowledge_rows = "\n".join(
             f"| `{sel.path}` | {sel.role} | {sel.reason} |" for sel in plan.selections
@@ -90,11 +97,13 @@ class DocumentGenerator:
 
 ---
 
-## 1. Выбранное направление
+## 1. Направление проекта
 
 - **Направление**: {d.selected_name or '—'}
-- **Почему именно оно**: {d.selection_reason or '—'}
+- **Чем держится игра**: {d.selection_reason or '—'}
 - **Узнаваемая сцена**: {d.signature_scene or '—'}
+
+{frame}
 
 ### Без чего проект перестаёт быть собой
 {musts}
@@ -107,16 +116,7 @@ class DocumentGenerator:
 
 ---
 
-## 2. Рассмотренные направления
-
-{options}
-
-### Почему отвергнуты остальные
-{rejected}
-
----
-
-## 3. Знания, отобранные под проект
+## 2. Знания, отобранные под проект
 
 {plan.summary or '_Сводка не задана._'}
 

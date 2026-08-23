@@ -574,8 +574,8 @@ class FactoryService:
                 action(ctx)
                 if key == "project_director" and ctx.direction and ctx.direction.selected_name:
                     self.append_log(
-                        f"{tag}Направление: {ctx.direction.selected_name} "
-                        f"(вариантов рассмотрено: {len(ctx.direction.options)})"
+                        f"{tag}Рамка проекта: {ctx.direction.selected_name} "
+                        f"(запрещено шаблонов: {len(ctx.direction.what_it_is_not)})"
                     )
                 elif key == "idea_analyzer" and ctx.concept:
                     self.append_log(f"{tag}Концепт: '{ctx.concept.title}' (Slug: {ctx.concept.slug})")

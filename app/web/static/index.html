@@ -49,13 +49,12 @@
     <section class="view active" id="view-studio">
       <div class="panel">
         <div class="row spread" style="margin-bottom:8px">
-          <h2>💡 Идея игры <span class="dim">— 14 AI-агентов соберут архитектуру, скиллы и код</span></h2>
-          <button class="btn violet small" id="btn-brainstorm">✨ ПРИДУМАТЬ ИДЕЮ ОТ ИИ</button>
+          <h2>📝 Промпт игры <span class="dim">— агенты дополняют и расписывают его в документацию</span></h2>
         </div>
 
         <div class="presets" id="studio-presets" style="margin-bottom:10px"></div>
 
-        <textarea id="studio-prompt" rows="3" placeholder="Опишите идею игры. Промпт, референсы и модели можно приложить файлами — Ctrl+V или Drag&Drop.">3D гладиаторский roguelike с активным рэгдоллом, расчленением и боссами на Яндекс Игры</textarea>
+        <textarea id="studio-prompt" rows="6" placeholder="Вставьте готовый промпт игры целиком. Агенты не придумывают вместо вас — они дополняют его до полной документации. Референсы и модели можно приложить файлами — Ctrl+V или Drag&amp;Drop.">3D гладиаторский roguelike с активным рэгдоллом, расчленением и боссами на Яндекс Игры</textarea>
 
         <!-- Материалы заказа: промпт игры, референсы, модели. Файлы ждут в
              предбаннике и переезжают в проект на старте прогона. -->
@@ -128,7 +127,7 @@
               <button class="btn small" id="btn-refresh-gallery" title="Обновить список">🔄</button>
               <button class="btn small" id="btn-open-workspace-2" title="Открыть рабочую папку">📂 Папка</button>
             </div>
-            <div class="gallery" id="gallery"></div>
+            <div class="gallery card-grid" id="gallery"></div>
           </div>
 
           <!-- Журнал -->
@@ -494,35 +493,6 @@
     </section>
 
   </main>
-</div>
-
-<!-- ── Модалка брейнсторма ────────────────────────────────────────── -->
-<div class="modal-backdrop hidden" id="brainstorm-modal">
-  <div class="modal">
-    <div class="row spread">
-      <h2>💡 Генератор идей от ИИ</h2>
-      <button class="btn small icon-only" id="btn-close-brainstorm">✕</button>
-    </div>
-    <p class="dim">
-      Работа в два захода: сначала ИИ ищет незанятые <strong>тематики</strong> — ремёсла, среды,
-      уклады, — и только потом выращивает из каждой игру, выводя механику из самой темы.
-      Все игры на Three.js. Возьмите один вариант в студию или отметьте несколько галочками
-      и соберите ТЗ пакетом.
-    </p>
-    <div class="row">
-      <input type="text" id="brainstorm-hint" class="grow" placeholder="Пожелания / тема: 3D арена с физикой, idle кликер, roguelike..." />
-      <button class="btn primary" id="btn-run-brainstorm">⚡ Придумать 10 идей</button>
-    </div>
-    <div class="idea-list" id="idea-list"></div>
-    <div class="row spread">
-      <div class="row">
-        <button class="btn small" id="btn-select-all">☑ Выбрать все</button>
-        <button class="btn small" id="btn-select-none">☐ Снять все</button>
-        <span class="small muted" id="idea-count">Выбрано идей: 0</span>
-      </div>
-      <button class="btn ok" id="btn-batch" disabled>📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ</button>
-    </div>
-  </div>
 </div>
 
 <!-- ── Модалка отката запроса ─────────────────────────────────────── -->

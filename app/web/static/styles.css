@@ -817,17 +817,58 @@ textarea {
   flex-direction: column;
 }
 
+/* Сетка карточек игр. Одна и та же и в витрине студии, и в избранном:
+ * раньше избранное рисовалось списком во всю ширину панели, и обложка
+ * растягивалась в ленту 1600x96. Ширину колонки задаёт обложка, а не текст. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 16px;
+  padding: 4px 2px 10px;
+  align-content: start;
+}
 .gallery {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-  padding: 4px 2px;
+}
+
+/* Единственная рамка обложки на всё приложение. Пропорции 16:9 держит
+ * aspect-ratio, а не подобранная руками высота: превью приходят ровно
+ * 1280x720, и любая фиксированная высота резала кадр по-своему в каждом
+ * списке. flex: 0 0 auto обязателен — внутри колоночного флекса карточки
+ * обложка иначе сжимается ниже своих пропорций. */
+.cover16 {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: var(--bg-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-align: center;
+}
+.cover16 > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.35s ease;
+}
+.cover16.empty {
+  background:
+    repeating-linear-gradient(135deg,
+      var(--bg-panel-2), var(--bg-panel-2) 12px,
+      var(--bg-deep) 12px, var(--bg-deep) 24px);
 }
 
 .game-card {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
@@ -835,46 +876,64 @@ textarea {
   display: flex;
   flex-direction: column;
   cursor: pointer;
-  transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s;
+  transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
 }
 .game-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border);
+  border-color: var(--accent);
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
-.game-card .cover {
-  height: 140px;
-  background: var(--bg-deep);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  font-size: 11.5px;
-  position: relative;
-  border-bottom: 1px solid var(--border-subtle);
+.game-card:hover .cover16 > img { transform: scale(1.045); }
+
+/* Название лежит НА обложке: в 268-пиксельной колонке отдельная строка под
+ * кадром съедала треть карточки, а читаемость давал не размер шрифта,
+ * а подложка-градиент. */
+.cover16.titled::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 62%;
+  background: linear-gradient(to top, rgba(8, 8, 7, 0.92), rgba(8, 8, 7, 0.55) 45%, transparent);
+  pointer-events: none;
 }
-.game-card .cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.cover16.titled.empty::after { display: none; }
+.cover16 .cover-title {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  z-index: 1;
+  color: #fff;
+  font-weight: 650;
+  font-size: 13.5px;
+  line-height: 1.3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
+/* Без картинки подложки нет — название читается тёмным по светлому. */
+.cover16.empty .cover-title {
+  color: var(--text);
+  text-shadow: none;
+}
+
 .game-card .body {
-  padding: 10px 12px;
+  padding: 9px 11px 4px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   flex: 1;
-}
-.game-card .name {
-  font-weight: 600;
-  font-size: 13.5px;
-  color: var(--text);
-  line-height: 1.35;
 }
 .game-card .meta {
   font-size: 11px;
   color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .game-card .card-rating {
   display: flex;
@@ -882,21 +941,38 @@ textarea {
   justify-content: space-between;
   gap: 6px;
   margin-top: auto;
-  padding-top: 6px;
+  padding-top: 4px;
 }
+.game-card .card-rating .dim { font-size: 10.5px; }
+
+/* Кнопки: одно главное действие тянется, служебные остаются квадратными. Раньше
+ * `flex: 1` был у всех, и шесть иконок растягивались в шесть одинаковых
+ * плашек во всю карточку. */
 .game-card .card-actions {
   display: flex;
-  gap: 6px;
-  padding: 8px 12px 12px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-panel-2);
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 5px;
+  padding: 8px 11px 11px;
 }
-.game-card .card-actions .btn { flex: 1; }
+.game-card .card-actions .btn { flex: 0 0 auto; }
+.game-card .card-actions .btn.grow-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;          /* ellipsis не работает на inline-flex */
+  text-align: center;
+  line-height: 1.6;
+}
+.game-card .card-actions .btn.icon-only { padding: 4px 6px; min-width: 27px; }
 
 .archive-badge {
   position: absolute;
   top: 8px;
   left: 8px;
+  z-index: 2;
   background: rgba(24, 24, 22, 0.9);
   color: var(--warn);
   font-size: 10px;
@@ -905,8 +981,31 @@ textarea {
   border-radius: 999px;
   border: 1px solid var(--border);
 }
-.game-card.archived { opacity: 0.75; }
+.game-card.archived { opacity: 0.72; }
 .game-card.archived:hover { opacity: 1; }
+
+/* Пометка приёмки — пилюлей поверх обложки, а не четвёртой строкой текста. */
+.gate-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  background: rgba(18, 18, 16, 0.86);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gate-pill.gate-pass { color: var(--ok); border-color: rgba(74, 222, 128, 0.45); }
+.gate-pill.gate-fail { color: var(--err); border-color: rgba(248, 113, 113, 0.45); }
+.gate-pill.gate-none { display: none; }
 
 /* ── Проекты и ТЗ ─────────────────────────────────────────────────────── */
 
@@ -947,32 +1046,10 @@ textarea {
   background: var(--bg-card-active);
   box-shadow: var(--shadow-sm);
 }
-.list-item .thumb {
-  width: 100%;
-  height: 96px;
-  object-fit: cover;
+.list-item .cover16 {
   border-radius: var(--radius-sm);
-  background: var(--bg-deep);
-  display: block;
-  margin-bottom: 6px;
   border: 1px solid var(--border-subtle);
-}
-.list-item .thumb-empty {
-  height: 48px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel-2);
-  color: var(--text-dim);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   margin-bottom: 6px;
-  border: 1px dashed var(--border-subtle);
-}
-.list-item .name {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
 }
 .list-item .meta {
   font-size: 11px;
@@ -1184,8 +1261,9 @@ textarea {
   gap: 12px;
   align-items: flex-start;
 }
-.preview-pane img {
-  max-width: 100%;
+.preview-pane .cover16 {
+  width: 100%;
+  max-width: 720px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
@@ -1553,6 +1631,16 @@ textarea {
 .composer.drop-target,
 #studio-prompt.drop-target { border-color: var(--accent); background: var(--accent-bg); }
 
+/* Поле заказа — под вставку готового промпта целиком, а не одной строки:
+ * заказ теперь приходит документом на несколько экранов. */
+#studio-prompt {
+  min-height: 96px;
+  max-height: 30vh;
+  resize: vertical;
+  overflow: auto;
+  line-height: 1.55;
+}
+
 /* ── Играть (Play) & Встроенный предпросмотр ───────────────────────────── */
 
 .play-viewport-container {
@@ -1746,25 +1834,6 @@ textarea {
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
 }
-.idea-list { overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
-.idea-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-}
-.idea-card .idea-head { display: flex; align-items: center; gap: 8px; }
-.idea-card .badge {
-  font-size: 10.5px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.badge.genre { background: var(--violet-bg); color: var(--violet); }
-.badge.renderer { background: var(--accent-bg); color: var(--accent); }
-.idea-card .hook { color: var(--ok); font-size: 12px; font-weight: 600; margin: 6px 0; }
-.idea-card .seed { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-
 #toasts {
   position: fixed;
   right: 20px;
@@ -1886,7 +1955,3 @@ textarea {
 
 /* Приёмка на карточке проекта: зелёная — проверена запуском, красная —
    провалена запуском, серая — не гонялась. Промежуточных состояний нет. */
-.meta.gate { font-variant-numeric: tabular-nums; }
-.meta.gate-pass { color: #4ade80; }
-.meta.gate-fail { color: #f87171; }
-.meta.gate-none { opacity: .55; }

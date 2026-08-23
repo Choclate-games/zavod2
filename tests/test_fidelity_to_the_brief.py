@@ -94,7 +94,7 @@ def test_honest_direction_is_left_alone():
 
 
 def test_nothing_kept_the_order_says_so_out_loud():
-    """Когда заказ потеряли все варианты, это не молчаливый успех."""
+    """Когда заказ потерян и переносить не на что, это не молчаливый успех."""
     direction = ProjectDirection(
         options=[
             DirectionOption(id="D1", name="Ферма", pitch="Сажать морковь", core_verb="сажать", camera="сверху"),
@@ -104,7 +104,8 @@ def test_nothing_kept_the_order_says_so_out_loud():
         selected_name="Ферма",
     )
     _, note = fidelity.enforce(direction, COD_PROMPT)
-    assert "не полностью" in note
+    assert "не удержало заказ" in note
+    assert "первого лица" in note
 
 
 @pytest.mark.parametrize(
@@ -128,8 +129,17 @@ def test_director_prompt_puts_the_order_above_originality():
 
     assert "ЗАКАЗ ВЫШЕ ОРИГИНАЛЬНОСТИ" in SYSTEM_PROMPT
     index_order = SYSTEM_PROMPT.index("ЗАКАЗ ВЫШЕ ОРИГИНАЛЬНОСТИ")
-    index_original = SYSTEM_PROMPT.index("трудно спутать с чужой игрой")
-    assert index_order < index_original, "правило верности обязано стоять раньше правила про оригинальность"
+    index_freedom = SYSTEM_PROMPT.index("why_not_generic")
+    assert index_order < index_freedom, "правило верности обязано стоять раньше поиска непохожести"
+
+
+def test_director_works_one_direction_not_three():
+    """Промпт приходит готовым: перебор направлений — это способы его не выполнить."""
+    from agents.project_director import SYSTEM_PROMPT
+
+    assert "РОВНО ОДНО направление" in SYSTEM_PROMPT
+    assert "Вариантов не перебирай" in SYSTEM_PROMPT
+    assert "rejected_reasons оставь пустым" in SYSTEM_PROMPT
 
 
 # --------------------------------------------------------------- заказ выше оригинальности

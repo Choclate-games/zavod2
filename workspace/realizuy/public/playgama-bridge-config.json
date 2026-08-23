@@ -1,0 +1,13 @@
+{
+  "platforms": {
+    "yandex": {
+      "appId": "realizuy"
+    },
+    "vk": {
+      "appId": "realizuy"
+    },
+    "mock": {
+      "appId": "realizuy"
+    }
+  }
+}

@@ -45,9 +45,24 @@ async def _body(request: Request) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _stamped(html: str) -> str:
+    """Дописывает к ссылкам на стили и скрипт версию по времени файла.
+
+    Без штампа браузер оставляет у себя старый `styles.css`: HTML отдаётся
+    заново каждым запросом, а вот CSS живёт в кэше, и новая разметка от
+    `app.js` раскладывается по правилам, которых в этом CSS ещё нет. Именно
+    так обложки уезжали в натуральные 1280 пикселей мимо колонки — JS уже
+    рисовал `.cover16`, а стилей для него в браузере не было."""
+    for asset in ("styles.css", "app.js"):
+        path = STATIC_DIR / asset
+        version = int(path.stat().st_mtime) if path.exists() else 0
+        html = html.replace(f"/static/{asset}", f"/static/{asset}?v={version}")
+    return html
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(_stamped((STATIC_DIR / "index.html").read_text(encoding="utf-8")))
 
 
 @app.get("/play", response_class=HTMLResponse)

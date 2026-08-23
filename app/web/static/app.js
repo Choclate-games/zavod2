@@ -39,8 +39,6 @@ const state = {
   doc: "AI_DEVELOPER_PROMPT.md",
   docRaw: false,
   docContent: "",
-  ideas: [],
-  ideaError: "",     // осечка брейнсторма показывается вместо списка, а не прячется
   attachments: [],    // вложения, готовые уйти со следующим сообщением агенту
   studioAttachments: [],  // материалы заказа: они ждут в предбаннике до старта прогона
   ttsVoices: [],
@@ -473,6 +471,36 @@ async function runGate(slug) {
   toast("Приёмка пошла", "Сборка, запуск в браузере, проверки — смотрите журнал студии");
 }
 
+/* Обложка проекта в кадре 16:9 — она же и есть карточка: на ней лежат
+ * название и пометка приёмки. Один конструктор на все списки: витрину,
+ * избранное, список проектов и вкладку превью. Раньше каждый список строил
+ * картинку сам, пропорции расходились, а под кадром висели три строки
+ * подписей — в колонке шириной 268 пикселей они и съедали карточку. */
+function coverBox(project, opts = {}) {
+  const box = el("div",
+    ["cover16", project.has_preview ? "" : "empty", opts.title ? "titled" : ""]
+      .filter(Boolean).join(" "));
+  if (project.has_preview) {
+    const img = el("img");
+    img.src = `/api/projects/${encodeURIComponent(project.slug)}/preview.png?v=${project.preview_mtime}`;
+    img.loading = "lazy";
+    img.alt = project.title || project.slug;
+    box.appendChild(img);
+  } else {
+    box.appendChild(el("span", "", "🖼 превью ещё не создано"));
+  }
+  if (project.archived) box.appendChild(el("span", "archive-badge", "📦 архив"));
+  if (opts.gate) {
+    const pill = el("span", `gate-pill gate-${esc(project.gate_state || "none")}`, gateBadge(project));
+    pill.title = "Состояние приёмки";
+    box.appendChild(pill);
+  }
+  if (opts.title) {
+    box.appendChild(el("div", "cover-title", `${opts.mark || ""}${esc(project.title)}`));
+  }
+  return box;
+}
+
 function gateBadge(p) {
   const m = p.gate_metrics || {};
   if (p.gate_state === "pass") {
@@ -592,38 +620,41 @@ function renderFavorites() {
     badge.classList.toggle("hidden", !shown.length);
   }
 
+  box.className = "card-grid";
   box.innerHTML = "";
   if (!shown.length) {
+    box.className = "";
     box.appendChild(el("p", "muted",
       "Пока пусто. Откройте удачную игру в «Проекты и ТЗ» и нажмите «⭐ В избранное»."));
     return;
   }
   shown.forEach((p) => {
-    const item = el("div", "list-item");
-    if (p.has_preview) {
-      const img = el("img", "thumb");
-      img.src = `/api/projects/${encodeURIComponent(p.slug)}/preview.png?v=${p.preview_mtime}`;
-      img.loading = "lazy";
-      item.appendChild(img);
-    } else {
-      item.appendChild(el("div", "thumb-empty", "🖼 превью ещё не создано"));
-    }
-    item.appendChild(el("div", "name", `⭐ ${esc(p.title)}`));
-    item.appendChild(el("div", "meta",
+    const card = el("div", "game-card");
+    card.appendChild(coverBox(p, { title: true, gate: true, mark: "⭐ " }));
+
+    const body = el("div", "body");
+    body.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
-    item.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
+    const rating = el("div", "card-rating");
+    rating.appendChild(starWidget(p, "tiny"));
+    rating.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
+    body.appendChild(rating);
+    card.appendChild(body);
 
-    const line = el("div", "row");
-    const open = el("button", "btn small primary", "📁 Открыть");
-    open.onclick = (e) => { e.stopPropagation(); showView("projects"); selectProject(p.slug); };
-    const off = el("button", "btn small", "☆ Убрать");
-    off.onclick = (e) => { e.stopPropagation(); toggleFavorite(p); };
-    const play = el("button", "btn small ok", "▶ Запустить");
+    const actions = el("div", "card-actions");
+    const play = el("button", "btn small ok grow-btn", "▶ Запустить");
     play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
-    line.append(open, play, off);
-    item.appendChild(line);
-    box.appendChild(item);
+    const open = el("button", "btn small", "📁 Открыть");
+    open.onclick = (e) => { e.stopPropagation(); showView("projects"); selectProject(p.slug); };
+    const off = el("button", "btn small icon-only", "☆");
+    off.title = "Убрать из избранного";
+    off.onclick = (e) => { e.stopPropagation(); toggleFavorite(p); };
+    actions.append(play, open, off);
+    card.appendChild(actions);
+
+    card.onclick = () => { showView("projects"); selectProject(p.slug); };
+    box.appendChild(card);
   });
 }
 
@@ -646,33 +677,24 @@ async function loadGallery() {
   }
   shown.forEach((p) => {
     const card = el("div", `game-card ${p.archived ? "archived" : ""}`);
-    const cover = el("div", "cover");
-    if (p.has_preview) {
-      const img = el("img");
-      img.src = `/api/projects/${encodeURIComponent(p.slug)}/preview.png?v=${p.preview_mtime}`;
-      img.loading = "lazy";
-      cover.appendChild(img);
-    } else cover.textContent = "🖼 превью ещё не создано";
-    if (p.archived) cover.appendChild(el("span", "archive-badge", "📦 архив"));
-    card.appendChild(cover);
+    card.appendChild(coverBox(p, { title: true, gate: true, mark: "🎮 " }));
 
     const body = el("div", "body");
-    body.appendChild(el("div", "name", `🎮 ${esc(p.title)}`));
     body.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код готов" : "📄 только ТЗ"}`
-      + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)} токенов` : "")));
-    body.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
+      + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
     const line = el("div", "card-rating");
-    line.appendChild(starWidget(p));
-    line.appendChild(el("span", "dim", p.created_label ? `создана ${esc(p.created_label)}` : ""));
+    line.appendChild(starWidget(p, "tiny"));
+    line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
     body.appendChild(line);
     card.appendChild(body);
 
     const actions = el("div", "card-actions");
-    const play = el("button", `btn small ${p.playable ? "ok" : ""}`, p.playable ? "▶ Играть" : "▶ Нет кода");
+    const play = el("button", `btn small grow-btn ${p.playable ? "ok" : ""}`, p.playable ? "▶ Играть" : "▶ Нет кода");
     play.disabled = !p.playable;
     play.onclick = (e) => { e.stopPropagation(); openPlay(p.slug); };
-    const open = el("button", "btn small", "📄 ТЗ");
+    const open = el("button", "btn small icon-only", "📄");
+    open.title = "Открыть ТЗ проекта";
     open.onclick = (e) => { e.stopPropagation(); selectProject(p.slug); };
     const gate = el("button", "btn small icon-only", "🧪");
     gate.title = "Прогнать приёмку: собрать, открыть в браузере, проверить";
@@ -684,100 +706,16 @@ async function loadGallery() {
     const archive = el("button", "btn small icon-only", p.archived ? "↩️" : "📦");
     archive.title = p.archived ? "Вернуть из архива" : "Убрать в архив (игра останется на диске)";
     archive.onclick = (e) => { e.stopPropagation(); toggleArchive(p); };
-    const remove = el("button", "btn small danger", "🗑");
+    const remove = el("button", "btn small danger icon-only", "🗑");
     remove.title = "Удалить игру безвозвратно";
     remove.onclick = (e) => { e.stopPropagation(); deleteProject(p); };
-    actions.append(play, gate, open, rename, archive, remove);
+    actions.append(play, open, gate, rename, archive, remove);
     card.appendChild(actions);
 
     card.onclick = () => selectProject(p.slug);
     box.appendChild(card);
   });
 }
-
-/* ── Брейнсторм ───────────────────────────────────────────────────────── */
-
-function openBrainstorm() {
-  $("brainstorm-modal").classList.remove("hidden");
-  if (!state.ideas.length) runBrainstorm();
-}
-
-async function runBrainstorm() {
-  const btn = $("btn-run-brainstorm");
-  btn.disabled = true;
-  btn.textContent = "⏳ Генерация идей...";
-  // Два захода: сначала модель придумывает тематики, потом растит из них игры.
-  // Ждать приходится дольше одного запроса — говорим, чего именно ждём.
-  $("idea-list").innerHTML =
-    '<div class="muted">Шаг 1 — ИИ ищет незанятые тематики. Шаг 2 — выращивает из них игры…</div>';
-  const res = await api("/api/brainstorm", {
-    body: { provider: $("sel-provider").value, hint: $("brainstorm-hint").value.trim(), count: 10 },
-  });
-  btn.disabled = false;
-  btn.textContent = "⚡ Придумать 10 идей";
-  state.ideas = res.ideas || [];
-  // Заготовленный список фабрика больше не подставляет: пустая выдача — это
-  // осечка провайдера, и она должна быть видна, а не выглядеть как «идеи».
-  state.ideaError = res.status === "error" ? (res.message || "Не удалось получить идеи") : "";
-  renderIdeas();
-  if (state.ideaError) toast("Брейнсторм", state.ideaError, "err");
-}
-
-function renderIdeas() {
-  const box = $("idea-list");
-  box.innerHTML = "";
-  if (!state.ideas.length) {
-    box.appendChild(el("div", "muted", state.ideaError
-      || "Не удалось получить идеи. Попробуйте ещё раз."));
-    updateIdeaCount();
-    return;
-  }
-  state.ideas.forEach((idea, index) => {
-    const card = el("div", "idea-card");
-    const head = el("div", "idea-head");
-    const check = el("input");
-    check.type = "checkbox";
-    check.dataset.index = index;
-    check.onchange = updateIdeaCount;
-    head.appendChild(check);
-    head.appendChild(el("strong", "", esc(idea.title)));
-    head.appendChild(el("span", "badge genre", esc(idea.genre)));
-    head.appendChild(el("span", "badge renderer", esc((idea.renderer || "").toUpperCase())));
-    card.appendChild(head);
-    card.appendChild(el("div", "hook", `🎯 Hook: ${esc(idea.hook)}`));
-    if (idea.art_style) card.appendChild(el("div", "seed", `🎨 Стиль: ${esc(idea.art_style)}`));
-    card.appendChild(el("div", "seed", esc(idea.prompt_seed)));
-
-    const take = el("button", "btn small primary", "👉 ВЗЯТЬ В СТУДИЮ");
-    take.style.marginTop = "8px";
-    take.onclick = () => {
-      $("studio-prompt").value = idea.prompt_seed;
-      if (idea.renderer) $("sel-renderer").value = idea.renderer;
-      closeBrainstorm();
-      toast("Идея выбрана", idea.title, "ok");
-    };
-    card.appendChild(take);
-    box.appendChild(card);
-  });
-  updateIdeaCount();
-}
-
-function selectedIdeas() {
-  return [...$("idea-list").querySelectorAll("input[type=checkbox]")]
-    .filter((c) => c.checked)
-    .map((c) => state.ideas[Number(c.dataset.index)]);
-}
-
-function updateIdeaCount() {
-  const count = selectedIdeas().length;
-  $("idea-count").textContent = `Выбрано идей: ${count}`;
-  $("btn-batch").disabled = count === 0;
-  $("btn-batch").textContent = count
-    ? `📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ (${count})`
-    : "📦 СДЕЛАТЬ ДОКИ ПО ВЫБРАННЫМ";
-}
-
-function closeBrainstorm() { $("brainstorm-modal").classList.add("hidden"); }
 
 /* ── Проекты ──────────────────────────────────────────────────────────── */
 
@@ -795,20 +733,14 @@ async function loadProjects() {
   }
   shown.forEach((p) => {
     const item = el("div", `list-item ${p.slug === state.project ? "active" : ""} ${p.archived ? "archived" : ""}`);
-    if (p.has_preview) {
-      const img = el("img", "thumb");
-      img.src = `/api/projects/${encodeURIComponent(p.slug)}/preview.png?v=${p.preview_mtime}`;
-      img.loading = "lazy";
-      item.appendChild(img);
-    } else {
-      item.appendChild(el("div", "thumb-empty", "🖼 превью ещё не создано"));
-    }
-    item.appendChild(el("div", "name",
-      `${p.archived ? "📦 " : (p.favorite ? "⭐ " : "🎮 ")}${esc(p.title)}`));
+    item.appendChild(coverBox(p, {
+      title: true,
+      gate: true,
+      mark: p.archived ? "📦 " : (p.favorite ? "⭐ " : "🎮 "),
+    }));
     item.appendChild(el("div", "meta",
       `${esc(p.genre)} · ${esc(p.renderer)} · ${p.playable ? "💻 код" : "📄 только ТЗ"}`
       + (p.tokens ? ` · 🎟 ${esc(p.tokens_human)}` : "")));
-    item.appendChild(el("div", `meta gate gate-${esc(p.gate_state || "none")}`, gateBadge(p)));
     const line = el("div", "card-rating");
     line.appendChild(starWidget(p, "tiny"));
     line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
@@ -949,9 +881,12 @@ async function renderPreviewPane() {
   pane.appendChild(btn);
 
   if (detail.has_preview) {
-    const img = el("img");
-    img.src = `/api/projects/${encodeURIComponent(state.project)}/preview.png?v=${detail.preview_mtime}`;
-    pane.appendChild(img);
+    pane.appendChild(coverBox({
+      slug: state.project,
+      has_preview: true,
+      preview_mtime: detail.preview_mtime,
+      title: detail.title,
+    }));
   } else {
     pane.appendChild(el("div", "muted", "Изображение превью отсутствует (сгенерирован только PREVIEW_PROMPT.md)."));
   }
@@ -2733,32 +2668,6 @@ function bindStudio() {
   $("btn-refresh-gallery").onclick = loadGallery;
   if ($("gallery-search")) $("gallery-search").oninput = loadGallery;
 
-  $("btn-brainstorm").onclick = openBrainstorm;
-  $("btn-close-brainstorm").onclick = closeBrainstorm;
-  $("btn-run-brainstorm").onclick = runBrainstorm;
-  $("btn-select-all").onclick = () => {
-    $("idea-list").querySelectorAll("input[type=checkbox]").forEach((c) => { c.checked = true; });
-    updateIdeaCount();
-  };
-  $("btn-select-none").onclick = () => {
-    $("idea-list").querySelectorAll("input[type=checkbox]").forEach((c) => { c.checked = false; });
-    updateIdeaCount();
-  };
-  $("btn-batch").onclick = async () => {
-    const ideas = selectedIdeas();
-    if (!ideas.length) return;
-    closeBrainstorm();
-    showView("studio");
-    showLogPane(true);
-    const res = await api("/api/studio/batch", { body: studioOpts({ ideas }) });
-    if (res.status !== "started") {
-      toast("Пакет", res.message || "Не удалось запустить", "warn");
-      return;
-    }
-    toast("Пакет", `Заказано прогонов: ${res.total}`, "ok");
-    await loadJobs();
-    ensureRunTicker();
-  };
 }
 
 function bindProjects() {
