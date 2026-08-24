@@ -64,20 +64,30 @@ def _b64d(text: str) -> bytes:
 # ── Пароль ──────────────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
-    """Хеш для .env в виде `scrypt$N$r$p$соль$ключ`."""
+    """
+    Хеш для .env в виде `scrypt:N:r:p:соль:ключ`.
+
+    Разделитель двоеточие, а не привычный для scrypt/PHC доллар — и это не
+    вкусовщина. Docker Compose разворачивает `$` в значениях env_file, то есть
+    хеш `scrypt$32768$8$1$соль$ключ` доезжает до контейнера как
+    `scrypt$32768$8$1` с вырезанной солью: `$соль` он считает несуществующей
+    переменной. Пароль после этого не подходит никогда, а причина совершенно
+    не видна со стороны формы входа. Алфавит base64url (A-Za-z0-9-_) с
+    двоеточием не пересекается, так что разбор однозначен.
+    """
     salt = secrets.token_bytes(_SALT_BYTES)
     key = hashlib.scrypt(
         password.encode("utf-8"), salt=salt,
         n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_KEY_BYTES,
         maxmem=_SCRYPT_MAXMEM,
     )
-    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${_b64e(salt)}${_b64e(key)}"
+    return f"scrypt:{_SCRYPT_N}:{_SCRYPT_R}:{_SCRYPT_P}:{_b64e(salt)}:{_b64e(key)}"
 
 
 def verify_password(password: str, stored: str) -> bool:
     """Проверка пароля против хеша. Любой мусор в хеше — просто «не подошёл»."""
     try:
-        algo, n_s, r_s, p_s, salt_s, key_s = stored.strip().split("$")
+        algo, n_s, r_s, p_s, salt_s, key_s = stored.strip().split(":")
         if algo != "scrypt":
             return False
         salt, expected = _b64d(salt_s), _b64d(key_s)
@@ -206,10 +216,19 @@ class AuthSettings:
                 "Отключить вход:  AUTH_ENABLED=0 в .env — только для локального\n"
                 "                 запуска на 127.0.0.1."
             )
-        if enabled and not password_hash.startswith("scrypt$"):
+        if enabled and (not password_hash.startswith("scrypt:")
+                        or len(password_hash.split(":")) != 6):
             raise AuthError(
-                "AUTH_PASSWORD_HASH не похож на хеш scrypt. В .env кладётся не сам\n"
-                "пароль, а вывод `python -m app.web.auth --hash`."
+                "AUTH_PASSWORD_HASH не похож на хеш scrypt (ожидается\n"
+                "scrypt:N:r:p:соль:ключ). В .env кладётся не сам пароль, а вывод\n"
+                "`python -m app.web.auth --hash`.\n"
+                "\n"
+                "Если хеш выглядит обрезанным — проверь, нет ли в нём символа `$`:\n"
+                "Docker Compose разворачивает доллары в значениях env_file и режет\n"
+                "строку. Перевыпусти хеш этой же командой, текущий формат от этого\n"
+                "не страдает.\n"
+                "\n"
+                f"Сейчас в переменной: {password_hash[:24] or '(пусто)'}…"
             )
         return cls(enabled=enabled, username=username,
                    password_hash=password_hash, ttl_seconds=ttl)
