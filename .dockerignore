@@ -1,0 +1,34 @@
+# Контекст сборки. Держим его маленьким намеренно: в рабочей копии workspace/
+# весит гигабайты (node_modules сгенерированных игр), и без этого файла docker
+# отправлял бы их демону на каждую сборку.
+#
+# Сами игры при этом не теряются: workspace/ и output/ приезжают в контейнер
+# bind-монтом из склонированного репозитория — см. compose.yml.
+
+.git
+.gitignore
+.github
+
+workspace/
+output/
+zip_projects/
+knowledge_archive/
+
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.pytest_cache
+
+# Секреты и локальное состояние — в образ не попадают никогда.
+.env
+.env.local
+.env.*.local
+.agent_usage_history.json
+.agy_quota_history.json
+.agy_quota_live.json
+.token_usage_totals.json
+
+# Windows-специфичное
+start.bat
+*.bak

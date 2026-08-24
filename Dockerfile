@@ -1,0 +1,122 @@
+# AI Game Factory — образ для мини-ПК.
+#
+# Внутри должно оказаться четыре вещи:
+#   1. Python + FastAPI — собственно веб-фабрика;
+#   2. Node + npm — фабрика зовёт их для сгенерированных игр (app/acceptance.py,
+#      app/pkgstore.py: npm install, npx, дымовой прогон через node);
+#   3. git — без него отваливается откат запросов: app/snapshots.py держит по
+#      теневому bare-репозиторию на каждый проект;
+#   4. терминальные агенты — claude, codex, opencode, gemini, qwen, agy.
+#
+# Заодно это изоляция: фабрика выполняет код, который сама же и сгенерировала
+# (app/sandbox.py). На хосте рядом крутятся раннеры организации, и пускать туда
+# чужой код напрямую не хочется.
+
+# ── Node ────────────────────────────────────────────────────────────────────
+# Берём из официального образа, а не из nodesource: не нужен ни apt-репозиторий,
+# ни ключи, а версия фиксируется тегом.
+FROM node:20-bookworm-slim AS node
+
+# ── Основной образ ──────────────────────────────────────────────────────────
+FROM python:3.12-slim-bookworm
+
+# Версии агентов пиньтся здесь. Обновление агента — правка одной строки и
+# пересборка, а не «что там сегодня в latest».
+ARG CLAUDE_VERSION=2.1.197
+ARG CODEX_VERSION=0.149.1
+ARG OPENCODE_VERSION=1.18.22
+ARG GEMINI_VERSION=0.56.0
+ARG QWEN_VERSION=0.15.10
+
+# uid/gid пользователя в контейнере. По умолчанию — как у `oem` на мини-ПК:
+# workspace/ приезжает bind-монтом из склонированного репозитория, и писать
+# туда контейнер сможет только совпав с владельцем каталога.
+ARG APP_UID=29999
+ARG APP_GID=29999
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+
+# tini — чтобы дочерние процессы агентов и dev-серверов не оставались зомби:
+# фабрика поднимает vite/npm пачками, а PID 1 из питона их не пожинает.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates curl tini procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
+
+# ── Терминальные агенты ─────────────────────────────────────────────────────
+RUN npm install -g --no-audit --no-fund \
+        @anthropic-ai/claude-code@${CLAUDE_VERSION} \
+        @openai/codex@${CODEX_VERSION} \
+        opencode-ai@${OPENCODE_VERSION} \
+        @google/gemini-cli@${GEMINI_VERSION} \
+        @qwen-code/qwen-code@${QWEN_VERSION} \
+    && npm cache clean --force
+
+# Antigravity CLI ставится не из npm. Повторяем ровно то, что делает
+# официальный установщик (antigravity.google/cli/install.sh): манифест на
+# платформу -> tar.gz -> обязательная сверка SHA-512. Без совпадения хеша
+# сборка падает, а не «ну ладно».
+RUN set -eux; \
+    manifest="$(curl -fsSL https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json)"; \
+    url="$(printf '%s' "$manifest" | sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"; \
+    sha="$(printf '%s' "$manifest" | sed -n 's/.*"sha512"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"; \
+    test -n "$url" && test -n "$sha"; \
+    curl -fsSL -o /tmp/agy.tar.gz "$url"; \
+    echo "$sha  /tmp/agy.tar.gz" | sha512sum -c -; \
+    tar -xzf /tmp/agy.tar.gz -C /tmp antigravity; \
+    install -m 0755 /tmp/antigravity /usr/local/bin/agy; \
+    rm -f /tmp/agy.tar.gz /tmp/antigravity; \
+    agy --version
+
+# ── Пользователь ────────────────────────────────────────────────────────────
+RUN groupadd -g ${APP_GID} factory \
+    && useradd -u ${APP_UID} -g ${APP_GID} -m -s /bin/bash factory
+
+WORKDIR /app
+
+# Зависимости отдельным слоем: правка кода не должна отправлять pip заново.
+COPY requirements.txt ./
+# pywebview выкидываем: это десктопная обёртка (app/webview_host.py), на
+# сервере она бесполезна, а тянет за собой GTK/WebKit.
+RUN grep -viE '^pywebview' requirements.txt > /tmp/req.txt \
+    && pip install --no-cache-dir -r /tmp/req.txt \
+    && rm -f /tmp/req.txt
+
+COPY --chown=${APP_UID}:${APP_GID} . /app
+COPY --chown=${APP_UID}:${APP_GID} docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+# CRLF в скрипте — это «/bin/sh\r» в shebang и падение контейнера с
+# «no such file or directory» при живом /bin/sh. В репозитории это уже
+# закреплено через .gitattributes; здесь подстраховка на случай сборки из
+# копии, скачанной мимо git.
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh
+
+# Каталоги под bind-монты и состояние. Создаём заранее и с нужным владельцем:
+# иначе docker создаст их от root и контейнер не сможет туда писать.
+RUN mkdir -p /app/workspace /app/output /app/zip_projects /app/state \
+    && chown -R ${APP_UID}:${APP_GID} /app/workspace /app/output /app/zip_projects /app/state
+
+USER factory
+
+# git внутри контейнера работает с чужими по владельцу каталогами (bind-монт),
+# без этого он ругается «detected dubious ownership» и снимки не создаются.
+RUN git config --global --add safe.directory '*' \
+    && git config --global user.name 'AI Game Factory' \
+    && git config --global user.email 'factory@local'
+
+EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:7860/healthz || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["uvicorn", "app.web.api:app", "--host", "0.0.0.0", "--port", "7860", \
+     "--log-level", "warning", "--no-access-log"]

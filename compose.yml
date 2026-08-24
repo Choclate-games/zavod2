@@ -1,0 +1,128 @@
+# AI Game Factory на мини-ПК.
+#
+# Два сервиса и намеренно ничего больше:
+#   factory — сама фабрика (FastAPI + терминальные агенты);
+#   runner  — раннер GitHub Actions, привязанный к ЭТОМУ репозиторию.
+#
+# Раннеры организации (gh-runner-1, gh-runner-unity-1) живут в другом compose
+# и про этот файл не знают. Пересечения нет: разные метки, разные контейнеры,
+# разные тома.
+#
+# Сокет Docker не отдаётся никому. Раннер не умеет ни собирать образы, ни
+# перезапускать контейнеры — он только прогоняет тесты и трогает файл-триггер,
+# а разворачивает systemd на хосте (docker/systemd/). Это сохраняет правило,
+# записанное в README CI-инфраструктуры: код из workflow не управляет демоном
+# Docker хоста.
+
+services:
+  factory:
+    build:
+      context: .
+      args:
+        APP_UID: ${APP_UID:-29999}
+        APP_GID: ${APP_GID:-29999}
+    image: zavod2-factory:latest
+    container_name: zavod2-factory
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Слушаем все интерфейсы намеренно. Адрес 10.8.1.9 появляется только
+      # когда поднят туннель AmneziaWG, а Docker биндит порт сразу при старте
+      # контейнера — при `10.8.1.9:7860:7860` контейнер падал бы с "cannot
+      # assign requested address" каждый раз, когда стартовал раньше туннеля.
+      # Кто именно может достучаться, решают правила на awg0, а не bind.
+      GUI_HOST: "0.0.0.0"
+      GUI_PORT: "7860"
+
+      # Жёстко перекрывает .env. Фабрика доступна по сети, а значит открытый
+      # интерфейс — это удалённое выполнение кода. Даже если в .env случайно
+      # уедет AUTH_ENABLED=0, здесь будет 1.
+      AUTH_ENABLED: "1"
+      # Своего nginx перед фабрикой нет, X-Forwarded-For подделывается кем
+      # угодно — счётчик неудачных входов должен смотреть на реальный адрес.
+      AUTH_TRUST_PROXY: "0"
+
+      # Предпросмотр игр. Внутри контейнера vite слушает 0.0.0.0, а браузеру
+      # отдаётся адрес самой машины: «localhost» в браузере пользователя — это
+      # его собственный компьютер, а не мини-ПК. PREVIEW_HOST задаётся в .env
+      # (10.8.1.9 после поднятия туннеля, до него — 192.168.1.194).
+      PREVIEW_BIND: "0.0.0.0"
+      PREVIEW_HOST: ${PREVIEW_HOST:-192.168.1.194}
+      PREVIEW_PORT_MIN: "5100"
+      PREVIEW_PORT_MAX: "5109"
+
+    ports:
+      - "${SITE_PORT:-7860}:7860"
+      # Диапазон под dev-серверы игр. Десять одновременных предпросмотров —
+      # с запасом; каждый опубликованный порт это ещё один docker-proxy, шире
+      # брать смысла нет.
+      - "5100-5109:5100-5109"
+
+    volumes:
+      # workspace/ и output/ лежат в самом репозитории (правило репозитория:
+      # игры едут в git вместе с кодом). Поэтому это bind-монты в рабочую
+      # копию, а не именованные тома: то, что нагенерила фабрика, сразу видно
+      # git-у и уезжает коммитом.
+      - ./workspace:/app/workspace
+      - ./output:/app/output
+      - ./zip_projects:/app/zip_projects
+
+      # Домашний каталог: авторизация всех шести агентов (~/.claude.json,
+      # ~/.codex, ~/.config/opencode, ~/.gemini, ~/.qwen, ~/.antigravity) и
+      # кэш npm. Логин интерактивный и делается один раз — терять его на
+      # каждом деплое нельзя.
+      - factory-home:/home/factory
+
+      # История расхода и квот. Эти файлы модули providers/ ищут по путям
+      # рядом с кодом, то есть внутри слоя образа; entrypoint уводит их сюда
+      # симлинками. Подробности — в docker/entrypoint.sh.
+      - factory-state:/app/state
+
+    # На мини-ПК 7,5 ГБ, и лимиты двух раннеров организации в сумме уже больше
+    # физической памяти. Фабрике даём фиксированный кусок, чтобы генерация не
+    # утаскивала машину в swap посреди сборки Unity.
+    mem_limit: ${FACTORY_MEM_LIMIT:-3g}
+    cpus: ${FACTORY_CPUS:-2.5}
+    # Агенты и vite плодят процессы пачками; без потолка один зациклившийся
+    # npm способен забить таблицу процессов хоста.
+    pids_limit: 2048
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  runner:
+    build:
+      context: ./docker/runner
+      args:
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
+    image: zavod2-runner:${RUNNER_VERSION:-2.336.0}
+    container_name: zavod2-runner
+    restart: always
+    stop_grace_period: 90s
+    environment:
+      # Регистрация на уровне РЕПОЗИТОРИЯ, а не организации. Это принципиально:
+      # org-раннер доступен всем репозиториям организации, и любой из них смог
+      # бы запускать job'ы на этой машине. Здесь — только Choclate-games/zavod2.
+      GITHUB_REPO: ${GITHUB_REPO:-Choclate-games/zavod2}
+      GITHUB_PAT: ${GITHUB_PAT:?GITHUB_PAT не задан в .env}
+      RUNNER_NAME: ${ZAVOD_RUNNER_NAME:-minipc-zavod2}
+      RUNNER_LABELS: ${ZAVOD_RUNNER_LABELS:-self-hosted,linux,x64,zavod2}
+    volumes:
+      # Единственная связь раннера с внешним миром помимо сети. Job пишет сюда
+      # файл, systemd на хосте это видит и запускает деплой. Ни docker.sock,
+      # ни доступа к рабочей копии.
+      - ./.deploy:/deploy
+    mem_limit: ${ZAVOD_RUNNER_MEM_LIMIT:-2g}
+    cpus: ${ZAVOD_RUNNER_CPUS:-2}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  factory-home:
+  factory-state:

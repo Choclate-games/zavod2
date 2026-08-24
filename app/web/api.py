@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
 from app import sandbox
+from app.web import auth
 from app.web.bus import bus
 from app.web.service import AGENT_KEYS, DEMO_SLUG, service
 
@@ -25,6 +30,127 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="AI Game Factory", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Настройки входа читаются один раз на старте. Если они кривые, AuthError
+# поднимается здесь же и uvicorn не поднимется — лучше не запуститься, чем
+# запуститься открытым наружу.
+AUTH = auth.AuthSettings.from_env()
+
+# Единственные адреса, доступные без входа. Всё остальное — включая /static
+# и весь /api — закрыто. Страница входа самодостаточна и своих ассетов не
+# просит, поэтому дырку под них делать не нужно.
+_PUBLIC_PATHS = frozenset({"/login", "/api/login", "/api/logout", "/healthz", "/favicon.ico"})
+
+
+def _client_ip(request: Request) -> str:
+    """
+    Адрес клиента для счётчика неудачных входов.
+
+    X-Forwarded-For доверяем только когда фабрика заведомо стоит за своим
+    nginx (AUTH_TRUST_PROXY=1). Иначе заголовок подделывается кем угодно и
+    лимит перебора обходится одной строкой.
+    """
+    if os.getenv("AUTH_TRUST_PROXY", "").strip().lower() in ("1", "true", "yes", "on"):
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client else "?"
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """
+    Проверка сессии перед каждым запросом.
+
+    Сделано middleware, а не зависимостью на роутах: роутов уже под сотню, и
+    любой забытый `Depends` — это открытая ручка. Здесь закрыто по умолчанию,
+    а исключения перечислены явно и списком.
+    """
+    if not AUTH.enabled:
+        return await call_next(request)
+
+    path = request.url.path
+    if path in _PUBLIC_PATHS:
+        return await call_next(request)
+
+    token = request.cookies.get(auth.COOKIE_NAME) or ""
+    if token and auth.read_token(token, AUTH.password_hash):
+        return await call_next(request)
+
+    if path.startswith("/api/"):
+        return JSONResponse(
+            {"status": "error", "auth": "required", "message": "Требуется вход."},
+            status_code=401,
+        )
+
+    target = request.url.path
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return RedirectResponse(f"/login?next={quote(target, safe='')}", status_code=302)
+
+
+@app.get("/healthz")
+def healthz() -> Dict[str, Any]:
+    """Проба для Docker HEALTHCHECK. Намеренно ничего не рассказывает о себе."""
+    return {"status": "ok"}
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page() -> HTMLResponse:
+    if not AUTH.enabled:
+        return HTMLResponse('<meta http-equiv="refresh" content="0; url=/">')
+    return HTMLResponse(
+        (STATIC_DIR / "login.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/login")
+async def login(request: Request) -> Response:
+    if not AUTH.enabled:
+        return JSONResponse({"status": "ok"})
+
+    ip = _client_ip(request)
+    wait = auth.attempts.blocked_for(ip)
+    if wait:
+        return JSONResponse(
+            {"status": "error",
+             "message": f"Слишком много попыток. Повторите через {wait // 60 + 1} мин."},
+            status_code=429,
+        )
+
+    payload = await _body(request)
+    username = str(payload.get("username") or "")
+    password = str(payload.get("password") or "")
+
+    if not auth.check_credentials(AUTH, username, password):
+        auth.attempts.fail(ip)
+        return JSONResponse(
+            {"status": "error", "message": "Неверный логин или пароль."},
+            status_code=401,
+        )
+
+    auth.attempts.reset(ip)
+    token = auth.issue_token(AUTH.username, AUTH.password_hash, AUTH.ttl_seconds)
+    response = JSONResponse({"status": "ok"})
+    response.set_cookie(
+        auth.COOKIE_NAME, token,
+        max_age=AUTH.ttl_seconds,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        # Secure не ставим: фабрика отдаётся по http внутри VPN, и с этим
+        # флагом браузер просто не сохранил бы куку.
+        secure=False,
+    )
+    return response
+
+
+@app.post("/api/logout")
+def logout() -> Response:
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    return response
 
 
 # ── Служебное ───────────────────────────────────────────────────────────────
@@ -76,7 +202,11 @@ def play_view() -> HTMLResponse:
 
 @app.get("/api/bootstrap")
 def bootstrap() -> Dict[str, Any]:
-    return service.bootstrap()
+    payload = service.bootstrap()
+    # Кнопка «Выйти» бессмысленна, когда вход выключен (локальный запуск на
+    # 127.0.0.1), поэтому её показывает только этот флаг.
+    payload["auth_enabled"] = AUTH.enabled
+    return payload
 
 
 @app.get("/api/events")

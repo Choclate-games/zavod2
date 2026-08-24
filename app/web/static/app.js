@@ -23,6 +23,14 @@ async function api(path, options = {}) {
     opts.method = opts.method || "POST";
   }
   const res = await fetch(path, opts);
+  // Сессия протухла (или сервер перезапустился со сменённым паролем): уводим
+  // на форму входа с возвратом на текущую страницу. Без этого интерфейс
+  // просто засыпало бы красными «HTTP 401» по всем панелям сразу.
+  if (res.status === 401) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.replace(`/login?next=${next}`);
+    return { status: "error", message: "Требуется вход." };
+  }
   const text = await res.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { status: "error", message: text }; }
@@ -3095,6 +3103,15 @@ function bindCommon() {
     btn.onclick = () => showSettingsTab(btn.dataset.settingsTab);
   });
   if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
+  if ($("btn-logout")) {
+    // Кнопку показываем только когда вход вообще включён: при локальном
+    // запуске на 127.0.0.1 (AUTH_ENABLED=0) выходить не из чего.
+    $("btn-logout").classList.toggle("hidden", !state.boot?.auth_enabled);
+    $("btn-logout").onclick = async () => {
+      await api("/api/logout", { method: "POST" });
+      location.replace("/login");
+    };
+  }
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
   bindStorage();

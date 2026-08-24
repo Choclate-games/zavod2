@@ -1,0 +1,15 @@
+# Следит за файлом-триггером, который трогает job в раннере.
+#
+# Почему так, а не docker.sock в раннере: сокет Docker — это root на хосте, а
+# на этой машине рядом работают раннеры организации. Здесь job может ровно
+# одно — тронуть файл; всё остальное делает systemd от имени oem.
+
+[Unit]
+Description=Zavod2: следить за триггером деплоя
+
+[Path]
+PathModified=/opt/zavod2/.deploy/trigger
+Unit=zavod2-deploy.service
+
+[Install]
+WantedBy=multi-user.target

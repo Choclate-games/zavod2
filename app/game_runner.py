@@ -75,6 +75,27 @@ def _dev_script(project_dir: Path) -> Optional[tuple]:
     return None
 
 
+# ── Где живёт предпросмотр игры ─────────────────────────────────────────────
+# По умолчанию всё как было: dev-сервер слушает localhost, браузер туда же и
+# идёт — фабрика и браузер на одной машине.
+#
+# Когда фабрика уезжает на сервер (мини-ПК, контейнер), это перестаёт работать:
+# «localhost» в браузере — это машина пользователя, а не та, где поднялся vite.
+# Поэтому адрес прослушивания и адрес для браузера разведены, а диапазон портов
+# можно сузить — контейнер умеет публиковать только заранее заданные порты.
+PREVIEW_BIND = os.getenv("PREVIEW_BIND", "localhost")
+PREVIEW_HOST = os.getenv("PREVIEW_HOST", "localhost")
+
+
+def _preview_range() -> Optional[tuple]:
+    try:
+        low = int(os.getenv("PREVIEW_PORT_MIN", "0") or 0)
+        high = int(os.getenv("PREVIEW_PORT_MAX", "0") or 0)
+    except ValueError:
+        return None
+    return (low, high) if low and high and high >= low else None
+
+
 def _free_port(avoid: Optional[int] = None) -> int:
     """
     Свободный порт от ОС: два проекта подряд не должны драться за 3000/5173.
@@ -82,8 +103,30 @@ def _free_port(avoid: Optional[int] = None) -> int:
     `avoid` — порт прошлого запуска этой же игры. Новый порт означает новый
     origin, а хранилище браузера (localStorage, IndexedDB, cookies) привязано
     к origin вместе с портом: игра стартует с нулевым прогрессом.
+
+    Если задан PREVIEW_PORT_MIN/MAX, порт берём только из этого диапазона:
+    в контейнере наружу опубликован именно он, и порт вне диапазона снаружи
+    просто не откроется.
     """
     import socket
+
+    window = _preview_range()
+    if window:
+        low, high = window
+        taken = {avoid} if avoid else set()
+        for candidate in range(low, high + 1):
+            if candidate in taken:
+                continue
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    sock.bind(("", candidate))
+                except OSError:
+                    continue
+            return candidate
+        # Диапазон занят целиком — лучше отдать занятый порт и получить внятную
+        # ошибку от vite, чем молча уехать на порт, которого нет снаружи.
+        return low
 
     for _ in range(12):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -130,10 +173,18 @@ def purge_caches(project_dir: Path, on_log: Optional[LogFn] = None) -> list[str]
 
 
 def _normalize_url(url: str) -> str:
-    """`0.0.0.0` и `[::]` в выводе Vite нельзя открыть в браузере — это localhost."""
-    return (url.replace("http://0.0.0.0", "http://localhost")
-               .replace("http://[::]", "http://localhost")
-               .replace("http://[::1]", "http://localhost"))
+    """
+    Приводит адрес из вывода Vite к тому, что реально откроется в браузере.
+
+    `0.0.0.0` и `[::]` открыть нельзя — это «слушаю везде», а не адрес. Раньше
+    они просто заменялись на localhost; теперь подставляется PREVIEW_HOST,
+    который при локальном запуске и есть localhost, а на сервере — адрес самой
+    машины с фабрикой.
+    """
+    for wildcard in ("http://0.0.0.0", "http://[::]", "http://[::1]", "http://localhost",
+                     "http://127.0.0.1"):
+        url = url.replace(wildcard, f"http://{PREVIEW_HOST}")
+    return url
 
 
 class DevServer:
@@ -237,12 +288,12 @@ class DevServer:
         if script and "vite" in script[1].lower():
             port = _free_port(avoid=self.avoid_port if self.reset_state else None)
             self.port = port
-            cmd = cmd + ["--", "--host", "localhost", "--port", str(port), "--strictPort"]
+            cmd = cmd + ["--", "--host", PREVIEW_BIND, "--port", str(port), "--strictPort"]
             # --force заставляет Vite пересобрать пре-бандл зависимостей вместо
             # того, чтобы поверить своему кешу.
             if self.reset_state:
                 cmd.append("--force")
-            self.expected_url = f"http://localhost:{port}/"
+            self.expected_url = f"http://{PREVIEW_HOST}:{port}/"
         else:
             # Не-Vite сборщики (webpack-dev-server, CRA, Next.js и т.п.) чаще
             # всего уважают $PORT — тот же приём, что и для Vite: свободный
@@ -250,7 +301,7 @@ class DevServer:
             port = _free_port(avoid=self.avoid_port if self.reset_state else None)
             self.port = port
             self._port_env = port
-            self.expected_url = f"http://localhost:{port}/"
+            self.expected_url = f"http://{PREVIEW_HOST}:{port}/"
 
         self._tail = []
         self.on_log(f"▶ {' '.join(cmd)}  (cwd: {self.project_dir})\n")

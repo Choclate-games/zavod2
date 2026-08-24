@@ -1,0 +1,17 @@
+# Сам деплой. Запускается только по срабатыванию zavod2-deploy.path.
+
+[Unit]
+Description=Zavod2: пересобрать и перезапустить фабрику
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=oem
+Group=oem
+WorkingDirectory=/opt/zavod2
+ExecStart=/opt/zavod2/docker/deploy.sh
+# Сборка образа с нуля на четырёх ядрах занимает минуты.
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal

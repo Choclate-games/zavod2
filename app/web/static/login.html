@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Вход — AI Game Factory</title>
+<style>
+/* Страница входа намеренно самодостаточна: она не тянет styles.css и app.js.
+   Это единственный документ, который отдаётся до проверки пароля, и чем
+   меньше он про себя рассказывает, тем лучше. */
+:root {
+  --bg: #181816;
+  --bg-panel: #201f1c;
+  --bg-panel-2: #262522;
+  --border: #383632;
+  --border-focus: #cc785c;
+  --accent: #cc785c;
+  --accent-hover: #da876d;
+  --text: #f3eee5;
+  --text-muted: #b0aaa0;
+  --text-dim: #7d776e;
+  --err: #f87171;
+  --err-bg: rgba(248, 113, 113, 0.16);
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 28px 26px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.mark {
+  font-size: 30px;
+  line-height: 1;
+  margin-bottom: 14px;
+}
+h1 {
+  margin: 0 0 4px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sub {
+  margin: 0 0 24px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  transition: border-color 0.15s;
+}
+input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+button {
+  width: 100%;
+  padding: 11px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #181816;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+button:hover:not(:disabled) { background: var(--accent-hover); }
+button:disabled { opacity: 0.6; cursor: default; }
+.error {
+  display: none;
+  margin: 0 0 16px;
+  padding: 9px 12px;
+  background: var(--err-bg);
+  border-radius: 8px;
+  color: var(--err);
+  font-size: 13px;
+}
+.error.show { display: block; }
+.foot {
+  margin: 20px 0 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark">🎮</div>
+    <h1>AI Game Factory</h1>
+    <p class="sub">Введите пароль, чтобы продолжить</p>
+
+    <p class="error" id="error"></p>
+
+    <form id="form" autocomplete="on">
+      <label for="username">Логин</label>
+      <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+
+      <button type="submit" id="submit">Войти</button>
+    </form>
+
+    <p class="foot">Доступ только из VPN</p>
+  </main>
+
+<script>
+(function () {
+  const form = document.getElementById("form");
+  const errorBox = document.getElementById("error");
+  const submit = document.getElementById("submit");
+
+  // Куда вернуть после входа. Берём только путь и только свой — иначе
+  // ?next=//чужой.сайт превращает форму входа в открытый редирект.
+  function safeNext() {
+    const raw = new URLSearchParams(location.search).get("next") || "/";
+    return (raw.startsWith("/") && !raw.startsWith("//")) ? raw : "/";
+  }
+
+  function fail(message) {
+    errorBox.textContent = message;
+    errorBox.classList.add("show");
+    submit.disabled = false;
+    submit.textContent = "Войти";
+    document.getElementById("password").select();
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorBox.classList.remove("show");
+    submit.disabled = true;
+    submit.textContent = "Проверяем…";
+
+    let response;
+    try {
+      response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: document.getElementById("username").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+    } catch (err) {
+      fail("Сервер не ответил. Проверьте, что VPN поднят.");
+      return;
+    }
+
+    let data = {};
+    try { data = await response.json(); } catch (err) { /* пустой ответ — ниже */ }
+
+    if (response.ok && data.status === "ok") {
+      location.replace(safeNext());
+      return;
+    }
+    fail(data.message || "Не удалось войти.");
+  });
+})();
+</script>
+</body>
+</html>

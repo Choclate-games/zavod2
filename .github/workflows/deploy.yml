@@ -1,0 +1,85 @@
+# Автообновление фабрики на мини-ПК.
+#
+# ВАЖНО про триггеры. Репозиторий публичный, а раннер self-hosted и стоит на
+# домашней машине. Поэтому здесь НЕТ и не должно появиться `pull_request`:
+# иначе любой человек с форком присылает PR и выполняет свой код на мини-ПК.
+# `push` в main умеет делать только тот, у кого есть доступ на запись, и с
+# форков он не срабатывает — это единственный безопасный триггер для такой
+# схемы.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    # Сгенерированные игры едут в git вместе с кодом (правило репозитория),
+    # то есть коммит очередной игры — это тоже push в main. Пересобирать и
+    # перезапускать контейнер посреди работы фабрики из-за этого не надо.
+    paths-ignore:
+      - 'workspace/**'
+      - 'output/**'
+      - 'zip_projects/**'
+      - 'knowledge_archive/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+# Быстрые пуши подряд не должны запускать два деплоя внахлёст. Отменять
+# начатый не даём: он уже мог дойти до docker build.
+concurrency:
+  group: zavod2-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, zavod2]
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Тесты
+        # AUTH_ENABLED=0 — тестам не нужен пароль; в контейнере фабрики он
+        # всё равно принудительно включён из compose.yml.
+        env:
+          AUTH_ENABLED: '0'
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip --quiet
+          pip install --quiet -r requirements.txt pytest
+          python -m pytest -q -p no:cacheprovider
+
+      - name: Проверка входа
+        # Отдельным шагом и намеренно: если вход сломан, деплой должен встать
+        # здесь, а не после того, как открытая наружу фабрика уже поднялась.
+        run: |
+          . .venv/bin/activate
+          python - <<'PY'
+          import os
+          from app.web import auth
+
+          h = auth.hash_password('deploy-selfcheck-password')
+          assert auth.verify_password('deploy-selfcheck-password', h)
+          assert not auth.verify_password('wrong', h)
+          assert auth.read_token(auth.issue_token('admin', h, 60), h) == 'admin'
+          assert auth.read_token(auth.issue_token('admin', h, -1), h) is None
+
+          # Главное: с AUTH_ENABLED=1 и пустым хешем сервер обязан отказаться
+          # подниматься, а не встать открытым.
+          os.environ['AUTH_ENABLED'] = '1'
+          os.environ['AUTH_PASSWORD_HASH'] = ''
+          try:
+              auth.AuthSettings.from_env()
+          except auth.AuthError:
+              print('ok: без пароля сервер не поднимется')
+          else:
+              raise SystemExit('ПРОВАЛ: пустой AUTH_PASSWORD_HASH прошёл проверку')
+          PY
+
+      - name: Триггер деплоя
+        # Единственное, что job делает с хостом. Дальше systemd-юнит
+        # zavod2-deploy.path видит запись и запускает docker/deploy.sh уже вне
+        # раннера — поэтому /var/run/docker.sock раннеру не нужен.
+        run: |
+          mkdir -p /deploy
+          printf '%s %s\n' "$GITHUB_SHA" "$(date -Is)" > /deploy/trigger
+          echo "Деплой запрошен для $GITHUB_SHA"
