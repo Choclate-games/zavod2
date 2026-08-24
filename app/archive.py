@@ -225,6 +225,37 @@ def _iter_files(root: Path):
                 yield path
 
 
+def _copy_to_database(slug: str, target: Path, files: int, log: LogFn) -> None:
+    """
+    Копия упакованной игры в MySQL.
+
+    Импорт внутри функции, а не в шапке модуля: `app/builds.py` тянет за собой
+    `app/db.py` и pymysql, а упаковка обязана работать и там, где базы нет
+    вовсе — на рабочем ПК, в тестах, при отключённом MYSQL_ENABLED.
+
+    Ошибку сюда не пускаем ни при каких условиях: игра уже упакована и лежит
+    на диске, и недоступность хостинга не повод считать уборку в архив
+    неудавшейся.
+    """
+    try:
+        from app import builds
+
+        builds.store_cold(slug, target, files=files, on_log=log)
+    except Exception as exc:
+        log(f"⚠️ {slug}: копию архива в базу положить не вышло — {exc}\n")
+
+
+def _forget_in_database(slug: str, log: LogFn) -> None:
+    """Снимает копию с игры, вернувшейся из архива."""
+    try:
+        from app import builds
+
+        if builds.drop_cold(slug):
+            log(f"☁️ {slug}: копия архива из базы убрана — игра снова на диске.\n")
+    except Exception:
+        pass
+
+
 def pack(slug: str, on_log: Optional[LogFn] = None, *, remove_source: bool = True) -> Dict:
     """
     Пакует проект в zip и (по умолчанию) удаляет распакованный каталог.
@@ -288,6 +319,7 @@ def pack(slug: str, on_log: Optional[LogFn] = None, *, remove_source: bool = Tru
 
         log(f"🗜 {slug}: упакован — файлов {files}, "
             f"{raw / 1048576:.1f} → {packed / 1048576:.1f} МБ.\n")
+        _copy_to_database(slug, target, files, log)
         return {"status": "success", "archived": True, "files": files,
                 "packed_bytes": packed, "raw_bytes": raw,
                 "message": f"Упакован: {raw / 1048576:.1f} → {packed / 1048576:.1f} МБ"}
@@ -331,6 +363,10 @@ def unpack(slug: str, on_log: Optional[LogFn] = None, *, keep_archive: bool = Fa
         staging.replace(folder)
         if not keep_archive:
             source.unlink(missing_ok=True)
+            # Копия в базе относилась к упакованному состоянию. Игра снова
+            # на диске и её вот-вот начнут править агенты — слепок под
+            # видом резервной копии хуже, чем отсутствие копии.
+            _forget_in_database(slug, log)
         touch(slug)
         log(f"📂 {slug}: распакован из архива.\n")
         return folder

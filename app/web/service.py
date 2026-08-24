@@ -3018,7 +3018,7 @@ class FactoryService:
         entry = builds.find(build_id)
         name = entry["filename"] if entry else ""
         if entry:
-            path = builds.builds_dir() / entry["filename"]
+            path = builds._file_for(entry["kind"], entry["filename"])
             if path.is_file():
                 return path, None, name
         data = builds.blob(build_id)

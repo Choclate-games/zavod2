@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app import builds, db, project_meta, sysinfo
+from app import archive, builds, db, pkgstore, project_meta, sysinfo
 from app.web import auth
 
 
@@ -286,3 +286,135 @@ def test_dead_database_does_not_stall_every_call(monkeypatch):
     db.reconfigure()
     assert db.available() is False
     assert len(calls) == 2
+
+
+# ── Что попадает в базу, а что нет ──────────────────────────────────────────
+
+def test_run_archives_stay_on_disk(game: Path, tmp_path: Path, monkeypatch):
+    """
+    Архив после прогона в базу не едет — по умолчанию.
+
+    Игра в этот момент лежит рядом на диске целиком, и копия не защищает ни от
+    чего, а таких архивов за ночь автономной работы набегают десятки.
+    """
+    monkeypatch.delenv("BUILD_ZIP_TO_DB", raising=False)
+    assert builds.to_db() is False
+
+
+def test_archived_game_goes_to_database(game: Path, tmp_path: Path, monkeypatch):
+    """
+    Упаковка игры в холодное хранилище кладёт копию в базу.
+
+    Вот здесь копия имеет смысл: каталог игры удалён, zip остался единственным
+    экземпляром.
+    """
+    calls = []
+    monkeypatch.setattr(builds, "store_cold",
+                        lambda slug, path, files=0, on_log=None: calls.append((slug, path, files)))
+
+    root = tmp_path / "ws"
+    (root / "cold-game" / "src").mkdir(parents=True)
+    (root / "cold-game" / "src" / "main.ts").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(archive, "project_dir", lambda slug: root / slug)
+    monkeypatch.setattr(archive, "archives_dir", lambda: tmp_path / "cold")
+    (tmp_path / "cold").mkdir()
+
+    result = archive.pack("cold-game")
+    assert result["archived"] is True
+    assert len(calls) == 1, "упаковка не позвала копирование в базу"
+    assert calls[0][0] == "cold-game"
+    assert calls[0][1].name == "cold-game.zip"
+
+
+def test_unpacking_removes_the_database_copy(tmp_path: Path, monkeypatch):
+    """
+    Возврат игры из архива копию убирает.
+
+    Копия относилась к упакованному состоянию. Игра снова на диске и её вот-вот
+    начнут править агенты — слепок под видом резервной копии хуже, чем её
+    отсутствие.
+    """
+    dropped = []
+    monkeypatch.setattr(builds, "drop_cold", lambda slug: dropped.append(slug) or 1)
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    cold = tmp_path / "cold"
+    cold.mkdir()
+    monkeypatch.setattr(archive, "project_dir", lambda slug: root / slug)
+    monkeypatch.setattr(archive, "archives_dir", lambda: cold)
+    monkeypatch.setattr(archive, "touch", lambda slug: None)
+
+    import zipfile
+    with zipfile.ZipFile(cold / "warm-game.zip", "w") as zf:
+        zf.writestr("src/main.ts", "console.log(1)")
+
+    archive.unpack("warm-game")
+    assert dropped == ["warm-game"]
+
+
+def test_cold_archive_is_looked_for_in_the_right_place(tmp_path: Path, monkeypatch):
+    """
+    Файл холодной записи ищется в каталоге упакованных игр, а не в builds/.
+
+    Иначе список показывал бы упакованную игру как «файла нет» — при том, что
+    файл на месте и именно он и есть игра.
+    """
+    monkeypatch.setattr(builds, "builds_dir", lambda: tmp_path / "builds")
+    (tmp_path / "builds").mkdir()
+    assert builds._file_for("cold", "g.zip").parent == builds.config.archive_dir
+    assert builds._file_for("export", "g.zip").parent == tmp_path / "builds"
+
+
+# ── pnpm ────────────────────────────────────────────────────────────────────
+
+def test_broken_pnpm_falls_back_to_npm(tmp_path: Path, monkeypatch):
+    """
+    Неработающий pnpm в сторе не должен ронять сборку игр.
+
+    pnpm ставится как `pnpm@latest` и живёт в сторе вечно, а требования к
+    версии Node у него растут. Когда установленный pnpm перестаёт
+    запускаться, каждый `npm install` сгенерированной игры падает: привычные
+    команды заворачиваются в pnpm через shim. Правильное поведение — вернуть
+    None и дать вызывающему уйти на обычный npm.
+    """
+    fake = tmp_path / "pnpm"
+    fake.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(pkgstore.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pkgstore, "_local_pnpm", lambda: fake)
+    pkgstore._pnpm_health.clear()
+
+    class Broken:
+        returncode = 1
+
+    monkeypatch.setattr(pkgstore.subprocess, "run", lambda *a, **k: Broken())
+    assert pkgstore.find_pnpm() is None
+
+    class Fine:
+        returncode = 0
+
+    pkgstore._pnpm_health.clear()
+    monkeypatch.setattr(pkgstore.subprocess, "run", lambda *a, **k: Fine())
+    assert pkgstore.find_pnpm() == fake
+
+
+def test_pnpm_health_is_checked_once(tmp_path: Path, monkeypatch):
+    """Проверка кешируется: find_pnpm зовётся на каждый запуск игры."""
+    fake = tmp_path / "pnpm"
+    fake.write_text("", encoding="utf-8")
+    monkeypatch.setattr(pkgstore.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pkgstore, "_local_pnpm", lambda: fake)
+    pkgstore._pnpm_health.clear()
+
+    runs = []
+
+    class Fine:
+        returncode = 0
+
+    monkeypatch.setattr(pkgstore.subprocess, "run",
+                        lambda *a, **k: (runs.append(1), Fine())[1])
+    pkgstore.find_pnpm()
+    pkgstore.find_pnpm()
+    pkgstore.find_pnpm()
+    assert len(runs) == 1

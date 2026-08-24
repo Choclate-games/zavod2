@@ -3286,7 +3286,8 @@ async function loadBuilds() {
   const data = await api("/api/builds?limit=60");
   const stats = data.stats || {};
   $("builds-stats").textContent = stats.enabled
-    ? `на диске: ${stats.files} · ${mb(stats.size)} · в базе: ${stats.in_db} (${mb(stats.db_size)}) · ` +
+    ? `после прогонов: ${stats.files} · ${mb(stats.size)} · ` +
+      `в базе (архивные игры): ${stats.in_db} · ${mb(stats.db_size)} · ` +
       `хранится последних: ${stats.keep || "все"}`
     : "автоархивы выключены (BUILD_ZIP_ENABLED=0)";
 
@@ -3298,8 +3299,14 @@ async function loadBuilds() {
   }
   rows.forEach((item) => {
     const row = el("div", "storage-row");
-    const where = item.stored ? "💾 база + диск" : (item.on_disk ? "💽 диск" : "⚠️ только запись");
-    const origin = item.reason ? ` · ${esc(item.reason)}` : "";
+    // Холодный архив — это сама игра, убранная с диска, а не слепок после
+    // прогона. Путать их в одном списке нельзя: у первого удаление записи не
+    // должно выглядеть как «удалить игру».
+    const cold = item.kind === "cold";
+    const where = cold
+      ? (item.stored ? "❄ в архиве · копия в базе" : "❄ в архиве · только файл")
+      : (item.stored ? "💾 база + диск" : (item.on_disk ? "💽 диск" : "⚠️ файла нет"));
+    const origin = item.reason && !cold ? ` · ${esc(item.reason)}` : "";
     row.appendChild(el("span", "storage-slug",
       `${esc(item.slug)}<span class="small dim"> — ${esc(item.created_at)}${origin} · ` +
       `${mb(item.size)}${item.files ? ` · ${item.files} файлов` : ""} · ${where}</span>`));
@@ -3310,7 +3317,9 @@ async function loadBuilds() {
       dl.href = `/api/builds/${item.id}/download`;
       actions.appendChild(dl);
       const del = el("button", "btn small danger", "🗑");
-      del.title = "Удалить архив с диска и из базы";
+      del.title = cold
+        ? "Убрать копию из базы (сама игра в архиве останется)"
+        : "Удалить архив с диска и из базы";
       del.onclick = async () => {
         del.disabled = true;
         const res = await api(`/api/builds/${item.id}`, { method: "DELETE" });

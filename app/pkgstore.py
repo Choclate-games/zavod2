@@ -89,12 +89,51 @@ def _local_pnpm() -> Optional[Path]:
     return None
 
 
+# Результат проверки работоспособности pnpm: путь → живой ли он. Кеш на
+# процесс, потому что find_pnpm зовётся на каждый запуск игры, а поднимать
+# ради этого внешний процесс каждый раз — лишние сотни миллисекунд.
+_pnpm_health: dict = {}
+
+
+def _pnpm_works(path: Path) -> bool:
+    """
+    Запускается ли этот pnpm вообще.
+
+    Проверка появилась не от любви к перестраховке. pnpm ставится в стор как
+    `pnpm@latest` и остаётся там навсегда, а требования к версии Node у него
+    растут: pnpm 10 требует Node >= 22.13 и импортирует `node:sqlite`. Стоит
+    Node отстать — и `pnpm --version` падает с ERR_UNKNOWN_BUILTIN_MODULE, а
+    вместе с ним падает КАЖДЫЙ `npm install` сгенерированной игры: привычные
+    команды заворачиваются в pnpm через shim. Отката при этом не было —
+    фабрика откатывалась на npm, только если pnpm не удалось установить, а не
+    если установленный не работает.
+    """
+    key = str(path)
+    if key in _pnpm_health:
+        return _pnpm_health[key]
+    try:
+        proc = subprocess.run(
+            [str(path), "--version"],
+            capture_output=True, text=True, timeout=30,
+            encoding="utf-8", errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        ok = proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    _pnpm_health[key] = ok
+    return ok
+
+
 def find_pnpm() -> Optional[Path]:
-    """Готовый pnpm: сначала системный, затем свой. Без установки."""
+    """Готовый и работающий pnpm: сначала системный, затем свой."""
     system = shutil.which("pnpm")
-    if system:
+    if system and _pnpm_works(Path(system)):
         return Path(system)
-    return _local_pnpm()
+    local = _local_pnpm()
+    if local and _pnpm_works(local):
+        return local
+    return None
 
 
 def ensure_pnpm(on_log: Optional[LogFn] = None) -> Optional[Path]:
@@ -112,7 +151,15 @@ def ensure_pnpm(on_log: Optional[LogFn] = None) -> Optional[Path]:
         if found:
             return found
 
-        log("📦 Первый запуск: ставлю pnpm в общее хранилище пакетов...\n")
+        broken = _local_pnpm()
+        if broken is not None:
+            # find_pnpm его отверг, значит он есть, но не запускается — обычно
+            # после смены версии Node. Ставим поверх свежий, а отметку о
+            # неработоспособности снимаем: иначе новый унаследует приговор.
+            log("♻️ pnpm в хранилище не запускается — переставляю.\n")
+            _pnpm_health.pop(str(broken), None)
+        else:
+            log("📦 Первый запуск: ставлю pnpm в общее хранилище пакетов...\n")
         target = tooling_dir()
         target.mkdir(parents=True, exist_ok=True)
         # package.json нужен, иначе npm --prefix уползёт искать его вверх по дереву
@@ -142,9 +189,12 @@ def ensure_pnpm(on_log: Optional[LogFn] = None) -> Optional[Path]:
             return None
 
         pnpm = _local_pnpm()
-        if pnpm:
+        if pnpm and _pnpm_works(pnpm):
             log(f"✅ pnpm готов: {pnpm}\n")
-        return pnpm
+            return pnpm
+        if pnpm:
+            log("⚠️ Свежий pnpm тоже не запускается — работаю обычным npm.\n")
+        return None
 
 
 # ---------------------------------------------------------------------------

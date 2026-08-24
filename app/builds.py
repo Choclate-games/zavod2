@@ -18,11 +18,20 @@
 снимков отката, и он бывает больше самой игры в разы. Архив игры — это игра,
 а не история правок к ней.
 
-**Содержимое уезжает в MySQL кусками по мегабайту.** Не одним BLOB: пакет
-крупнее `max_allowed_packet` сервер не отвергает с ошибкой, а рвёт
-соединение, и на шаред-хостинге этот предел чужой. Кусок в мегабайт проходит
-везде. Файл при этом всё равно остаётся на диске — база тут вторая копия и
-способ забрать игру с другой машины, а не единственное место хранения.
+**В базу уезжает не всё.** Архив после прогона остаётся файлом на диске, в
+базе от него только строчка в журнале. Копия содержимого там не защищала бы
+ни от чего: игра в этот момент лежит рядом, распакованная и целая, а таких
+архивов за ночь автономной работы набегают десятки.
+
+Копия появляется, когда игра **отправлена в архив** — упакована в холодное
+хранилище и удалена с диска. Вот тогда zip остаётся единственным экземпляром,
+и вторая копия в базе — настоящая страховка, а заодно способ забрать игру с
+другой машины. Возврат игры из архива копию убирает: держать её в базе после
+того, как игра снова развёрнута на диске, значит хранить заведомо устаревшее.
+
+**Содержимое режется на куски по мегабайту.** Не одним BLOB: пакет крупнее
+`max_allowed_packet` сервер не отвергает с ошибкой, а рвёт соединение, и на
+шаред-хостинге этот предел чужой. Кусок в мегабайт проходит везде.
 """
 
 from __future__ import annotations
@@ -37,7 +46,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from app import db
-from app.config import BASE_DIR
+from app.config import BASE_DIR, config
 
 LogFn = Callable[[str], None]
 
@@ -77,7 +86,32 @@ def keep_count() -> int:
 
 
 def to_db() -> bool:
-    return _flag("BUILD_ZIP_TO_DB", True)
+    """
+    Класть ли в базу архивы, снятые после прогона агента.
+
+    По умолчанию нет, и это осознанно. Такой архив снимается после каждого
+    прогона — за ночь автономной работы их набегают десятки, а игра на диске
+    в этот момент лежит целиком, распакованная. Копия в базе не защищает ни от
+    чего: оригинал прямо тут же. Смысл появляется, когда игра уезжает в
+    холодное хранилище — см. archive_to_db().
+    """
+    return _flag("BUILD_ZIP_TO_DB", False)
+
+
+def archive_to_db() -> bool:
+    """
+    Класть ли в базу игру, отправленную в архив.
+
+    Вот это как раз имеет смысл. Упакованная игра существует на мини-ПК в
+    единственном экземпляре — каталог удалён, остался один zip. Копия в базе
+    и есть страховка, и она же позволяет забрать игру с другой машины.
+    """
+    return _flag("ARCHIVE_TO_DB", True)
+
+
+def archive_db_limit_bytes() -> int:
+    """Потолок для холодного архива. Отдельный: игра целиком крупнее экспорта."""
+    return max(0, _int("ARCHIVE_DB_MAX_MB", 128)) * 1024 * 1024
 
 
 def db_limit_bytes() -> int:
@@ -199,7 +233,7 @@ def _upload_blob(build_id: int, path: Path) -> int:
 
 def record(slug: str, info: Dict[str, Any], *, kind: str = "export",
            reason: str = "", agent: str = "", job_id: str = "",
-           note: str = "") -> Optional[int]:
+           note: str = "", force_blob: bool = False) -> Optional[int]:
     """Заносит архив в базу. None — базы нет, файл просто остался на диске."""
     if not db.available():
         return None
@@ -219,8 +253,9 @@ def record(slug: str, info: Dict[str, Any], *, kind: str = "export",
     except Exception:
         return None
 
-    limit = db_limit_bytes()
-    if to_db() and limit and int(info["size"]) <= limit:
+    limit = archive_db_limit_bytes() if force_blob else db_limit_bytes()
+    wanted = force_blob or to_db()
+    if wanted and limit and int(info["size"]) <= limit:
         chunks = _upload_blob(int(build_id), path)
         if chunks:
             try:
@@ -232,6 +267,19 @@ def record(slug: str, info: Dict[str, Any], *, kind: str = "export",
             except Exception:
                 pass
     return int(build_id)
+
+
+def _file_for(kind: str, filename: str) -> Path:
+    """
+    Где на диске лежит файл записи.
+
+    Холодные архивы — не в `builds/`, а в каталоге упакованных игр: их пишет
+    `app/archive.py`, и туда же за ними ходит распаковка. Без этой развилки
+    список показывал бы упакованную игру как «файла нет».
+    """
+    if kind == "cold":
+        return config.archive_dir / filename
+    return builds_dir() / filename
 
 
 def _row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -251,7 +299,8 @@ def _row(row: Dict[str, Any]) -> Dict[str, Any]:
         "note": str(row.get("note") or ""),
         "created_at": created.isoformat(sep=" ", timespec="seconds")
         if hasattr(created, "isoformat") else str(created or ""),
-        "on_disk": (builds_dir() / str(row.get("filename") or "")).is_file(),
+        "on_disk": _file_for(str(row.get("kind") or ""),
+                             str(row.get("filename") or "")).is_file(),
     }
 
 
@@ -347,12 +396,15 @@ def delete(build_id: int) -> bool:
     """Убирает архив и из базы, и с диска. Куски уходят по каскаду."""
     entry = find(build_id)
     if entry:
-        path = builds_dir() / entry["filename"]
-        try:
-            if path.is_file():
-                path.unlink()
-        except OSError:
-            pass
+        # Холодный архив с диска НЕ трогаем: это сама игра, а не её слепок.
+        # Удаление записи из журнала не должно стирать игру.
+        if entry["kind"] != "cold":
+            path = _file_for(entry["kind"], entry["filename"])
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError:
+                pass
     if not db.available():
         return False
     try:
@@ -452,6 +504,91 @@ def capture(slug: str, sources: List[Path], *, reason: str = "",
     }
 
 
+def store_cold(slug: str, path: Path, *, files: int = 0,
+               on_log: Optional[LogFn] = None) -> Optional[int]:
+    """
+    Кладёт в базу игру, уехавшую в холодное хранилище.
+
+    Вызывается из `app/archive.py` сразу после успешной упаковки. Ошибки не
+    выпускаются наружу: игра уже упакована и лежит на диске, а недоступность
+    хостинга не повод считать уборку в архив неудавшейся.
+    """
+    def log(message: str) -> None:
+        if on_log:
+            try:
+                on_log(message)
+            except Exception:
+                pass
+
+    if not archive_to_db() or not db.available():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+
+    limit = archive_db_limit_bytes()
+    if limit and size > limit:
+        log(f"ℹ️ {slug}: архив {size / 1048576:.1f} МБ крупнее лимита "
+            f"{limit // 1048576} МБ — в базу не поеду, файл на диске.\n")
+        return None
+
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError:
+        return None
+
+    # Прежняя копия этой же игры больше не нужна: архив перезаписан целиком.
+    drop_cold(slug)
+
+    info = {"path": path, "files": files, "size": size, "sha256": digest.hexdigest()}
+    build_id = record(slug, info, kind="cold", reason="archive",
+                      note="игра в холодном хранилище", force_blob=True)
+    if build_id:
+        log(f"☁️ {slug}: копия архива уехала в базу ({size / 1048576:.1f} МБ).\n")
+    else:
+        log(f"⚠️ {slug}: копию архива в базу положить не вышло, файл на диске.\n")
+    return build_id
+
+
+def drop_cold(slug: str) -> int:
+    """
+    Убирает из базы копию игры, вернувшейся из архива.
+
+    Копия относилась к упакованному состоянию. После распаковки игра снова
+    живёт на диске и её правят агенты — хранить рядом слепок недельной
+    давности под видом резервной копии хуже, чем не хранить ничего.
+    """
+    if not db.available():
+        return 0
+    try:
+        rows = db.query(
+            "SELECT id FROM builds WHERE slug = %s AND kind = 'cold'", (slug,)
+        )
+        for row in rows:
+            db.execute("DELETE FROM builds WHERE id = %s", (row["id"],))
+        return len(rows)
+    except Exception:
+        return 0
+
+
+def cold_ids() -> Dict[str, int]:
+    """Игры, чья копия лежит в базе: слаг → id записи."""
+    if not db.available():
+        return {}
+    try:
+        rows = db.query(
+            "SELECT slug, MAX(id) AS id FROM builds "
+            "WHERE kind = 'cold' AND in_db = 1 GROUP BY slug"
+        )
+    except Exception:
+        return {}
+    return {str(row["slug"]): int(row["id"]) for row in rows}
+
+
 def stats() -> Dict[str, Any]:
     """Сводка для панели: сколько архивов, сколько занимают, что в базе."""
     total = 0
@@ -483,5 +620,6 @@ def stats() -> Dict[str, Any]:
         "keep": keep_count(),
         "enabled": enabled(),
         "to_db": to_db(),
-        "db_limit_mb": db_limit_bytes() // (1024 * 1024),
+        "archive_to_db": archive_to_db(),
+        "db_limit_mb": archive_db_limit_bytes() // (1024 * 1024),
     }
