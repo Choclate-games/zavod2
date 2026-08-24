@@ -12,6 +12,7 @@
 workspace/
 output/
 zip_projects/
+builds/
 knowledge_archive/
 
 **/node_modules

@@ -121,7 +121,7 @@ function showView(name) {
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
   if (name === "demo") loadDemoState();
   if (name === "settings") { renderSettings(); showSettingsTab(state.settingsTab || "config"); }
-  else stopQuotaTimer();
+  else { stopQuotaTimer(); stopSystemTimer(); }
 }
 
 function showSettingsTab(name) {
@@ -133,7 +133,10 @@ function showSettingsTab(name) {
     b.classList.toggle("active", b.dataset.settingsTab === name));
 
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
-  if (name === "storage") loadStorage();
+  if (name === "storage") { loadStorage(); loadBuilds(); }
+  if (name === "access") loadAccess();
+  if (name === "terminals") loadTerminals();
+  if (name === "system") { loadSystem(); startSystemTimer(); } else stopSystemTimer();
 }
 
 /* ── Markdown ─────────────────────────────────────────────────────────── */
@@ -2199,7 +2202,7 @@ function renderServers() {
 /* ── Квоты ────────────────────────────────────────────────────────────── */
 
 function quotaColor(percent) {
-  if (percent === null || percent === undefined) return "var(--dim)";
+  if (percent === null || percent === undefined) return "var(--text-dim)";
   if (percent <= 10) return "var(--err)";
   if (percent <= 30) return "var(--warn)";
   return "var(--ok)";
@@ -2669,6 +2672,7 @@ function handleEvent(topic, data) {
       if (state.view === "studio") loadGallery();
       if (state.view === "projects") loadProjects();
       if (state.view === "settings" && state.settingsTab === "storage") loadStorage();
+      if (state.view === "settings" && state.settingsTab === "storage") loadBuilds();
       break;
     case "storage.log":
       appendStorageLog(data.line);
@@ -3149,6 +3153,7 @@ async function boot() {
   $("chat-sandbox").textContent = `🔒 Песочница: ${state.boot.settings.sandbox_root}`;
 
   bindCommon();
+  bindSettingsExtras();
   bindStudio();
   bindProjects();
   bindChats();
@@ -3184,5 +3189,467 @@ async function boot() {
   if (state.project && state.view === "projects") selectProject(state.project);
 }
 
-boot();
+/* ── Доступ: пароль и база данных ─────────────────────────────────────── */
 
+async function changePassword() {
+  const current = $("pw-current").value;
+  const next = $("pw-new").value;
+  const repeat = $("pw-repeat").value;
+  const msg = $("pw-msg");
+
+  // Совпадение проверяем здесь: гонять пару на сервер, чтобы услышать
+  // «не совпали», значит зря считать scrypt и зря светить пароль в журнале.
+  if (next !== repeat) {
+    msg.style.color = "var(--err)";
+    msg.textContent = "Новый пароль и повтор не совпадают.";
+    return;
+  }
+  const btn = $("btn-change-password");
+  btn.disabled = true;
+  msg.style.color = "var(--text-dim)";
+  msg.textContent = "Считаю хеш...";
+  const res = await api("/api/settings/password", { body: { current, new: next } });
+  btn.disabled = false;
+  msg.style.color = res.status === "error" ? "var(--err)" : "var(--ok)";
+  msg.textContent = res.message || "";
+  if (res.status !== "error") {
+    $("pw-current").value = "";
+    $("pw-new").value = "";
+    $("pw-repeat").value = "";
+    toast("Доступ", res.message || "Пароль изменён", "ok");
+  }
+}
+
+function renderDatabase(data) {
+  const status = data.status || {};
+  const badge = $("db-status");
+  if (!data.enabled) {
+    badge.style.color = "var(--text-dim)";
+    badge.textContent = "выключено — реестр в JSON";
+  } else if (status.ok) {
+    badge.style.color = "var(--ok)";
+    badge.textContent = `✅ ${status.version || "подключено"} · ${status.latency_ms} мс`;
+  } else {
+    badge.style.color = "var(--err)";
+    badge.textContent = "⚠️ нет связи";
+  }
+
+  $("db-enabled").checked = !!data.enabled;
+  $("db-host").value = data.host || "";
+  $("db-port").value = data.port || 3306;
+  $("db-user").value = data.user || "";
+  $("db-name").value = data.database || "";
+  $("db-password").placeholder = data.has_password
+    ? "пароль задан — оставьте пустым, чтобы не менять"
+    : "пароль не задан";
+
+  const msg = $("db-msg");
+  msg.style.color = status.ok ? "var(--ok)" : "var(--text-dim)";
+  msg.textContent = status.message || "";
+}
+
+async function loadAccess() {
+  const data = await api("/api/settings/database");
+  if (data && !data.message) renderDatabase(data);
+}
+
+async function saveDatabase() {
+  const btn = $("btn-save-db");
+  const msg = $("db-msg");
+  btn.disabled = true;
+  msg.style.color = "var(--text-dim)";
+  msg.textContent = "Проверяю связь...";
+  const body = {
+    enabled: $("db-enabled").checked,
+    host: $("db-host").value.trim(),
+    port: $("db-port").value.trim() || "3306",
+    user: $("db-user").value.trim(),
+    database: $("db-name").value.trim(),
+  };
+  // Пустое поле означает «не трогать»: сервер пароль наружу не отдаёт, и
+  // отправить обратно пустую строку значило бы его стереть.
+  const password = $("db-password").value;
+  if (password) body.password = password;
+
+  const res = await api("/api/settings/database", { body });
+  btn.disabled = false;
+  $("db-password").value = "";
+  if (res.database) renderDatabase(res.database);
+  toast("MySQL", res.message || "Сохранено", res.status === "error" ? "err" : "ok");
+}
+
+/* ── Архивы игр ───────────────────────────────────────────────────────── */
+
+async function loadBuilds() {
+  const box = $("builds-list");
+  if (!box) return;
+  const data = await api("/api/builds?limit=60");
+  const stats = data.stats || {};
+  $("builds-stats").textContent = stats.enabled
+    ? `на диске: ${stats.files} · ${mb(stats.size)} · в базе: ${stats.in_db} (${mb(stats.db_size)}) · ` +
+      `хранится последних: ${stats.keep || "все"}`
+    : "автоархивы выключены (BUILD_ZIP_ENABLED=0)";
+
+  box.innerHTML = "";
+  const rows = data.builds || [];
+  if (!rows.length) {
+    box.appendChild(el("p", "dim", "Архивов пока нет — они появятся после первого прогона агента."));
+    return;
+  }
+  rows.forEach((item) => {
+    const row = el("div", "storage-row");
+    const where = item.stored ? "💾 база + диск" : (item.on_disk ? "💽 диск" : "⚠️ только запись");
+    const origin = item.reason ? ` · ${esc(item.reason)}` : "";
+    row.appendChild(el("span", "storage-slug",
+      `${esc(item.slug)}<span class="small dim"> — ${esc(item.created_at)}${origin} · ` +
+      `${mb(item.size)}${item.files ? ` · ${item.files} файлов` : ""} · ${where}</span>`));
+
+    const actions = el("div", "row");
+    if (item.id) {
+      const dl = el("a", "btn small", "⬇ Скачать");
+      dl.href = `/api/builds/${item.id}/download`;
+      actions.appendChild(dl);
+      const del = el("button", "btn small danger", "🗑");
+      del.title = "Удалить архив с диска и из базы";
+      del.onclick = async () => {
+        del.disabled = true;
+        const res = await api(`/api/builds/${item.id}`, { method: "DELETE" });
+        toast("Архивы", res.message || "Готово", res.status === "error" ? "err" : "ok");
+        loadBuilds();
+      };
+      actions.appendChild(del);
+    } else {
+      actions.appendChild(el("span", "small dim", "нет в базе"));
+    }
+    row.appendChild(actions);
+    box.appendChild(row);
+  });
+}
+
+/* ── Состояние машины ─────────────────────────────────────────────────── */
+
+let systemTimer = null;
+
+function bar(percent, warn = 75, danger = 90) {
+  const value = Math.max(0, Math.min(100, Number(percent) || 0));
+  const kind = value >= danger ? "danger" : (value >= warn ? "warn" : "ok");
+  return `<div class="meter"><i class="${kind}" style="width:${value}%"></i></div>`;
+}
+
+function card(title, value, extra, meter) {
+  return el("div", "system-card",
+    `<div class="system-title">${esc(title)}</div>` +
+    `<div class="system-value">${value}</div>` +
+    (meter || "") +
+    `<div class="small dim">${extra || ""}</div>`);
+}
+
+function human(seconds) {
+  const value = Number(seconds) || 0;
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (days) return `${days} д ${hours} ч`;
+  if (hours) return `${hours} ч ${minutes} мин`;
+  return `${minutes} мин`;
+}
+
+function renderSystem(data) {
+  const cards = $("system-cards");
+  if (!cards) return;
+  if (data.ok === false) {
+    cards.innerHTML = "";
+    cards.appendChild(el("p", "dim", esc(data.message || "Состояние недоступно.")));
+    return;
+  }
+
+  $("system-host").textContent =
+    `${data.host || ""} · ${data.platform || ""} · ` +
+    (data.container ? "в контейнере" : "на хосте") +
+    (data.uptime ? ` · аптайм ${human(data.uptime)}` : "");
+
+  const cpu = data.cpu || {};
+  const mem = data.memory || {};
+  const fac = data.factory || {};
+  cards.innerHTML = "";
+
+  const loadText = cpu.load ? `загрузка ${cpu.load.join(" / ")}` : "";
+  cards.appendChild(card(
+    "Процессор",
+    cpu.percent === null || cpu.percent === undefined ? "—" : `${cpu.percent}%`,
+    `${cpu.cores || "?"} ядер` + (cpu.quota ? ` · потолок контейнера ${cpu.quota}` : "") +
+    (loadText ? ` · ${loadText}` : ""),
+    bar(cpu.percent)));
+
+  // Память показываем дважды и намеренно: у хоста семь гигабайт, у контейнера
+  // три, и «занято 2.9 ГБ» означает в этих двух системах координат совершенно
+  // разное — спокойный вечер против OOM через минуту.
+  cards.appendChild(card(
+    "Память машины",
+    mem.total ? `${mb(mem.used)} из ${mb(mem.total)}` : "—",
+    mem.swap_total ? `swap ${mb(mem.swap_used)} из ${mb(mem.swap_total)}` : "",
+    bar(mem.percent)));
+
+  if (mem.limit) {
+    cards.appendChild(card(
+      "Память фабрики",
+      `${mb(mem.limit_used)} из ${mb(mem.limit)}`,
+      "лимит контейнера — превышение означает OOM",
+      bar(mem.limit_percent, 80, 92)));
+  }
+
+  (data.disks || []).forEach((disk) => {
+    cards.appendChild(card(
+      `Диск · ${disk.label}`,
+      `${mb(disk.free)} свободно`,
+      `${mb(disk.used)} из ${mb(disk.total)} · ${esc(disk.path)}`,
+      bar(disk.percent, 80, 92)));
+  });
+
+  const temps = data.temperatures || [];
+  if (temps.length) {
+    const hottest = temps.reduce((a, b) => (b.value > a.value ? b : a));
+    cards.appendChild(card(
+      "Температура",
+      `${hottest.value} °C`,
+      esc(hottest.label),
+      // Шкала до ста градусов: у процессора мини-ПК троттлинг начинается
+      // около сотни, и рисовать проценты от чего-то другого бессмысленно.
+      bar(hottest.value, 75, 88)));
+  }
+
+  cards.appendChild(card(
+    "Работа фабрики",
+    `${fac.studio_running || 0} + ${fac.chats_running || 0}`,
+    `прогонов студии + задач в чатах · dev-серверов: ${fac.servers || 0} · ` +
+    `терминалов: ${fac.terminals || 0}`,
+    ""));
+
+  const sensors = $("system-sensors");
+  sensors.innerHTML = "";
+  if (!temps.length) {
+    sensors.appendChild(el("p", "dim", "Датчиков температуры не видно."));
+  }
+  temps.forEach((sensor) => {
+    const row = el("div", "storage-row");
+    row.appendChild(el("span", "storage-slug", esc(sensor.label)));
+    row.appendChild(el("span", "small", `${sensor.value} °C`));
+    sensors.appendChild(row);
+  });
+  (data.fans || []).forEach((fan) => {
+    const row = el("div", "storage-row");
+    row.appendChild(el("span", "storage-slug", `${esc(fan.label)} · вентилятор`));
+    row.appendChild(el("span", "small", `${fan.rpm} об/мин`));
+    sensors.appendChild(row);
+  });
+
+  const procs = $("system-processes");
+  procs.innerHTML = "";
+  const rows = data.processes || [];
+  if (!rows.length) {
+    procs.appendChild(el("p", "dim",
+      data.psutil ? "Процессы не читаются." : "Нужен psutil: pip install -r requirements.txt"));
+  }
+  rows.forEach((proc) => {
+    const row = el("div", "storage-row");
+    row.appendChild(el("span", "storage-slug", `${esc(proc.name)} <span class="small dim">#${proc.pid}</span>`));
+    row.appendChild(el("span", "small", `${proc.cpu}% · ${mb(proc.memory)}`));
+    procs.appendChild(row);
+  });
+}
+
+async function loadSystem() {
+  const data = await api("/api/system");
+  renderSystem(data || {});
+}
+
+function startSystemTimer() {
+  stopSystemTimer();
+  // Три секунды: процент загрузки считается как среднее между двумя опросами,
+  // и на более редком интервале короткие всплески просто не видны.
+  systemTimer = setInterval(() => {
+    if (state.view === "settings" && state.settingsTab === "system") loadSystem();
+    else stopSystemTimer();
+  }, 3000);
+}
+
+function stopSystemTimer() {
+  if (systemTimer) { clearInterval(systemTimer); systemTimer = null; }
+}
+
+/* ── Терминалы CLI-агентов ────────────────────────────────────────────── */
+
+const term = { xterm: null, fit: null, socket: null, session: null, hints: {} };
+
+function terminalWrite(text) {
+  if (term.xterm) term.xterm.write(text);
+}
+
+function ensureXterm() {
+  if (term.xterm) return true;
+  if (typeof window.Terminal !== "function") return false;
+  term.xterm = new window.Terminal({
+    fontFamily: "'Cascadia Mono', 'JetBrains Mono', Consolas, monospace",
+    fontSize: 13,
+    cursorBlink: true,
+    convertEol: false,
+    scrollback: 5000,
+    theme: { background: "#0d1117", foreground: "#c9d1d9", cursor: "#58a6ff" },
+  });
+  if (window.FitAddon && window.FitAddon.FitAddon) {
+    term.fit = new window.FitAddon.FitAddon();
+    term.xterm.loadAddon(term.fit);
+  }
+  term.xterm.open($("terminal-host"));
+  term.xterm.onData((data) => {
+    if (term.socket && term.socket.readyState === WebSocket.OPEN) {
+      term.socket.send(JSON.stringify({ type: "input", data }));
+    }
+  });
+  window.addEventListener("resize", () => fitTerminal());
+  return true;
+}
+
+function fitTerminal() {
+  if (!term.fit || !term.xterm) return;
+  try { term.fit.fit(); } catch { return; }
+  if (term.socket && term.socket.readyState === WebSocket.OPEN) {
+    term.socket.send(JSON.stringify({
+      type: "resize", rows: term.xterm.rows, cols: term.xterm.cols,
+    }));
+  }
+}
+
+function connectTerminal(session) {
+  if (term.socket) { try { term.socket.close(); } catch { /* уже закрыт */ } }
+  term.session = session;
+  $("terminal-title").innerHTML =
+    `${esc(session.label || session.key)} — <code>${esc(session.command)}</code>` +
+    (term.hints[session.key] ? ` <span class="dim">· ${esc(term.hints[session.key])}</span>` : "");
+  $("btn-terminal-kill").classList.remove("hidden");
+  $("btn-terminal-clear").classList.remove("hidden");
+
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${scheme}://${location.host}/api/terminals/${session.id}/ws`);
+  term.socket = socket;
+
+  socket.onopen = () => fitTerminal();
+  socket.onmessage = (event) => {
+    let payload;
+    try { payload = JSON.parse(event.data); } catch { return; }
+    if (payload.type === "data") terminalWrite(payload.data);
+    else if (payload.type === "exit") {
+      $("btn-terminal-kill").classList.add("hidden");
+      loadTerminalSessions();
+    }
+  };
+  socket.onclose = (event) => {
+    // 1008 — сервер отказал: либо сессия уже закрыта, либо кука не подошла.
+    // Второе означает, что пароль сменили в другой вкладке.
+    if (event.code === 1008) {
+      terminalWrite("\r\n\x1b[31m— соединение отклонено: сессия закрыта или требуется вход —\x1b[0m\r\n");
+    }
+  };
+}
+
+async function startTerminal(key) {
+  if (!ensureXterm()) {
+    toast("Терминал", "Не загрузился xterm.js — обновите страницу", "err");
+    return;
+  }
+  term.xterm.reset();
+  const res = await api("/api/terminals", {
+    body: { key, rows: term.xterm.rows || 30, cols: term.xterm.cols || 100 },
+  });
+  if (res.status === "error") {
+    toast("Терминал", res.message || "Не удалось открыть", "err");
+    terminalWrite(`\x1b[31m${res.message || "Не удалось открыть терминал"}\x1b[0m\r\n`);
+    return;
+  }
+  connectTerminal(res.session);
+  loadTerminalSessions();
+  term.xterm.focus();
+}
+
+async function loadTerminalSessions() {
+  const data = await api("/api/terminals");
+  const box = $("terminal-sessions");
+  if (!box) return;
+
+  const launchers = $("terminal-launchers");
+  if (launchers && !launchers.childElementCount) {
+    (data.launchers || []).forEach((item) => {
+      term.hints[item.key] = item.hint || "";
+      const btn = el("button", "btn small", esc(item.label));
+      btn.title = item.hint || item.command;
+      btn.onclick = () => startTerminal(item.key);
+      launchers.appendChild(btn);
+    });
+  }
+
+  if (!data.available) {
+    $("terminal-hint").innerHTML =
+      "⚠️ Псевдотерминалов на этой системе нет — панель работает на Linux, " +
+      "то есть на мини-ПК. Локально на Windows пользуйтесь обычной консолью.";
+    (launchers ? Array.from(launchers.children) : []).forEach((b) => (b.disabled = true));
+  }
+
+  box.innerHTML = "";
+  const sessions = data.sessions || [];
+  if (!sessions.length) {
+    box.appendChild(el("p", "dim", "Открытых сессий нет."));
+    return;
+  }
+  sessions.forEach((item) => {
+    const row = el("div", "storage-row");
+    const state_ = item.alive ? "работает" : `завершён (код ${item.exit_code})`;
+    row.appendChild(el("span", "storage-slug",
+      `${esc(item.label)} <span class="small dim">— ${state_} · ${human(item.uptime)} · ` +
+      `зрителей: ${item.viewers}</span>`));
+    const actions = el("div", "row");
+    const attach = el("button", "btn small", "👁 Открыть");
+    attach.onclick = () => {
+      if (ensureXterm()) { term.xterm.reset(); connectTerminal(item); term.xterm.focus(); }
+    };
+    actions.appendChild(attach);
+    const kill = el("button", "btn small danger", "⏹");
+    kill.onclick = async () => {
+      kill.disabled = true;
+      await api(`/api/terminals/${item.id}`, { method: "DELETE" });
+      loadTerminalSessions();
+    };
+    actions.appendChild(kill);
+    row.appendChild(actions);
+    box.appendChild(row);
+  });
+}
+
+function loadTerminals() {
+  ensureXterm();
+  loadTerminalSessions();
+  // Размер считается по видимому контейнеру, а вкладка только что перестала
+  // быть скрытой — без задержки fit намерил бы нулевую ширину.
+  setTimeout(() => fitTerminal(), 60);
+}
+
+function bindSettingsExtras() {
+  const change = $("btn-change-password");
+  if (change) change.onclick = changePassword;
+  const saveDb = $("btn-save-db");
+  if (saveDb) saveDb.onclick = saveDatabase;
+  const refreshBuilds = $("btn-refresh-builds");
+  if (refreshBuilds) refreshBuilds.onclick = loadBuilds;
+
+  const clear = $("btn-terminal-clear");
+  if (clear) clear.onclick = () => term.xterm && term.xterm.clear();
+  const kill = $("btn-terminal-kill");
+  if (kill) {
+    kill.onclick = async () => {
+      if (!term.session) return;
+      await api(`/api/terminals/${term.session.id}`, { method: "DELETE" });
+      loadTerminalSessions();
+    };
+  }
+}
+
+boot();

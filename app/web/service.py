@@ -23,7 +23,7 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import yaml
@@ -35,7 +35,7 @@ import yaml
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 from app import acceptance, chat_store, library, notify, project_meta, sandbox, snapshots, uploads
-from app import archive, gate_stats, pkgstore
+from app import archive, builds, db, gate_stats, pkgstore, sysinfo
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
@@ -743,7 +743,7 @@ class FactoryService:
             self.append_log(f"УСПЕХ! Прогон {session.run_id} доведён до конца: workspace/{game_dir.name}")
             if kind != "full":
                 self.update_progress(100, "✅ Спецификация готова!")
-                bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+                self.studio_done(game_dir.name, job)
                 return
             bus.publish("projects.changed")
             if job.should_stop():
@@ -801,7 +801,7 @@ class FactoryService:
                                               attachments=attachments, title=title)
             self.update_progress(100, "✅ Спецификация готова!")
             self.append_log(f"УСПЕХ! Полный пакет спецификаций создан в workspace/{game_dir.name}")
-            bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+            self.studio_done(game_dir.name, job)
 
         job = self._launch_job(kind="spec", title=self._job_title(prompt), prompt=prompt,
                                provider=provider, mode=mode, body=body)
@@ -880,7 +880,7 @@ class FactoryService:
             + "- **Числа игрока**: " + (report.metrics_line() if report else "—"),
         )
         bus.publish("projects.changed")
-        bus.publish("studio.done", slug=game_dir.name, job_id=job.id)
+        self.studio_done(game_dir.name, job)
 
     def start_full_game(self, opts: Dict[str, Any]) -> Dict[str, Any]:
         """Под ключ: спецификация + кодогенерация терминальным агентом."""
@@ -961,7 +961,7 @@ class FactoryService:
             self.update_progress(100, "✅ Приёмка зелёная" if report.ok
                                  else "⚠️ Приёмка красная")
             bus.publish("projects.changed")
-            bus.publish("studio.done", slug=slug, job_id=job.id)
+            self.studio_done(slug, job)
 
         job = self._launch_job(kind="gate", title=f"Приёмка: {slug}", prompt=slug,
                                provider="", mode="gate", body=body)
@@ -1855,6 +1855,13 @@ class FactoryService:
         bus.publish("chats.changed", slug=job.slug)
         bus.publish("projects.changed")
         bus.publish("quota.changed")
+
+        # Тот же архив, что и после прогона студии. Чат — это тоже работа
+        # агента над игрой, и её результат должен переживать следующий запрос.
+        if job.status == "done":
+            self.capture_build(job.slug, reason="chat",
+                               agent=(stored.agent if stored else "") or "",
+                               job_id=job.session_id)
 
         # Системный тост Windows: он виден, даже когда браузер свёрнут.
         if notify.notifications_enabled():
@@ -2943,6 +2950,150 @@ class FactoryService:
     # =====================================================================
     # Настройки
     # =====================================================================
+
+    # =====================================================================
+    # Архивы игр: снимок после каждого прогона
+    # =====================================================================
+
+    def studio_done(self, slug: str, job: Optional[StudioJob] = None) -> None:
+        """
+        Прогон студии закончился.
+
+        Раньше здесь стоял голый `bus.publish("studio.done", ...)` в четырёх
+        местах. Теперь это одна точка, и в ней же снимается zip игры: любой
+        завершившийся прогон обязан оставить после себя архив, а четыре копии
+        этого правила рано или поздно разъехались бы.
+        """
+        bus.publish("studio.done", slug=slug, job_id=job.id if job else "")
+        reason = f"studio:{job.kind}" if job else "studio"
+        self.capture_build(slug, reason=reason,
+                           agent=(job.provider if job else ""),
+                           job_id=(job.id if job else ""),
+                           on_log=(job.log if job else None))
+
+    def capture_build(self, slug: str, *, reason: str = "", agent: str = "",
+                      job_id: str = "", note: str = "",
+                      on_log=None) -> Optional[Dict[str, Any]]:
+        """
+        Упаковать игру и записать архив. Ошибки гасятся внутри builds.capture.
+
+        Каталог берём напрямую, а не через `live_dir`: тот распаковывает
+        холодные игры, а здесь речь о проекте, с которым агент только что
+        работал — он заведомо на диске. Распаковывать что-то ради архива
+        означало бы будить игру, которую фабрика намеренно усыпила.
+        """
+        try:
+            project = sandbox.project_dir(slug)
+        except sandbox.SandboxViolation:
+            return None
+        if not project.is_dir():
+            return None
+
+        sources = [project]
+        try:
+            docs = sandbox.docs_dir(slug)
+            if docs != project and docs.is_dir():
+                sources.append(docs)
+        except sandbox.SandboxViolation:
+            pass
+
+        result = builds.capture(slug, sources, reason=reason, agent=agent,
+                                job_id=job_id, note=note,
+                                on_log=on_log or self._storage_log)
+        if result:
+            bus.publish("builds.changed", slug=slug)
+        return result
+
+    def builds_payload(self, slug: str = "", limit: int = 50) -> Dict[str, Any]:
+        return {"builds": builds.listing(slug, limit), "stats": builds.stats()}
+
+    def build_download(self, build_id: int) -> Tuple[Optional[Path], Optional[bytes], str]:
+        """
+        Архив для отдачи браузеру: файл с диска либо содержимое из базы.
+
+        Диск проверяется первым — отдать готовый файл дешевле, чем собрать его
+        из кусков через WAN. База нужна для случая, когда фабрику развернули
+        на другой машине и локальных файлов там нет.
+        """
+        entry = builds.find(build_id)
+        name = entry["filename"] if entry else ""
+        if entry:
+            path = builds.builds_dir() / entry["filename"]
+            if path.is_file():
+                return path, None, name
+        data = builds.blob(build_id)
+        if data is not None:
+            return None, data, name
+        return None, None, name
+
+    def delete_build(self, build_id: int) -> Dict[str, Any]:
+        ok = builds.delete(build_id)
+        bus.publish("builds.changed")
+        return {"status": "success" if ok else "error",
+                "message": "Архив удалён." if ok else "Архив не найден в базе."}
+
+    # =====================================================================
+    # Состояние машины
+    # =====================================================================
+
+    def system_payload(self) -> Dict[str, Any]:
+        paths = {
+            "Игры": sandbox.workspace_root(),
+            "Архивы": builds.builds_dir(),
+        }
+        data = sysinfo.snapshot(paths)
+        # Своё хозяйство фабрики: без него цифры хоста не с чем сопоставить.
+        data["factory"] = {
+            "studio_running": self.studio_jobs.running_count(),
+            "chats_running": self.chat_jobs.running_count(),
+            "servers": len([entry for entry in self.play.values()
+                            if (entry.get("server") and entry["server"].is_running)]),
+            "terminals": 0,
+        }
+        return data
+
+    # =====================================================================
+    # База данных
+    # =====================================================================
+
+    def database_payload(self) -> Dict[str, Any]:
+        settings = db.settings
+        return {
+            "enabled": settings.enabled,
+            "host": settings.host,
+            "port": settings.port,
+            "user": settings.user,
+            "database": settings.database,
+            # Пароль наружу не отдаём никогда: панель показывает лишь факт его
+            # наличия, а форма присылает новый, только если его меняли.
+            "has_password": bool(settings.password),
+            "status": db.status(),
+            "registry": project_meta.backend(),
+        }
+
+    def save_database(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Реквизиты MySQL в .env и немедленная проверка связи."""
+        mapping = {
+            "MYSQL_ENABLED": "1" if payload.get("enabled") else "0",
+            "MYSQL_HOST": (payload.get("host") or "").strip(),
+            "MYSQL_PORT": str(payload.get("port") or 3306).strip(),
+            "MYSQL_USER": (payload.get("user") or "").strip(),
+            "MYSQL_DB": (payload.get("database") or "").strip(),
+        }
+        password = payload.get("password")
+        if password:
+            mapping["MYSQL_PASSWORD"] = str(password)
+        for key, value in mapping.items():
+            self.persist_env_value(key, value)
+
+        db.reconfigure()
+        project_meta.invalidate()
+        status = db.status()
+        bus.publish("settings.changed")
+        return {"status": "success" if status.get("ok") or not status.get("enabled")
+                else "error",
+                "database": self.database_payload(),
+                "message": status.get("message", "")}
 
     def settings_payload(self) -> Dict[str, Any]:
         agents = {

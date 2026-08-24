@@ -48,6 +48,10 @@ services:
       # (10.8.1.9 после поднятия туннеля, до него — 192.168.1.194).
       PREVIEW_BIND: "0.0.0.0"
       PREVIEW_HOST: ${PREVIEW_HOST:-192.168.1.194}
+      # Каталог архивов задаём явно: BUILDS_DIR из .env указывает на путь
+      # рабочего ПК, а внутри контейнера смысл имеет только /app/builds.
+      BUILDS_DIR: "/app/builds"
+
       PREVIEW_PORT_MIN: "5100"
       PREVIEW_PORT_MAX: "5109"
 
@@ -66,6 +70,10 @@ services:
       - ./workspace:/app/workspace
       - ./output:/app/output
       - ./zip_projects:/app/zip_projects
+      # Автоархивы игр. Тоже bind-монт, а не том: без него каждый деплой
+      # уносил бы их вместе со старым контейнером — каталог лежал бы
+      # внутри слоя образа. Плюс так их видно с хоста без docker cp.
+      - ./builds:/app/builds
 
       # Домашний каталог: авторизация всех шести агентов (~/.claude.json,
       # ~/.codex, ~/.config/opencode, ~/.gemini, ~/.qwen, ~/.antigravity) и

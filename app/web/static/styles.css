@@ -2035,3 +2035,60 @@ textarea {
 
 /* Приёмка на карточке проекта: зелёная — проверена запуском, красная —
    провалена запуском, серая — не гонялась. Промежуточных состояний нет. */
+
+/* ── Состояние машины ──────────────────────────────────────────────────
+ * Карточки метрик и полоски заполнения. Ширина колонки — 240px: в неё
+ * помещается «2.9 ГБ из 3 ГБ» без переноса, а на мини-ПК таких карточек
+ * шесть-семь, и в две строки они читаются лучше, чем в одну длинную. */
+.system-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.system-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+.system-title {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.system-value {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 4px 0 8px;
+}
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-subtle);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.meter i.ok { background: var(--ok); }
+.meter i.warn { background: var(--warn); }
+.meter i.danger { background: var(--err); }
+
+/* ── Терминал агента ───────────────────────────────────────────────────
+ * Фон задан здесь же, а не только темой xterm: пока шрифты не загрузились,
+ * пустой контейнер иначе светится белым посреди тёмной панели. */
+.terminal-host {
+  height: 460px;
+  margin-top: 10px;
+  padding: 8px;
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.terminal-host .xterm { height: 100%; }

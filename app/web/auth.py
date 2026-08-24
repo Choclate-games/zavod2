@@ -32,6 +32,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 COOKIE_NAME = "zavod2_session"
@@ -193,6 +194,9 @@ class AuthSettings:
     username: str
     password_hash: str
     ttl_seconds: int
+    # Откуда взят действующий хеш: "env" или "mysql". Нужен только
+    # интерфейсу настроек, чтобы честно показать, куда уедет смена пароля.
+    source: str = "env"
 
     @classmethod
     def from_env(cls) -> "AuthSettings":
@@ -244,6 +248,135 @@ def check_credentials(settings: AuthSettings, username: str, password: str) -> b
     user_ok = hmac.compare_digest(username.strip(), settings.username)
     pass_ok = verify_password(password, settings.password_hash)
     return user_ok and pass_ok
+
+
+# ── Пользователь в базе ─────────────────────────────────────────────────────
+#
+# Пароль переехал из .env в таблицу `users` ради одной возможности: менять его
+# из интерфейса. Правка .env — это ssh на мини-ПК и перезапуск контейнера;
+# строка в базе меняется формой в настройках и действует немедленно.
+#
+# .env при этом остаётся аварийным зеркалом, и это не дублирование ради
+# симметрии. База стоит на шаред-хостинге за WAN и бывает недоступна. Если
+# единственная копия хеша лежит там, недоступность базы означает невозможность
+# войти в фабрику — то есть внешний сервис становится точкой отказа для входа
+# на собственную машину. Поэтому хеш пишется в оба места, а читается из базы
+# с откатом на .env.
+
+def _persist_env(key: str, value: str) -> None:
+    """
+    Точечно правит один ключ в .env.
+
+    Свой маленький писатель, а не `service.persist_env_value`, потому что
+    сервис импортирует auth: обратный импорт замкнул бы круг.
+    """
+    from app.config import BASE_DIR
+
+    path = BASE_DIR / ".env"
+    lines: List[str] = []
+    if path.exists():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+    for index, line in enumerate(lines):
+        if line.strip().startswith(f"{key}="):
+            lines[index] = f"{key}={value}"
+            break
+    else:
+        lines.append(f"{key}={value}")
+    try:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    os.environ[key] = value
+
+
+def db_load_user(username: str) -> Optional[str]:
+    """Хеш пароля из базы. None — базы нет или пользователь в ней не заведён."""
+    from app import db
+
+    if not db.available():
+        return None
+    try:
+        row = db.query_one(
+            "SELECT password_hash FROM users WHERE username = %s", (username,)
+        )
+    except Exception:
+        return None
+    if not row:
+        return None
+    stored = str(row.get("password_hash") or "").strip()
+    return stored or None
+
+
+def db_store_user(username: str, password_hash: str) -> bool:
+    from app import db
+
+    if not db.available():
+        return False
+    try:
+        db.execute(
+            "INSERT INTO users (username, password_hash, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), "
+            "updated_at = VALUES(updated_at)",
+            # Часы фабрики, а не сервера базы: он в другом часовом поясе.
+            (username[:64], password_hash[:255], datetime.now(), datetime.now()),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def load_settings() -> AuthSettings:
+    """
+    Настройки входа: .env как основа, база как источник актуального пароля.
+
+    Если пользователя в базе ещё нет, а в .env хеш есть — заводим его там же.
+    Так первый запуск с включённым MySQL переносит текущий пароль сам, без
+    отдельной команды миграции.
+    """
+    settings = AuthSettings.from_env()
+    if not settings.enabled:
+        return settings
+    stored = db_load_user(settings.username)
+    if stored:
+        settings.password_hash = stored
+        settings.source = "mysql"
+    elif settings.password_hash and db_store_user(settings.username, settings.password_hash):
+        settings.source = "mysql"
+    return settings
+
+
+def change_password(settings: AuthSettings, current: str, new: str) -> Tuple[bool, str]:
+    """
+    Смена пароля. Меняет `settings` на месте — объект живёт в app/web/api.py и
+    его же читает middleware на каждом запросе.
+
+    Все выданные куки после этого перестают приниматься: ключ подписи выводится
+    из хеша пароля. Это ровно то поведение, которое нужно от смены пароля.
+    """
+    if not settings.enabled:
+        return False, "Вход выключен (AUTH_ENABLED=0) — менять нечего."
+    if not verify_password(current, settings.password_hash):
+        return False, "Текущий пароль не подошёл."
+    new = (new or "").strip()
+    if len(new) < 8:
+        return False, "Новый пароль короче 8 символов."
+    if new == current:
+        return False, "Новый пароль совпадает со старым."
+
+    fresh = hash_password(new)
+    in_db = db_store_user(settings.username, fresh)
+    # В .env пишем всегда, даже когда база приняла: это и есть аварийная копия,
+    # ради которой всё затевалось.
+    _persist_env("AUTH_PASSWORD_HASH", fresh)
+    settings.password_hash = fresh
+    settings.source = "mysql" if in_db else "env"
+
+    where = "в базе и в .env" if in_db else "в .env (база недоступна)"
+    return True, f"Пароль изменён {where}. Остальные сессии разлогинены."
 
 
 # ── Генератор хеша ──────────────────────────────────────────────────────────

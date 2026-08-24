@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Game Factory 🎮</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎮</text></svg>" />
+  <link rel="stylesheet" href="/static/vendor/xterm.css">
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -395,6 +396,9 @@
         <button class="tab active" data-settings-tab="config">⚙️ Конфигурация</button>
         <button class="tab" data-settings-tab="quota">📊 Квоты агентов</button>
         <button class="tab" data-settings-tab="storage">🗜 Хранилище</button>
+        <button class="tab" data-settings-tab="access">🔐 Доступ</button>
+        <button class="tab" data-settings-tab="terminals">⌨️ Вход в агентов</button>
+        <button class="tab" data-settings-tab="system">📈 Машина</button>
       </div>
 
       <div class="panel grow scroll settings-tab-panel" id="settings-panel-config">
@@ -548,8 +552,129 @@
         </div>
 
         <div class="settings-card" style="margin-top:14px">
+          <div class="row spread">
+            <h3>📦 Архивы игр</h3>
+            <div class="row">
+              <span class="dim" id="builds-stats"></span>
+              <button class="btn small" id="btn-refresh-builds">🔄 Обновить</button>
+            </div>
+          </div>
+          <p class="dim" style="margin:8px 0">
+            Архив снимается сам после каждого прогона агента — и в студии, и в чате.
+            Пакуются исходники игры без <code>node_modules</code> и без служебного
+            <code>.factory/</code>; собранную версию по-прежнему делает кнопка на вкладке «Игра».
+            Файл лежит на диске, а копия — в MySQL, если её размер укладывается в лимит.
+          </p>
+          <div id="builds-list" class="storage-list"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
           <h3>📜 Журнал</h3>
           <pre class="log small" id="storage-log" style="max-height:240px"></pre>
+        </div>
+      </div>
+
+      <!-- ── Доступ: пароль входа и база данных ─────────────────────── -->
+      <div class="panel grow scroll settings-tab-panel hidden" id="settings-panel-access">
+        <h2>🔐 Доступ</h2>
+
+        <div class="settings-card">
+          <h3>🔑 Пароль администратора</h3>
+          <p class="dim" style="margin:8px 0">
+            Пароль хранится хешем — в таблице <code>users</code>, а копией в <code>.env</code>
+            на случай, если база окажется недоступна. Смена действует немедленно, перезапуск
+            не нужен. Все остальные открытые сессии при этом разлогиниваются: ключ подписи
+            кук выводится из самого хеша.
+          </p>
+          <label class="field">Текущий пароль
+            <input type="password" id="pw-current" autocomplete="current-password" />
+          </label>
+          <label class="field">Новый пароль (от 8 символов)
+            <input type="password" id="pw-new" autocomplete="new-password" />
+          </label>
+          <label class="field">Новый пароль ещё раз
+            <input type="password" id="pw-repeat" autocomplete="new-password" />
+          </label>
+          <div class="row">
+            <button class="btn ok" id="btn-change-password">🔑 Сменить пароль</button>
+            <span class="small" id="pw-msg"></span>
+          </div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <div class="row spread">
+            <h3>🗄 MySQL</h3>
+            <span class="small" id="db-status"></span>
+          </div>
+          <p class="dim" style="margin:8px 0">
+            В базе живут пользователи, реестр витрины (оценка, архив, избранное, название)
+            и журнал zip-архивов. Сами игры, чаты и история отката остаются на диске:
+            запрос к хостингу занимает около сотни миллисекунд, и гонять через него
+            каждое открытие витрины нельзя. Если база недоступна, фабрика работает
+            по локальному JSON и ничего не теряет.
+          </p>
+          <label class="check"><input type="checkbox" id="db-enabled" /> Использовать MySQL</label>
+          <div class="settings-grid">
+            <label class="field">Сервер<input type="text" id="db-host" placeholder="mrnuryn3.beget.tech" /></label>
+            <label class="field">Порт<input type="text" id="db-port" placeholder="3306" /></label>
+            <label class="field">Пользователь<input type="text" id="db-user" placeholder="mrnuryn3_zavod" /></label>
+            <label class="field">База<input type="text" id="db-name" placeholder="mrnuryn3_zavod" /></label>
+          </div>
+          <label class="field">Пароль
+            <input type="password" id="db-password" placeholder="оставьте пустым, чтобы не менять" />
+          </label>
+          <div class="row">
+            <button class="btn ok" id="btn-save-db">💾 Сохранить и проверить</button>
+            <span class="small" id="db-msg"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Терминалы CLI-агентов ──────────────────────────────────── -->
+      <div class="panel grow scroll settings-tab-panel hidden" id="settings-panel-terminals">
+        <div class="row spread">
+          <h2>⌨️ Вход в CLI-агентов</h2>
+          <div class="row" id="terminal-launchers"></div>
+        </div>
+        <p class="dim" style="margin:6px 0 12px" id="terminal-hint">
+          Настоящий терминал агента прямо здесь. Вход интерактивный: CLI печатает ссылку,
+          её надо открыть в браузере и вставить сюда код. Сессия переживает уход на другую
+          вкладку — вернувшись, вы увидите диалог целиком.
+        </p>
+        <div class="row spread">
+          <span class="small" id="terminal-title">Терминал не запущен.</span>
+          <div class="row">
+            <button class="btn small hidden" id="btn-terminal-clear">🧹 Очистить экран</button>
+            <button class="btn small danger hidden" id="btn-terminal-kill">⏹ Завершить</button>
+          </div>
+        </div>
+        <div id="terminal-host" class="terminal-host"></div>
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🖥 Открытые сессии</h3>
+          <div id="terminal-sessions" class="storage-list"></div>
+        </div>
+      </div>
+
+      <!-- ── Состояние машины ───────────────────────────────────────── -->
+      <div class="panel grow scroll settings-tab-panel hidden" id="settings-panel-system">
+        <div class="row spread">
+          <h2>📈 Состояние машины</h2>
+          <span class="small dim" id="system-host"></span>
+        </div>
+        <p class="dim" style="margin:6px 0 12px">
+          Цифры хоста и, отдельно, потолок контейнера. Разница важна: занять три гигабайта
+          из семи для машины пустяк, а для фабрики это её лимит целиком и OOM следом.
+        </p>
+        <div class="system-grid" id="system-cards"></div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🌡 Датчики</h3>
+          <div id="system-sensors" class="storage-list"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🔥 Самые тяжёлые процессы</h3>
+          <div id="system-processes" class="storage-list"></div>
         </div>
       </div>
     </section>
@@ -582,6 +707,8 @@
 
 <div id="toasts"></div>
 
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/xterm-addon-fit.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

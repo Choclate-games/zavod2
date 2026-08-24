@@ -9,20 +9,21 @@ HTTP-слой веб-фабрики (FastAPI).
 from __future__ import annotations
 
 import asyncio
+import codecs
 import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 
 from app import sandbox
-from app.web import auth
+from app.web import auth, terminals
 from app.web.bus import bus
 from app.web.service import AGENT_KEYS, DEMO_SLUG, service
 
@@ -34,7 +35,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Настройки входа читаются один раз на старте. Если они кривые, AuthError
 # поднимается здесь же и uvicorn не поднимется — лучше не запуститься, чем
 # запуститься открытым наружу.
-AUTH = auth.AuthSettings.from_env()
+#
+# load_settings, а не from_env: действующий пароль лежит в таблице `users`,
+# .env остаётся аварийной копией на случай недоступной базы. Объект дальше
+# меняется на месте при смене пароля — middleware читает его на каждом
+# запросе, поэтому новый пароль действует сразу, без перезапуска.
+AUTH = auth.load_settings()
 
 # Единственные адреса, доступные без входа. Всё остальное — включая /static
 # и весь /api — закрыто. Страница входа самодостаточна и своих ассетов не
@@ -872,6 +878,189 @@ async def set_default_agent(request: Request) -> Dict[str, Any]:
     return service.set_default_agent(payload.get("agent") or "")
 
 
+# -- Смена пароля ------------------------------------------------------------
+
+@app.post("/api/settings/password")
+async def change_password(request: Request):
+    """
+    Смена пароля входа.
+
+    Меняет объект AUTH на месте, поэтому новый пароль действует сразу, без
+    перезапуска контейнера. Все ранее выданные куки при этом перестают
+    приниматься — ключ подписи выводится из хеша пароля. Себя разлогинивать
+    незачем, поэтому в ответ кладём свежую куку, подписанную новым хешем.
+    """
+    payload = await _body(request)
+    ok, message = auth.change_password(
+        AUTH,
+        str(payload.get("current") or ""),
+        str(payload.get("new") or ""),
+    )
+    if not ok:
+        return {"status": "error", "message": message}
+    response = JSONResponse({"status": "success", "message": message})
+    response.set_cookie(
+        auth.COOKIE_NAME,
+        auth.issue_token(AUTH.username, AUTH.password_hash, AUTH.ttl_seconds),
+        max_age=AUTH.ttl_seconds, httponly=True, samesite="lax", secure=False,
+    )
+    return response
+
+
+# -- Состояние машины --------------------------------------------------------
+
+@app.get("/api/system")
+def system_state() -> Dict[str, Any]:
+    data = service.system_payload()
+    data.setdefault("factory", {})["terminals"] = len(terminals.registry.list())
+    return data
+
+
+# -- База данных -------------------------------------------------------------
+
+@app.get("/api/settings/database")
+def database_state() -> Dict[str, Any]:
+    return service.database_payload()
+
+
+@app.post("/api/settings/database")
+async def database_save(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.save_database(payload)
+
+
+# -- Архивы игр --------------------------------------------------------------
+
+@app.get("/api/builds")
+def builds_list(slug: str = "", limit: int = 50) -> Dict[str, Any]:
+    return service.builds_payload(_slug(slug) if slug else "", limit)
+
+
+@app.post("/api/projects/{slug}/snapshot")
+def build_snapshot(slug: str) -> Dict[str, Any]:
+    result = service.capture_build(_slug(slug), reason="manual")
+    if not result:
+        return {"status": "error",
+                "message": "Каталог игры не найден или архивы выключены."}
+    return {"status": "success", "build": result,
+            "message": f"Архив {result['filename']} готов."}
+
+
+@app.get("/api/builds/{build_id}/download")
+def build_download(build_id: int):
+    path, data, name = service.build_download(build_id)
+    if path is not None:
+        return FileResponse(path, media_type="application/zip", filename=name)
+    if data is not None:
+        return Response(
+            content=data, media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="' + name + '"'},
+        )
+    raise HTTPException(status_code=404, detail="Архив не найден ни на диске, ни в базе")
+
+
+@app.delete("/api/builds/{build_id}")
+def build_delete(build_id: int) -> Dict[str, Any]:
+    return service.delete_build(build_id)
+
+
+# -- Терминалы агентов -------------------------------------------------------
+
+@app.get("/api/terminals")
+def terminals_list() -> Dict[str, Any]:
+    return {
+        "available": terminals.registry.available(),
+        "launchers": terminals.launchers(),
+        "sessions": terminals.registry.list(),
+    }
+
+
+@app.post("/api/terminals")
+async def terminals_start(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    try:
+        session = terminals.registry.start(
+            str(payload.get("key") or ""),
+            rows=int(payload.get("rows") or 30),
+            cols=int(payload.get("cols") or 100),
+        )
+    except terminals.TerminalError as exc:
+        return {"status": "error", "message": str(exc)}
+    return {"status": "success", "session": session.snapshot()}
+
+
+@app.delete("/api/terminals/{session_id}")
+def terminals_close(session_id: str) -> Dict[str, Any]:
+    ok = terminals.registry.close(session_id)
+    return {"status": "success" if ok else "error",
+            "message": "Терминал закрыт." if ok else "Терминал уже закрыт."}
+
+
+@app.websocket("/api/terminals/{session_id}/ws")
+async def terminals_stream(websocket: WebSocket, session_id: str) -> None:
+    """
+    Двусторонний поток терминала.
+
+    Вход проверяется здесь руками, и это принципиально: `@app.middleware("http")`
+    к вебсокетам не применяется — у них своя область запроса. Без этой проверки
+    роут раздавал бы оболочку мини-ПК всем, кто дотянется до порта, в обход
+    формы входа.
+    """
+    if AUTH.enabled:
+        token = websocket.cookies.get(auth.COOKIE_NAME) or ""
+        if not (token and auth.read_token(token, AUTH.password_hash)):
+            await websocket.close(code=1008)
+            return
+
+    session = terminals.registry.get(session_id)
+    if session is None:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    queue = session.attach(loop)
+
+    # Байты из PTY могут разорвать многобайтовый символ между двумя чтениями,
+    # поэтому декодер инкрементальный: половинка кириллической буквы не должна
+    # превращаться в мусор.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    async def pump() -> None:
+        """Вывод процесса — в браузер."""
+        while True:
+            chunk = await queue.get()
+            if chunk == b"":
+                await websocket.send_json({"type": "exit", "code": session.exit_code})
+                return
+            text = decoder.decode(chunk)
+            if text:
+                await websocket.send_json({"type": "data", "data": text})
+
+    # Накопленный вывод — сразу: вернувшийся из вкладки с кодом входа браузер
+    # должен увидеть диалог целиком, а не с момента подключения.
+    history = session.history()
+    if history:
+        await websocket.send_json({"type": "data", "data": decoder.decode(history)})
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        while True:
+            message = await websocket.receive_json()
+            kind = message.get("type")
+            if kind == "input":
+                session.write(str(message.get("data") or ""))
+            elif kind == "resize":
+                session.resize(int(message.get("rows") or 30),
+                               int(message.get("cols") or 100))
+    except (WebSocketDisconnect, RuntimeError, ValueError):
+        pass
+    finally:
+        pump_task.cancel()
+        session.detach(queue)
+
+
 @app.on_event("shutdown")
 def _shutdown() -> None:
     service.stop_all_servers()
+    terminals.registry.close_all()
