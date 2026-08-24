@@ -30,9 +30,18 @@ async function api(path, options = {}) {
   return data;
 }
 
+// Квоты и Хранилище переехали во вкладки внутри «Настроек» — старые сохранённые
+// значения раскладки поддерживаем как алиасы, чтобы не сломать закладку в localStorage.
+const LEGACY_VIEW_TO_SETTINGS_TAB = { quota: "quota", storage: "storage" };
+
 const state = {
   boot: null,
-  view: localStorage.getItem("view") || "studio",
+  view: (() => {
+    const saved = localStorage.getItem("view") || "studio";
+    return LEGACY_VIEW_TO_SETTINGS_TAB[saved] ? "settings" : saved;
+  })(),
+  settingsTab: LEGACY_VIEW_TO_SETTINGS_TAB[localStorage.getItem("view")] ||
+    localStorage.getItem("settingsTab") || "config",
   project: localStorage.getItem("project") || null,
   session: null,
   sessionRunning: false,
@@ -103,9 +112,20 @@ function showView(name) {
   if (name === "chats") { fillChatProjects(); loadChats(); }
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
   if (name === "demo") loadDemoState();
+  if (name === "settings") { renderSettings(); showSettingsTab(state.settingsTab || "config"); }
+  else stopQuotaTimer();
+}
+
+function showSettingsTab(name) {
+  state.settingsTab = name;
+  localStorage.setItem("settingsTab", name);
+  document.querySelectorAll(".settings-tab-panel").forEach((p) =>
+    p.classList.toggle("hidden", p.id !== `settings-panel-${name}`));
+  document.querySelectorAll("#settings-tabs .tab").forEach((b) =>
+    b.classList.toggle("active", b.dataset.settingsTab === name));
+
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
   if (name === "storage") loadStorage();
-  if (name === "settings") renderSettings();
 }
 
 /* ── Markdown ─────────────────────────────────────────────────────────── */
@@ -2315,8 +2335,31 @@ async function loadStorage() {
     list.appendChild(row);
   });
 
+  renderSnapshotStorage(data.snapshots || {});
+
   $("storage-log").textContent = data.logs || "";
   $("storage-log").scrollTop = $("storage-log").scrollHeight;
+}
+
+function renderSnapshotStorage(s) {
+  const limit = s.limit_bytes
+    ? `потолок ${mb(s.limit_bytes)}` : "потолок снят (SNAPSHOT_LIMIT_MB=0)";
+  const line = $("storage-snapshots");
+  line.textContent =
+    `История снимков: ${mb(s.total_bytes)} у ${s.count || 0} игр · ${limit}` +
+    (s.over_limit ? " · потолок превышен, ближайшая уборка ужмёт и почистит" : "");
+  line.classList.toggle("warn", !!s.over_limit);
+
+  // Показываем только заметных едоков: список из тридцати строк по мегабайту
+  // ничего не объясняет, а место, которое стоит вернуть, видно сразу.
+  const box = $("storage-snapshot-list");
+  box.innerHTML = "";
+  (s.projects || []).filter((p) => p.bytes >= 5 * 1048576).slice(0, 10).forEach((p) => {
+    const row = el("div", "storage-row");
+    row.appendChild(el("span", "storage-slug", esc(p.slug)));
+    row.appendChild(el("span", "dim small", mb(p.bytes)));
+    box.appendChild(row);
+  });
 }
 
 function bindStorage() {
@@ -2327,6 +2370,14 @@ function bindStorage() {
     const res = await api("/api/storage/sweep", { body: {} });
     e.target.disabled = false;
     toast("Хранилище", res.message || "Готово", "ok");
+    loadStorage();
+  };
+
+  $("btn-storage-snapshots").onclick = async (e) => {
+    e.target.disabled = true;
+    const res = await api("/api/storage/snapshots/clean", { body: {} });
+    e.target.disabled = false;
+    toast("История отката", res.message || "Готово", "ok");
     loadStorage();
   };
 
@@ -2585,7 +2636,7 @@ function handleEvent(topic, data) {
     case "projects.changed":
       if (state.view === "studio") loadGallery();
       if (state.view === "projects") loadProjects();
-      if (state.view === "storage") loadStorage();
+      if (state.view === "settings" && state.settingsTab === "storage") loadStorage();
       break;
     case "storage.log":
       appendStorageLog(data.line);
@@ -2655,7 +2706,7 @@ function handleEvent(topic, data) {
       loadServers();
       break;
     case "quota.changed":
-      if (state.view === "quota") loadQuota();
+      if (state.view === "settings" && state.settingsTab === "quota") loadQuota();
       break;
     case "runs.changed":
       // Прогон живёт в чате проекта: обновляем список бесед и полосу прогона.
@@ -3015,6 +3066,9 @@ function toggleTheme() {
 function bindCommon() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.onclick = () => showView(btn.dataset.view);
+  });
+  document.querySelectorAll("#settings-tabs .tab").forEach((btn) => {
+    btn.onclick = () => showSettingsTab(btn.dataset.settingsTab);
   });
   if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });

@@ -149,6 +149,7 @@ class DevServer:
         self.reset_state = reset_state
         self.avoid_port = avoid_port
         self.port: Optional[int] = None
+        self._port_env: Optional[int] = None
         self.proc: Optional[subprocess.Popen] = None
         self.url: Optional[str] = None
         self.expected_url: Optional[str] = None
@@ -243,7 +244,13 @@ class DevServer:
                 cmd.append("--force")
             self.expected_url = f"http://localhost:{port}/"
         else:
-            self.expected_url = None
+            # Не-Vite сборщики (webpack-dev-server, CRA, Next.js и т.п.) чаще
+            # всего уважают $PORT — тот же приём, что и для Vite: свободный
+            # порт выясняем заранее, а не полагаемся на дефолт инструмента.
+            port = _free_port(avoid=self.avoid_port if self.reset_state else None)
+            self.port = port
+            self._port_env = port
+            self.expected_url = f"http://localhost:{port}/"
 
         self._tail = []
         self.on_log(f"▶ {' '.join(cmd)}  (cwd: {self.project_dir})\n")
@@ -337,14 +344,15 @@ class DevServer:
             self.on_log(f"⚠️ Ошибка остановки сервера: {exc}\n")
         self.url = None
 
-    @staticmethod
-    def _env() -> dict:
+    def _env(self) -> dict:
         # pkgstore.env кладёт в PATH подмену npm/npx: даже если в package.json
         # прописано `npm run …`, пакеты придут из общего стора.
         env = pkgstore.env(os.environ.copy(), bootstrap=False)
         env["FORCE_COLOR"] = "0"
         env["NO_COLOR"] = "1"
         env["BROWSER"] = "none"  # чтобы Vite не открывал системный браузер сам
+        if self._port_env:
+            env["PORT"] = str(self._port_env)
         return env
 
 

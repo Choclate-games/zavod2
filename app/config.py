@@ -46,6 +46,11 @@ class AppConfig:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         # Каталог упакованных игр. По умолчанию — рядом с workspace.
         self.archive_dir = Path(os.getenv("ARCHIVE_DIR", str(DEFAULT_ARCHIVE_DIR))).resolve()
+        # Потолок для истории отката (app/snapshots.py). Теневые репозитории
+        # снимков растут с каждым запросом к агенту и сами не чистятся; когда
+        # они вместе перевалят за этот объём, фабрика ужимает их и выбрасывает
+        # самые старые. 0 — не ограничивать.
+        self.snapshot_limit_mb = int(os.getenv("SNAPSHOT_LIMIT_MB", "1024") or 0)
 
         # Load yaml configs
         self.factory_cfg = load_yaml(CONFIG_DIR / "factory.yaml")

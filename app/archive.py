@@ -196,7 +196,8 @@ def _force_remove(func, path, _exc) -> None:
         pass
 
 
-def _rmtree(path: Path) -> None:
+def force_rmtree(path: Path) -> None:
+    """Удаление каталога, переживающее read-only файлы git (см. `_force_remove`)."""
     if sys.version_info >= (3, 12):
         shutil.rmtree(path, onexc=_force_remove)
     else:
@@ -273,11 +274,11 @@ def pack(slug: str, on_log: Optional[LogFn] = None, *, remove_source: bool = Tru
         packed = target.stat().st_size
 
         if remove_source:
-            _rmtree(folder)
+            force_rmtree(folder)
             if folder.exists():
                 # Архив уже валиден, поэтому это не провал упаковки: каталог
                 # просто занят (открыт проводник, держит файл антивирус).
-                # Проверяем по факту, а не по исключению: _rmtree дожимает
+                # Проверяем по факту, а не по исключению: force_rmtree дожимает
                 # read-only файлы поштучно и наверх ничего не бросает.
                 log(f"⚠️ Архив {slug}.zip готов, но каталог удалить не вышло — "
                     f"{folder} занят.\n")

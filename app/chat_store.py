@@ -120,6 +120,23 @@ def list_sessions(slug: str) -> List[ChatSession]:
     return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
 
 
+def count_sessions(slug: str) -> int:
+    """
+    Число бесед проекта — без чтения и разбора содержимого файлов.
+
+    Витрина показывает только цифру на карточке; `list_sessions` ради неё
+    читала и парсила JSON каждого чата целиком (со всей историей сообщений),
+    что на полусотне проектов и превращало загрузку витрины в заметное
+    ожидание.
+    """
+    from app import archive  # локально: archive тянет sandbox, как и этот модуль
+
+    return sum(
+        1 for name in archive.list_entries(slug, str(CHATS_DIRNAME))
+        if name.endswith(".json")
+    )
+
+
 def create_session(slug: str, title: str = "", kind: str = "chat",
                    run_id: str = "") -> ChatSession:
     now = datetime.now().isoformat(timespec="seconds")

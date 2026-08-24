@@ -1009,6 +1009,9 @@ textarea {
   border-radius: 8px;
 }
 
+/* Строка сводки, когда объём перевалил за потолок. */
+.storage-note.warn { color: var(--warn); }
+
 .storage-slug {
   font-family: var(--mono, monospace);
   font-size: 12px;

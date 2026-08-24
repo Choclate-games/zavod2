@@ -364,6 +364,11 @@ def storage_prune() -> Dict[str, Any]:
     return service.prune_packages()
 
 
+@app.post("/api/storage/snapshots/clean")
+def storage_snapshots_clean() -> Dict[str, Any]:
+    return service.clean_snapshots()
+
+
 @app.post("/api/projects/{slug}/pack")
 def project_pack(slug: str) -> Dict[str, Any]:
     return service.pack_project(_slug(slug))

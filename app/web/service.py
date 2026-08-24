@@ -1145,7 +1145,7 @@ class FactoryService:
                 "archived": bool(meta.get("archived")),
                 "favorite": bool(meta.get("favorite")),
                 "favorited_at": meta.get("favorited_at") or "",
-                "chats": len(chat_store.list_sessions(slug)),
+                "chats": chat_store.count_sessions(slug),
                 "tokens": spend.get(slug, {}).get("tokens", 0),
                 "tokens_human": spend.get(slug, {}).get("tokens_human", "0"),
                 "agent_runs": spend.get(slug, {}).get("runs", 0),
@@ -2149,6 +2149,8 @@ class FactoryService:
                 f"освобождено {result['freed_bytes'] / 1048576:.1f} МБ."
             )
             bus.publish("projects.changed")
+        # История отката сама не кончается: тем же обходом держим её в потолке.
+        snapshots.enforce_limit(is_busy=self._project_busy, on_log=self._storage_log)
         return result
 
     def storage_state(self) -> Dict[str, Any]:
@@ -2158,6 +2160,7 @@ class FactoryService:
         return {
             "archives": archives,
             "packages": packages,
+            "snapshots": snapshots.stats(),
             "archived_slugs": archive.archived_slugs(),
             "stale": archive.candidates(archive.DEFAULT_MAX_AGE_DAYS),
             "logs": "".join(self._storage_logs),
@@ -2191,6 +2194,25 @@ class FactoryService:
             result["message"] = (f"Упаковано игр: {len(result['packed'])}, "
                                  f"освобождено {result['freed_bytes'] / 1048576:.1f} МБ.")
         result["status"] = "success"
+        return result
+
+    def clean_snapshots(self) -> Dict[str, Any]:
+        """
+        Кнопка «Ужать историю отката».
+
+        Ужимает всегда, даже когда до потолка далеко: человек нажал её ради
+        места. Выбрасывать истории целиком по-прежнему может только потолок.
+        """
+        result = snapshots.enforce_limit(
+            is_busy=self._project_busy, on_log=self._storage_log, compact_all=True)
+        freed = result["freed_bytes"]
+        dropped = len(result["dropped"])
+        if not freed:
+            result["message"] = "История снимков и так ужата — освобождать нечего."
+        else:
+            tail = f", историй выброшено: {dropped}" if dropped else ""
+            result["message"] = f"Освобождено {freed / 1048576:.1f} МБ{tail}."
+        self._storage_log(f"🧹 История отката: {result['message']}")
         return result
 
     def prune_packages(self) -> Dict[str, Any]:

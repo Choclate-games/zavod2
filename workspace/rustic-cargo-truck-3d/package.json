@@ -1,0 +1,22 @@
+{
+  "name": "rustic-cargo-truck-3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "check:physics": "esbuild tools/physicsSanity.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/physicsSanity.mjs --external:@dimforge/rapier3d-compat --log-level=warning && node node_modules/.cache/physicsSanity.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.13.1",
+    "@playgama/bridge": "^2.0.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5"
+  }
+}
