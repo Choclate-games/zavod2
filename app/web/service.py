@@ -2296,14 +2296,20 @@ class FactoryService:
         if not db.available():
             return {"status": "error", "message": "База недоступна — зеркалить некуда."}
         result = self.mirror_sweep()
+        # Про пропущенные говорим вслух. Молчание о них однажды уже стоило
+        # получаса разбирательства: игра только что закрытого dev-сервера
+        # считалась занятой, обход её не трогал, а сводка бодро сообщала
+        # «всё уже свежее» — при том, что на диске лежала правка.
+        skipped = (f" Занято агентом и пропущено: {result['skipped']}."
+                   if result["skipped"] else "")
         return {
             "status": "success",
             "result": result,
             "message": (f"Обновлено игр: {result['updated']} "
                         f"({result['bytes'] / 1048576:.1f} МБ), "
-                        f"проверено {result['checked']}."
+                        f"проверено {result['checked']}.{skipped}"
                         if result["updated"] else
-                        f"Всё уже свежее: проверено {result['checked']} игр."),
+                        f"Всё уже свежее: проверено {result['checked']} игр.{skipped}"),
         }
 
     def storage_state(self) -> Dict[str, Any]:
