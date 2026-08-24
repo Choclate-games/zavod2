@@ -179,9 +179,11 @@
   "sozday_igru_po_tipu_rainbow_six": {
     "rating": 3,
     "archived": true,
+    "favorite": false,
+    "favorited_at": "",
     "created_at": "2026-08-23T00:04:59",
     "archived_at": "2026-08-23T02:58:36",
-    "title": ""
+    "title": "Тактика Прорыва: CQB Штурм"
   },
   "sozday_igru_po_tipu_cs_go_s_kartoy_dust_2_vyboro": {
     "rating": 2,
@@ -371,5 +373,50 @@
     "created_at": "2026-08-23T23:57:27",
     "archived_at": "2026-08-24T15:11:40",
     "title": "Kick Arena: Кинетический Рикошет"
+  },
+  "3d_gladiatorskiy_roguelike_s_aktivnym_regdollom": {
+    "rating": 0,
+    "archived": false,
+    "favorite": false,
+    "favorited_at": "",
+    "created_at": "2026-08-24T16:12:01",
+    "archived_at": "",
+    "title": "Промпт игры от пользователя"
+  },
+  "ritmichnoe_burenie_asteroidov_na_mehah_v_kosmose": {
+    "rating": 0,
+    "archived": false,
+    "favorite": false,
+    "favorited_at": "",
+    "created_at": "2026-08-24T16:12:48",
+    "archived_at": "",
+    "title": "Промпт игры от пользователя"
+  },
+  "igra_pro_kurera": {
+    "rating": 0,
+    "archived": false,
+    "favorite": false,
+    "favorited_at": "",
+    "created_at": "2026-08-24T16:12:55",
+    "archived_at": "",
+    "title": "Черепичный Спринт"
+  },
+  "demo": {
+    "rating": 0,
+    "archived": false,
+    "favorite": false,
+    "favorited_at": "",
+    "created_at": "2026-08-24T16:12:58",
+    "archived_at": "",
+    "title": ""
+  },
+  "smotritel_mayaka_chinit_linzu_v_shtorm": {
+    "rating": 0,
+    "archived": false,
+    "favorite": false,
+    "favorited_at": "",
+    "created_at": "2026-08-24T16:13:02",
+    "archived_at": "",
+    "title": "Промпт игры от пользователя"
   }
 }

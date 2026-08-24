@@ -21,11 +21,23 @@ RENDERER = "threejs"
 # Topics a generated game package almost always needs, in the order they matter
 # during development. Used by the prompt compiler and the skill generator.
 CORE_TOPICS: List[str] = [
+    # bridge_api_reference — единственный документ, где вообще есть лидерборды,
+    # платежи и social/achievements API. До 2026-08-24 сюда не входил: папка
+    # knowledge/playgama целиком исключена из выбора KnowledgeCuratorAgent (это
+    # "требования площадок", не жанровый выбор), а в CORE_TOPICS ехало только 5
+    # файлов из 9 — bridge_api_reference.md, social_features.md,
+    # platform_matrix.md и lifecycle_and_orientation.md не доставались ни одной
+    # сгенерированной игре ни одним путём. Отсюда игры без лидербордов,
+    # платежей и соцфич, хотя документы про них в базе давно есть.
+    "playgama/bridge_api_reference.md",
     "playgama/game_ready_and_loading.md",
     "playgama/auth_and_player.md",
     "playgama/storage_and_cloud.md",
     "playgama/ads_integration.md",
     "playgama/banners_and_layout.md",
+    "playgama/lifecycle_and_orientation.md",
+    "playgama/platform_matrix.md",
+    "playgama/social_features.md",
     "compliance/yandex_moderation.md",
     "ux/localization_system.md",
     # Мобильное управление — не опция: платформы играются в основном с телефона,

@@ -1,0 +1,37 @@
+{
+  "id": "a153dc4c5f63",
+  "title": "Черепичный Спринт",
+  "created_at": "2026-08-24T16:12:55",
+  "updated_at": "2026-08-24T16:12:55",
+  "conversation_id": null,
+  "agent": null,
+  "model": null,
+  "kind": "run",
+  "run_id": "20260824-161255-igra_pro_kurera",
+  "messages": [
+    {
+      "role": "user",
+      "text": "игра про курьера",
+      "timestamp": "2026-08-24T16:12:55",
+      "snapshot": null
+    },
+    {
+      "role": "assistant",
+      "text": "Прогон `20260824-161255-igra_pro_kurera` начат. Провайдер: test-provider, режим: standard. Проект: `igra_pro_kurera`.",
+      "timestamp": "2026-08-24T16:12:55",
+      "snapshot": null
+    },
+    {
+      "role": "assistant",
+      "text": "▶ **renderer_selector** — renderer_selector",
+      "timestamp": "2026-08-24T16:12:55",
+      "snapshot": null
+    },
+    {
+      "role": "assistant",
+      "text": "▶ **technical_architect** — technical_architect",
+      "timestamp": "2026-08-24T16:12:55",
+      "snapshot": null
+    }
+  ]
+}

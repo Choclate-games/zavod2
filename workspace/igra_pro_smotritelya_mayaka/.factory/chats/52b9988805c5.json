@@ -1,0 +1,25 @@
+{
+  "id": "52b9988805c5",
+  "title": "Прогон 1",
+  "created_at": "2026-08-24T16:13:01",
+  "updated_at": "2026-08-24T16:13:01",
+  "conversation_id": null,
+  "agent": null,
+  "model": null,
+  "kind": "run",
+  "run_id": "20260824-161301-igra_pro_smotritelya_mayaka",
+  "messages": [
+    {
+      "role": "user",
+      "text": "игра про смотрителя маяка",
+      "timestamp": "2026-08-24T16:13:01",
+      "snapshot": null
+    },
+    {
+      "role": "assistant",
+      "text": "Прогон `20260824-161301-igra_pro_smotritelya_mayaka` начат. Провайдер: по умолчанию, режим: standard. Проект: `igra_pro_smotritelya_mayaka`.",
+      "timestamp": "2026-08-24T16:13:01",
+      "snapshot": null
+    }
+  ]
+}

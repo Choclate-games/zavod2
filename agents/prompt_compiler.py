@@ -1078,6 +1078,16 @@ Keep a 15 s watchdog that sends `game_ready` regardless of boot failures.
 - Guests have a non-null `id` and `name`: the only reliable check is `player.isGuest`.
 - Never `await` a dialog-showing `authorize()` inside boot.
 
+### 6. Leaderboards, Payments & Social
+These three are as mandatory as ads and storage above — see
+`playgama/bridge_api_reference.md` (§8–10), `playgama/social_features.md` and
+`playgama/platform_matrix.md` for the full contract; `ACCEPTANCE.md` checks
+every item from those documents against this build.
+- Leaderboards: `bridge.leaderboards` (plural, never `.leaderboard`). IDs contain no underscores on Yandex, and each ID needs an explicit per-platform override in `playgama-bridge-config.json`, even when identical.
+- Payments: `getCatalog()` supplies localized prices — never hardcode a price. `consumePurchase(id)` takes a product id, never a purchase token. On every launch, check `getPurchases()` and grant first, consume second.
+- Social: `bridge.social.*` calls happen synchronously inside the real click/pointer handler, not on a later frame — engines that queue input lose the popup on VK/OK. Every action (share, invite, community, rate, favorites, home-screen) is gated on its own `isXSupported` flag; the whole social entry point is hidden when none are supported.
+- All three are capability-gated exactly like ads: an unsupported feature's UI control is not rendered at all, not disabled.
+
 ---
 
 ## 6. USER INTERFACE & CONTROLS (ДВЕ СХЕМЫ)
