@@ -1,0 +1,221 @@
+{
+  "startedAt": "2026-08-24T11:33:22.066Z",
+  "target": "local",
+  "mobile": false,
+  "profile": "(throwaway)",
+  "timeline": [
+    {
+      "t": 1787571202076,
+      "kind": "serve",
+      "data": {
+        "dir": "C:\\Users\\1\\Documents\\Eduard\\Program\\zavod2\\workspace\\rustic-cargo-truck-3d\\dist",
+        "url": "http://127.0.0.1:4179/"
+      }
+    },
+    {
+      "t": 1787571205864,
+      "kind": "boot",
+      "data": {
+        "ms": 1709,
+        "ready": true
+      }
+    },
+    {
+      "t": 1787571205883,
+      "kind": "state-global",
+      "data": "(none found)"
+    },
+    {
+      "t": 1787571206920,
+      "kind": "shot",
+      "data": "C:\\Users\\1\\Documents\\Eduard\\Program\\zavod2\\workspace\\rustic-cargo-truck-3d\\qa-out\\01-boot.png"
+    },
+    {
+      "t": 1787571206924,
+      "kind": "state",
+      "data": {
+        "stateGlobal": null,
+        "canvases": [
+          [
+            1440,
+            900
+          ]
+        ],
+        "url": "http://127.0.0.1:4179/"
+      }
+    },
+    {
+      "t": 1787571209931,
+      "kind": "fps",
+      "data": 60
+    },
+    {
+      "t": 1787571209939,
+      "kind": "layout",
+      "data": {
+        "viewport": [
+          1440,
+          900
+        ],
+        "horizontalScroll": false,
+        "offscreen": [],
+        "clippedText": []
+      }
+    },
+    {
+      "t": 1787571209945,
+      "kind": "i18n",
+      "data": "no untranslated visible text (expect-lang=ru)"
+    },
+    {
+      "t": 1787571209949,
+      "kind": "storage",
+      "data": [
+        {
+          "key": "bridge-player-guest-id",
+          "bytes": 16
+        }
+      ]
+    },
+    {
+      "t": 1787571209952,
+      "kind": "storage",
+      "data": [
+        {
+          "key": "bridge-player-guest-id",
+          "bytes": 16
+        }
+      ]
+    },
+    {
+      "t": 1787571210313,
+      "kind": "boot",
+      "data": {
+        "ms": 265,
+        "ready": true
+      }
+    },
+    {
+      "t": 1787571210319,
+      "kind": "state-global",
+      "data": "(none found)"
+    },
+    {
+      "t": 1787571211033,
+      "kind": "storage",
+      "data": [
+        {
+          "key": "bridge-player-guest-id",
+          "bytes": 16
+        }
+      ]
+    },
+    {
+      "t": 1787571211288,
+      "kind": "shot",
+      "data": "C:\\Users\\1\\Documents\\Eduard\\Program\\zavod2\\workspace\\rustic-cargo-truck-3d\\qa-out\\02-after-reload.png"
+    },
+    {
+      "t": 1787571211616,
+      "kind": "boot",
+      "data": {
+        "ms": 256,
+        "ready": true
+      }
+    },
+    {
+      "t": 1787571211625,
+      "kind": "state-global",
+      "data": "(none found)"
+    },
+    {
+      "t": 1787571212592,
+      "kind": "shot",
+      "data": "C:\\Users\\1\\Documents\\Eduard\\Program\\zavod2\\workspace\\rustic-cargo-truck-3d\\qa-out\\03-corrupt-save.png"
+    }
+  ],
+  "checks": {
+    "rafTicks": 43,
+    "state": {
+      "stateGlobal": null,
+      "canvases": [
+        [
+          1440,
+          900
+        ]
+      ],
+      "url": "http://127.0.0.1:4179/"
+    },
+    "fps": 60,
+    "layout": {
+      "viewport": [
+        1440,
+        900
+      ],
+      "horizontalScroll": false,
+      "offscreen": [],
+      "clippedText": []
+    },
+    "i18nSuspects": [],
+    "storage": {
+      "keys": [
+        {
+          "key": "bridge-player-guest-id",
+          "bytes": 16
+        }
+      ],
+      "parsed": {}
+    },
+    "storagePersists": {
+      "keysBefore": 1,
+      "keysAfter": 1
+    },
+    "survivesCorruptSave": {
+      "key": "bridge-player-guest-id",
+      "survived": true,
+      "rafTicks": 43
+    }
+  },
+  "failures": [
+    {
+      "label": "console",
+      "detail": "6 error(s) from the game origin"
+    },
+    {
+      "label": "network",
+      "detail": [
+        "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json",
+        "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json",
+        "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json"
+      ]
+    }
+  ],
+  "consoleAll": [
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a",
+    "info: %c PlaygamaBridge v2.0.2 initialized.  background: #9747FF; color: white; padding: 1px 6px; border-radius: 4px",
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a",
+    "info: %c PlaygamaBridge v2.0.2 initialized.  background: #9747FF; color: white; padding: 1px 6px; border-radius: 4px",
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a",
+    "info: %c PlaygamaBridge v2.0.2 initialized.  background: #9747FF; color: white; padding: 1px 6px; border-radius: 4px"
+  ],
+  "consoleGameErrors": [
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a",
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a",
+    "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "error: %c PlaygamaBridge %c Failed to load the bridge config file background: #9747FF; color: #fff; padding: 1px 6px; border-radius: 4px  Error: Failed to load bridge config: ./playgama-bridge-config.json 404 (Not Found)\n    at Object.load (http://127.0.0.1:4179/assets/index-CENYuoDH.js:125:79555)\n    at a"
+  ],
+  "netFailures": [
+    "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json",
+    "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json",
+    "HTTP 404 http://127.0.0.1:4179/playgama-bridge-config.json"
+  ],
+  "bootMs": 256,
+  "stateGlobal": null,
+  "finishedAt": "2026-08-24T11:33:32.593Z",
+  "passed": false
+}

@@ -75,6 +75,28 @@ bridge.advertisement.off(eventName, handler);
 Always fire your callback once with the current value at subscribe time — a game
 booted while the tab is hidden otherwise starts in the wrong state.
 
+**Never type the event name by hand.** `EVENT_NAME` members are UPPER_SNAKE
+(`PAUSE_STATE_CHANGED`), but their *values* are lower_snake
+(`'pause_state_changed'`) — a shipped game once subscribed with
+`platform?.on?.('PAUSE_STATE_CHANGED', onPause)`, a plausible-looking string
+instead of the constant. The subscription never fired, silently: no console
+error, no failed build, the game just never paused for an interstitial or
+muted on the platform's mute flag. It happened because the code declared its
+own `interface PlatformBridge { on?: (event: string, ...) => void }` instead of
+importing the SDK's real types — a hand-rolled `event: string` accepts any
+string and hides the typo from the compiler. Import `EVENT_NAME` (and the
+bridge's own types) from `@playgama/bridge` and pass the member, never a
+literal:
+
+```typescript
+// WRONG — compiles, subscribes to an event that does not exist
+platform?.on?.('PAUSE_STATE_CHANGED', onPause);
+
+// RIGHT
+import { EVENT_NAME } from '@playgama/bridge';
+platform?.on?.(EVENT_NAME.PAUSE_STATE_CHANGED, onPause);
+```
+
 ## 5. Advertisement
 
 | Member | Notes |
@@ -176,3 +198,17 @@ Game code never touches `window.bridge` directly. One `BridgeService` singleton
 wraps every call in `try/catch` and degrades to a local mock when the SDK is
 absent (raw Vite dev server). Every method must be safe to call on a platform
 that does not support it.
+
+---
+
+## Чек-лист «интеграция бьётся о реальный Bridge v2, а не о выдуманный v1»
+
+- [ ] Игровой код не трогает `window.bridge` напрямую: всё через один сервис-обёртку с try/catch
+- [ ] Каждый вызов безопасен на площадке, где функции нет, и на голом dev-сервере без SDK
+- [ ] Используется v2-API: `bridge.leaderboards` (множественное число), а не v1-имена
+- [ ] Тип хранилища не выбирается вручную по `isAuthorized` — v2 делает это сам
+- [ ] Интерфейс построен на флагах поддержки, а не на предположении, что функция есть
+- [ ] Награда за rewarded берётся из события, а не из промиса
+- [ ] Колбэк каждого события вызывается один раз с текущим значением сразу при подписке
+- [ ] `game_ready` не отправляется сразу после `initialize` — только когда меню интерактивно
+- [ ] Имя события подписки — константа `EVENT_NAME.<...>`, импортированная из `@playgama/bridge`, а не строка, набранная руками по названию константы

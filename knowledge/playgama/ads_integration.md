@@ -108,6 +108,18 @@ this one subscription covers both. Fire the callback once with the current value
 at subscribe time, and reset the delta accumulator on resume or the first frame
 back jumps the physics.
 
+## A wrapper method is not integration
+
+Writing `PlaygamaService.rewarded()` / `.interstitial()` correctly is not the
+same as the game showing any ads. A shipped game had a fully correct-looking
+`rewarded(placement)` and `interstitial()` on its platform service — and
+**zero call sites for either anywhere in `main.ts`, `Game.ts`, or the UI.** No
+button, no gameplay hook, nothing triggered them. The service existed to
+satisfy the acceptance checklist by eye; it never ran during actual play.
+Defining the wrapper is the easy half — wire it to a real "run ended" /
+"revive" / "menu" trigger, then check by playing the game that an ad request
+actually fires.
+
 ## Capability gating is not optional
 
 Every ad surface has a support flag, and **UI must be built on those flags**. A

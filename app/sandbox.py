@@ -28,23 +28,30 @@ class SandboxViolation(RuntimeError):
 
 
 _workspace_root_cache: Optional[Path] = None
+_workspace_root_cache_source: Optional[Path] = None
 
 
 def workspace_root() -> Path:
     """
     Разрешённый корень песочницы — кешируется на процесс.
 
-    `config.workspace_dir` уже создан и абсолютен на момент старта (см.
-    `Config.__init__`), а сам путь не меняется, пока процесс жив. Раньше
-    здесь на каждый вызов заново шли `mkdir` и `resolve()` (разрешение
-    symlink'ов через диск) — витрина из полусотни проектов дергает этот
-    вызов сотни раз и ощутимо теряла на этом время.
+    В проде `config.workspace_dir` не меняется, пока процесс жив, поэтому
+    `mkdir`/`resolve()` (разрешение symlink'ов через диск — витрина из
+    полусотни проектов дергает этот вызов сотни раз) считаются один раз.
+
+    Кеш ключуется значением `config.workspace_dir`, а не просто фактом "уже
+    считали": тесты подменяют его через `monkeypatch.setattr(config,
+    "workspace_dir", tmp_path)` на каждый прогон, и голый `if cache is None`
+    не замечал подмену после первого теста в процессе — все следующие тесты
+    молча продолжали работать с путём из первого. Так тестовый прогон архива
+    один раз стёр реальные проекты в workspace/ вместо tmp_path.
     """
-    global _workspace_root_cache
-    if _workspace_root_cache is None:
-        root = config.workspace_dir
+    global _workspace_root_cache, _workspace_root_cache_source
+    root = config.workspace_dir
+    if _workspace_root_cache is None or _workspace_root_cache_source != root:
         root.mkdir(parents=True, exist_ok=True)
         _workspace_root_cache = root.resolve()
+        _workspace_root_cache_source = root
     return _workspace_root_cache
 
 

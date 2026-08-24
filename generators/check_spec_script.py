@@ -210,6 +210,55 @@ if (!claimsBridge) {
     scan(codeFiles, /BridgeService|PlaygamaService/).slice(0, 4))
 }
 
+/* ── C14: имена событий берутся из EVENT_NAME, а не пишутся руками ──────── */
+// Живой случай: игра «Тайга: Экспедиция» подписывалась на паузу и звук так —
+// `platform.on('PAUSE_STATE_CHANGED', onPause)` — со строкой, набранной вручную
+// по названию константы. У Bridge v2 сами значения строчные и через
+// подчёркивание ('pause_state_changed'), а тип на месте вызова был собственным
+// interface с сигнатурой `(event: string, ...) => void`, поэтому опечатка
+// прошла сборку не моргнув. Подписка не срабатывала никогда: игра не вставала
+// на паузу под интерстишлом и не глушила звук по флагу площадки — молча, без
+// единой ошибки в консоли.
+const knownEventNames = [
+  'PAUSE_STATE_CHANGED', 'AUDIO_STATE_CHANGED', 'REWARDED_STATE_CHANGED',
+  'INTERSTITIAL_STATE_CHANGED', 'BANNER_STATE_CHANGED', 'ADVANCED_BANNERS_STATE_CHANGED',
+  'ORIENTATION_STATE_CHANGED', 'SCREEN_SIZE_CHANGED', 'PLATFORM_MESSAGE_SENT',
+  'PLATFORM_STORAGE_AVAILABILITY_CHANGED',
+]
+// `on` тоже вызывают через опциональную цепочку (`platform?.on?.(...)`), а не
+// только напрямую — оба варианта обязаны попадать в проверку.
+const literalEventNames = scan(codeFiles, new RegExp(`\\.on\\??\\.?\\(\\s*['"\`](${knownEventNames.join('|')})['"\`]`))
+if (literalEventNames.length) {
+  fail('C14',
+    "Имя события подписки набрано строкой руками вместо EVENT_NAME.<...> — у Bridge v2 " +
+    "реальные значения строчные с подчёркиванием ('pause_state_changed'), подписка на " +
+    "литерал 'PAUSE_STATE_CHANGED' не сработает никогда, и это не всплывёт ни в консоли, ни в сборке",
+    literalEventNames)
+} else {
+  pass('C14', 'Подписки на события платформы не используют строковый литерал вместо EVENT_NAME')
+}
+
+/* ── C15: реклама объявлена в сервисе, но реально вызывается из игры ────── */
+// Тот же живой случай: `PlaygamaService.rewarded()` и `.interstitial()` были
+// написаны целиком — включая правильную сигнатуру — но ни разу не вызывались
+// ни из main.ts, ни из Game.ts, ни из UI. C6 это не ловил: он ищет
+// `showRewarded` где угодно в коде, а сама реализация лежала в том же файле,
+// что и её определение. За сессию не показывалось ни одной рекламы.
+const platformDirAbs = join(SRC, 'platform')
+const isInsidePlatformDir = (f) => !relative(platformDirAbs, f).startsWith('..')
+const adCallSites = scan(codeFiles, /\.(showRewarded|showInterstitial)\s*\(/, isInsidePlatformDir)
+const adDefined = /showRewarded|showInterstitial/.test(bridgeText)
+if (!adDefined) {
+  skip('C15', 'Реклама (rewarded/interstitial) в коде не найдена — проверьте, предусмотрена ли она спецификацией')
+} else if (!adCallSites.length) {
+  fail('C15',
+    'showRewarded/showInterstitial объявлены только внутри src/platform — ни один файл геймплея ' +
+    'или UI их не вызывает, реклама не триггерится за всю сессию',
+    scan(codeFiles, /\.(showRewarded|showInterstitial)\s*\(/))
+} else {
+  pass('C15', `Реклама вызывается из игры (${adCallSites.length} место(а) вне src/platform)`)
+}
+
 /* ── C5: одна точка сохранения ─────────────────────────────────────────── */
 const storage = scan(codeFiles, /localStorage\.(get|set)Item/)
 storage.length > 4
