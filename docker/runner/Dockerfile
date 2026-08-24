@@ -13,6 +13,13 @@ FROM ubuntu:24.04
 ARG RUNNER_VERSION=2.336.0
 ARG DEBIAN_FRONTEND=noninteractive
 
+# uid/gid должны совпасть с владельцем каталога .deploy на хосте (пользователь
+# oem, uid 29999). Через него job передаёт хосту единственный сигнал — файл
+# триггера; с несовпадающим uid запись падает с «Permission denied», и деплой
+# не запускается при полностью зелёных тестах.
+ARG APP_UID=29999
+ARG APP_GID=29999
+
 # libicu74 обязателен: раннер написан на .NET и без него не стартует.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -29,7 +36,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 # actions/runner отказывается работать от root без RUNNER_ALLOW_RUNASROOT.
 # Вместо флага-костыля заводим непривилегированного пользователя.
-RUN useradd -m -s /bin/bash runner
+RUN groupadd -g ${APP_GID} runner \
+ && useradd -u ${APP_UID} -g ${APP_GID} -m -s /bin/bash runner
 
 WORKDIR /home/runner
 USER runner

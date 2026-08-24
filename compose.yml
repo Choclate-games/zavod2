@@ -98,6 +98,11 @@ services:
       context: ./docker/runner
       args:
         RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
+        # Те же uid/gid, что у фабрики и у владельца .deploy на хосте: через
+        # этот каталог job отдаёт хосту сигнал на деплой, и при несовпадении
+        # запись падает с «Permission denied» уже после зелёных тестов.
+        APP_UID: ${APP_UID:-29999}
+        APP_GID: ${APP_GID:-29999}
     image: zavod2-runner:${RUNNER_VERSION:-2.336.0}
     container_name: zavod2-runner
     restart: always
