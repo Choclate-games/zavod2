@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import sandbox
@@ -288,10 +288,12 @@ def project_doc(slug: str, name: str = "AI_DEVELOPER_PROMPT.md") -> Dict[str, An
 
 @app.get("/api/projects/{slug}/preview.png")
 def project_preview(slug: str):
-    path = service.preview_image_path(_slug(slug))
-    if not path:
+    # Отдаём байтами, а не FileResponse: у упакованной игры превью лежит
+    # внутри zip, и файла на диске для него нет.
+    data = service.preview_image_bytes(_slug(slug))
+    if not data:
         raise HTTPException(status_code=404, detail="Превью не найдено")
-    return FileResponse(path, media_type="image/png")
+    return Response(content=data, media_type="image/png")
 
 
 @app.post("/api/projects/{slug}/preview")
@@ -330,7 +332,9 @@ def project_export(slug: str):
 
 @app.post("/api/projects/{slug}/open-folder")
 def project_open_folder(slug: str) -> Dict[str, Any]:
-    return service.open_folder(sandbox.project_dir(_slug(slug)))
+    # Открыть в проводнике можно только настоящую папку — упакованную игру
+    # для этого разворачиваем.
+    return service.open_folder(service.live_dir(_slug(slug)))
 
 
 @app.post("/api/open-workspace")
@@ -341,6 +345,33 @@ def open_workspace() -> Dict[str, Any]:
 @app.get("/api/projects/{slug}/continue-prompt")
 def project_continue_prompt(slug: str) -> Dict[str, Any]:
     return {"prompt": service.continue_prompt(_slug(slug))}
+
+
+# ── Хранилище: архивы игр и общий стор node-пакетов ─────────────────────────
+
+@app.get("/api/storage")
+def storage_state() -> Dict[str, Any]:
+    return service.storage_state()
+
+
+@app.post("/api/storage/sweep")
+def storage_sweep() -> Dict[str, Any]:
+    return service.sweep_storage()
+
+
+@app.post("/api/storage/prune")
+def storage_prune() -> Dict[str, Any]:
+    return service.prune_packages()
+
+
+@app.post("/api/projects/{slug}/pack")
+def project_pack(slug: str) -> Dict[str, Any]:
+    return service.pack_project(_slug(slug))
+
+
+@app.post("/api/projects/{slug}/unpack")
+def project_unpack(slug: str) -> Dict[str, Any]:
+    return service.unpack_project(_slug(slug))
 
 
 # ── Чаты ────────────────────────────────────────────────────────────────────

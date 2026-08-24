@@ -1,7 +1,0 @@
-node_modules/
-dist/
-*.tsbuildinfo
-
-# tsc must never emit next to the sources: Vite resolves ./Foo to Foo.js before Foo.ts,
-# so a stray compiled file silently shadows the module you are editing.
-src/**/*.js

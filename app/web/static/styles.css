@@ -968,7 +968,8 @@ textarea {
 }
 .game-card .card-actions .btn.icon-only { padding: 4px 6px; min-width: 27px; }
 
-.archive-badge {
+.archive-badge,
+.packed-badge {
   position: absolute;
   top: 8px;
   left: 8px;
@@ -980,6 +981,40 @@ textarea {
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
+}
+
+/* «Сжата» — про место на диске, а не про то, что игра убрана из витрины.
+ * Метки могут стоять вместе, поэтому у сжатой свой угол и свой цвет. */
+.packed-badge {
+  left: auto;
+  right: 8px;
+  color: var(--muted);
+}
+
+/* Список упакованных игр во вкладке «Хранилище» */
+.storage-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.storage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.storage-slug {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .game-card.archived { opacity: 0.72; }
 .game-card.archived:hover { opacity: 1; }

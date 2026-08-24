@@ -1,0 +1,12 @@
+{
+  "id": "d72fdb30a580",
+  "title": "Чат от 24.08 09:43",
+  "created_at": "2026-08-24T09:43:22",
+  "updated_at": "2026-08-24T09:43:22",
+  "conversation_id": null,
+  "agent": null,
+  "model": null,
+  "kind": "chat",
+  "run_id": null,
+  "messages": []
+}

@@ -104,6 +104,7 @@ function showView(name) {
   if (name === "play") { fillPlayProjects(); loadPlayState(); loadServers(); }
   if (name === "demo") loadDemoState();
   if (name === "quota") { loadQuota(); startQuotaTimer(); } else stopQuotaTimer();
+  if (name === "storage") loadStorage();
   if (name === "settings") renderSettings();
 }
 
@@ -493,6 +494,14 @@ function coverBox(project, opts = {}) {
     box.appendChild(el("span", "", "🖼 превью ещё не создано"));
   }
   if (project.archived) box.appendChild(el("span", "archive-badge", "📦 архив"));
+  if (project.packed) {
+    // Игра лежит в zip. Это не ограничение, а состояние диска: любое действие
+    // (чат, запуск, сборка) развернёт её само, поэтому кнопку тут не рисуем.
+    const pill = el("span", "packed-badge", "🗜 сжата");
+    pill.title = "Игра упакована в архив и освободила диск. "
+      + "Развернётся сама при первом действии.";
+    box.appendChild(pill);
+  }
   if (opts.gate) {
     const pill = el("span", `gate-pill gate-${esc(project.gate_state || "none")}`, gateBadge(project));
     pill.title = "Состояние приёмки";
@@ -2256,6 +2265,80 @@ async function loadQuota() {
   renderUsage(data.usage);
 }
 
+/* ── Хранилище: архивы игр и общий стор node-пакетов ──────────────────── */
+
+function mb(bytes) {
+  const value = (bytes || 0) / 1048576;
+  return value >= 1024 ? `${(value / 1024).toFixed(2)} ГБ` : `${value.toFixed(1)} МБ`;
+}
+
+function appendStorageLog(line) {
+  const box = $("storage-log");
+  if (!box) return;
+  box.textContent += line;
+  box.scrollTop = box.scrollHeight;
+}
+
+async function loadStorage() {
+  const data = await api("/api/storage");
+  const a = data.archives || {};
+  const p = data.packages || {};
+
+  $("storage-archives").textContent =
+    `Упаковано игр: ${a.archived || 0} · архивы занимают ${mb(a.archive_bytes)} · ` +
+    `порог упаковки — ${a.max_age_days} дн. без обращения`;
+
+  const stale = (data.stale || []).length;
+  $("storage-stale").textContent = stale ? `залежалось: ${stale}` : "залежавшихся нет";
+
+  $("storage-packages").textContent = p.ready
+    ? `Стор: ${p.store_dir} — ${mb(p.store_bytes)} · кеш загрузок ${mb(p.cache_bytes)}`
+    : "Стор ещё не готов: pnpm устанавливается при первой сборке или запуске игры.";
+
+  const list = $("storage-list");
+  list.innerHTML = "";
+  const slugs = data.archived_slugs || [];
+  if (!slugs.length) {
+    list.appendChild(el("p", "dim", "Пока ни одна игра не упакована."));
+  }
+  slugs.forEach((slug) => {
+    const row = el("div", "storage-row");
+    row.appendChild(el("span", "storage-slug", esc(slug)));
+    const btn = el("button", "btn small", "📂 Распаковать");
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const res = await api(`/api/projects/${encodeURIComponent(slug)}/unpack`, { body: {} });
+      toast("Хранилище", res.message || "Готово", res.status === "error" ? "err" : "ok");
+      loadStorage();
+    };
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+
+  $("storage-log").textContent = data.logs || "";
+  $("storage-log").scrollTop = $("storage-log").scrollHeight;
+}
+
+function bindStorage() {
+  $("btn-refresh-storage").onclick = loadStorage;
+
+  $("btn-storage-sweep").onclick = async (e) => {
+    e.target.disabled = true;
+    const res = await api("/api/storage/sweep", { body: {} });
+    e.target.disabled = false;
+    toast("Хранилище", res.message || "Готово", "ok");
+    loadStorage();
+  };
+
+  $("btn-storage-prune").onclick = async (e) => {
+    e.target.disabled = true;
+    const res = await api("/api/storage/prune", { body: {} });
+    e.target.disabled = false;
+    toast("Стор пакетов", res.message || "Готово", res.status === "error" ? "err" : "ok");
+    loadStorage();
+  };
+}
+
 /* ── Расход токенов: фабрика целиком и каждый проект ──────────────────── */
 
 function usageTile(label, value, note) {
@@ -2502,6 +2585,10 @@ function handleEvent(topic, data) {
     case "projects.changed":
       if (state.view === "studio") loadGallery();
       if (state.view === "projects") loadProjects();
+      if (state.view === "storage") loadStorage();
+      break;
+    case "storage.log":
+      appendStorageLog(data.line);
       break;
     case "chats.changed":
       if (data.slug === state.project) loadChats();
@@ -2932,6 +3019,7 @@ function bindCommon() {
   if ($("btn-theme-toggle")) $("btn-theme-toggle").onclick = toggleTheme;
   $("btn-open-workspace-2").onclick = () => api("/api/open-workspace", { method: "POST" });
   $("btn-refresh-quota").onclick = loadQuota;
+  bindStorage();
   $("btn-save-settings").onclick = saveSettings;
   $("btn-activity-clear").onclick = clearActivity;
   $("btn-fish-test").onclick = async () => {

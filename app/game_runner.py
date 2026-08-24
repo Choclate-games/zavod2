@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from app import pkgstore
 from app.sandbox import ensure_inside_workspace
 
 # Vite печатает «  ➜  Local:   http://localhost:5173/»
@@ -29,7 +30,17 @@ LogFn = Callable[[str], None]
 
 
 def _npm_command() -> str:
-    """npm.cmd на Windows, npm в остальных системах."""
+    """
+    Чем запускать скрипты проекта.
+
+    Предпочитаем pnpm из общего стора: подмена npm в PATH работает, но Windows
+    ищет исполняемый файл не только по PATH дочернего процесса, и полагаться на
+    неё там, где можно указать путь напрямую, незачем. Если pnpm не поднялся —
+    обычный npm, игра всё равно запустится.
+    """
+    pnpm = pkgstore.find_pnpm()
+    if pnpm:
+        return str(pnpm)
     for candidate in (("npm.cmd", "npm") if sys.platform == "win32" else ("npm",)):
         if shutil.which(candidate):
             return candidate
@@ -150,12 +161,23 @@ class DevServer:
         return self.proc is not None and self.proc.poll() is None
 
     def install_dependencies(self) -> int:
-        """npm install — нужен при первом запуске проекта."""
+        """
+        Установка зависимостей перед первым запуском проекта.
+
+        Пакеты берутся из общего стора фабрики: в первый раз они действительно
+        качаются, дальше `node_modules` собирается из стора жёсткими ссылками —
+        без сети и почти без места на диске. См. app/pkgstore.py.
+        """
+        pnpm = pkgstore.ensure_pnpm(self.on_log)
+        pkgstore.ensure_project_config(self.project_dir)
+        if pnpm:
+            self.on_log("📦 Установка зависимостей из общего стора пакетов...\n")
+            return self._run_blocking([str(pnpm), "install"])
         self.on_log("📦 npm install — установка зависимостей, это может занять пару минут...\n")
         return self._run_blocking([_npm_command(), "install"])
 
     def build(self) -> int:
-        self.on_log("🏗️ npm run build...\n")
+        self.on_log("🏗️ Сборка проекта (npm run build)...\n")
         return self._run_blocking([_npm_command(), "run", "build"])
 
     def _run_blocking(self, cmd: list[str]) -> int:
@@ -317,7 +339,9 @@ class DevServer:
 
     @staticmethod
     def _env() -> dict:
-        env = os.environ.copy()
+        # pkgstore.env кладёт в PATH подмену npm/npx: даже если в package.json
+        # прописано `npm run …`, пакеты придут из общего стора.
+        env = pkgstore.env(os.environ.copy(), bootstrap=False)
         env["FORCE_COLOR"] = "0"
         env["NO_COLOR"] = "1"
         env["BROWSER"] = "none"  # чтобы Vite не открывал системный браузер сам

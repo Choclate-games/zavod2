@@ -70,9 +70,17 @@ class UploadError(RuntimeError):
 
 # ── Пути ────────────────────────────────────────────────────────────────────
 
-def uploads_dir(slug: str) -> Path:
+def uploads_dir(slug: str, create: bool = True) -> Path:
+    """
+    Папка вложений проекта.
+
+    `create=False` — для чтения: у упакованной игры каталога на диске нет, и
+    `mkdir` воскресил бы пустую папку, из-за чего проект перестал бы считаться
+    заархивированным (см. app/archive.py).
+    """
     directory = ensure_inside_workspace(project_dir(slug) / UPLOADS_DIRNAME)
-    directory.mkdir(parents=True, exist_ok=True)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
@@ -93,7 +101,7 @@ def resolve(slug: str, name: str) -> Optional[Path]:
     safe = _safe_name(name)
     if not safe or safe != name.strip():
         return None
-    path = uploads_dir(slug) / safe
+    path = uploads_dir(slug, create=False) / safe
     try:
         ensure_inside_workspace(path)
     except SandboxViolation:
@@ -123,8 +131,10 @@ def save(slug: str, filename: str, payload: str) -> Dict[str, Any]:
 def list_files(slug: str) -> List[Dict[str, Any]]:
     """Вложения проекта, свежие сверху."""
     try:
-        directory = uploads_dir(slug)
+        directory = uploads_dir(slug, create=False)
     except SandboxViolation:
+        return []
+    if not directory.is_dir():
         return []
     files = [_describe(path) for path in directory.iterdir() if path.is_file()]
     return sorted(files, key=lambda f: f["modified_ts"], reverse=True)

@@ -1,17 +1,18 @@
 """
 Сервисный слой веб-фабрики.
 
-Здесь живёт вся логика, которая раньше была размазана по CustomTkinter-окну:
-пайплайн генерации ТЗ, кодогенерация терминальными агентами, чаты проектов,
-dev-сервер игры, квоты и настройки. Веб-слой (app/web/api.py) только принимает
-HTTP-запросы и отдаёт события браузеру через шину `app.web.bus`.
+Здесь живёт вся логика фабрики: пайплайн генерации ТЗ, кодогенерация
+терминальными агентами, чаты проектов, dev-сервер игры, хранилище проектов,
+квоты и настройки. Веб-слой (app/web/api.py) только принимает HTTP-запросы и
+отдаёт события браузеру через шину `app.web.bus`.
 
-Долгие операции идут в фоновых потоках — ровно как в десктопной версии, — а
-браузер получает их ход событиями SSE, поэтому интерфейс не «дёргается».
+Долгие операции идут в фоновых потоках, а браузер получает их ход событиями
+SSE, поэтому интерфейс не «дёргается».
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -28,7 +29,7 @@ from urllib.parse import urlparse
 import yaml
 
 from app import acceptance, chat_store, library, notify, project_meta, sandbox, snapshots, uploads
-from app import gate_stats
+from app import archive, gate_stats, pkgstore
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
@@ -270,10 +271,24 @@ class FactoryService:
         # localStorage (а с ним и прогресс) стартовал пустым.
         self._last_ports: Dict[str, int] = {}
 
+        # ── Хранилище проектов ──
+        # Игра, к которой давно не обращались, уезжает в zip (app/archive.py).
+        # Сборщик работает в фоне и сам обходит занятые проекты.
+        self._storage_logs: List[str] = []
+        self._sweeper_stop = threading.Event()
+        # Первое обращение к каталогу архивов переносит их из старого места
+        # (workspace/.factory/archives) в zip_projects/. Делаем это до того,
+        # как витрина пойдёт искать упакованные игры.
+        archive.archives_dir()
+
         self.append_log("Система готова к разработке. Опишите идею и нажмите «🚀 СОЗДАТЬ ИГРУ ПОД КЛЮЧ».")
         register_log_listener(self._on_global_log_event)
         # Вложения чата живут неделю — подметаем просроченные при старте фабрики.
         uploads.cleanup_async()
+        # Стор пакетов готовим сразу: агент запускает `npm install` сам, и
+        # подмена npm в PATH должна существовать раньше первой задачи.
+        pkgstore.warm_up(self._storage_log)
+        self._start_sweeper()
 
     # =====================================================================
     # Студия: журнал и прогресс
@@ -909,8 +924,10 @@ class FactoryService:
         поднимает браузер — это минуты, а не секунды.
         """
         try:
-            project = sandbox.project_dir(slug)
-        except sandbox.SandboxViolation as exc:
+            # Приёмка ставит зависимости, собирает и запускает игру — архив
+            # разворачиваем до начала, а не посреди прогона.
+            project = self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
         if not (project / "package.json").exists():
             return {"status": "error", "message": "У проекта ещё нет кода — принимать нечего."}
@@ -1061,10 +1078,19 @@ class FactoryService:
     def project_is_playable(self, slug: Optional[str]) -> bool:
         if not slug:
             return False
+        # Через archive, а не по диску: у упакованной игры package.json лежит
+        # в zip, но играбельной она от этого быть не перестала.
+        return bool(slug) and archive.file_exists(slug, "package.json")
+
+    def _project_data(self, slug: str, filename: str = "GAME_DATA.yaml") -> Dict[str, Any]:
+        """YAML проекта — с диска или прямо из архива, без распаковки."""
+        raw = archive.read_text(slug, filename)
+        if not raw:
+            return {}
         try:
-            return (sandbox.project_dir(slug) / "package.json").exists()
-        except sandbox.SandboxViolation:
-            return False
+            return yaml.safe_load(raw) or {}
+        except yaml.YAMLError:
+            return {}
 
     def list_projects(self) -> List[Dict[str, Any]]:
         """
@@ -1073,6 +1099,10 @@ class FactoryService:
         Сортировка идёт по дате появления игры, а не по mtime каталога:
         иначе любая правка агента в старой игре выкидывала бы её на первое
         место и «сначала новые» переставало работать.
+
+        Витрина принципиально ничего не распаковывает: спека, превью и число
+        чатов читаются прямо из zip. Иначе один заход в список игр развернул бы
+        на диск все архивы разом — ровно то, ради чего они и создавались.
         """
         projects: List[Dict[str, Any]] = []
         # Расход по всем проектам читается один раз: на карточке нужна только
@@ -1082,15 +1112,16 @@ class FactoryService:
             slug = path.name
             if slug == DEMO_SLUG:
                 continue  # у демо-стенда своя кнопка, в витрине игр ему не место
-            docs = sandbox.docs_dir(slug)
-            data = self._read_yaml(docs / "GAME_DATA.yaml")
-            preview = docs / "preview" / "concept_preview.png"
+            data = self._project_data(slug)
+            preview_stamp = archive.stamp(slug, "preview/concept_preview.png")
+            packed = archive.is_archived(slug)
             try:
                 stat = path.stat()
                 updated_ts = stat.st_mtime
-                updated = datetime.fromtimestamp(updated_ts).strftime("%d.%m %H:%M")
             except OSError:
-                updated_ts, updated = 0.0, ""
+                updated_ts = float(archive.stamp(slug, "GAME_DATA.yaml")) or 0.0
+            updated = (datetime.fromtimestamp(updated_ts).strftime("%d.%m %H:%M")
+                       if updated_ts else "")
             meta = project_meta.get(slug, created_fallback=self._created_fallback(path))
             created_at = meta.get("created_at") or ""
             projects.append({
@@ -1101,8 +1132,11 @@ class FactoryService:
                 "score": (data.get("scores") or {}).get("overall_score", "-"),
                 "hook": data.get("hook", ""),
                 "playable": self.project_is_playable(slug),
-                "has_preview": preview.exists(),
-                "preview_mtime": int(preview.stat().st_mtime) if preview.exists() else 0,
+                "has_preview": bool(preview_stamp),
+                "preview_mtime": preview_stamp,
+                # Игра лежит в zip: работать с ней можно, первое действие
+                # развернёт её само — карточке нужен лишь значок.
+                "packed": packed,
                 "updated_at": updated,
                 "updated_ts": updated_ts,
                 "created_at": created_at,
@@ -1118,19 +1152,27 @@ class FactoryService:
                 # Приёмка вместо самооценки. Поле score выставляет модель ещё до
                 # того, как написана первая строка кода, — с игрой оно не связано
                 # никак. Здесь лежит то, что фабрика проверила запуском.
-                **self._gate_card(path),
+                **self._gate_card(slug),
             })
         projects.sort(key=lambda p: (p["created_at"], p["updated_ts"]), reverse=True)
         return projects
 
     @staticmethod
-    def _gate_card(path) -> Dict[str, Any]:
+    def _gate_card(slug: str) -> Dict[str, Any]:
         """Строки приёмки для карточки: состояние, числа игрока, дата прогона.
 
         Пустой словарь означает ровно одно — приёмка по этой игре не гонялась,
         и утверждать о ней нечего.
         """
-        gate = acceptance.read_gate(path)
+        raw = archive.read_text(slug, f"{acceptance.FACTORY_DIR}/gate.json")
+        gate = None
+        if raw:
+            try:
+                data = json.loads(raw)
+                last = data.get("last") if isinstance(data, dict) else None
+                gate = last if isinstance(last, dict) else None
+            except ValueError:
+                gate = None
         if not gate:
             return {"gate_state": "none", "gate_summary": "приёмка не запускалась",
                     "gate_metrics": {}, "gate_at": "", "gate_failed": []}
@@ -1174,15 +1216,34 @@ class FactoryService:
                 "message": f"Оценка проекта: {stars}"}
 
     def set_project_archived(self, slug: str, archived: bool) -> Dict[str, Any]:
-        """Архив прячет игру из витрины, но ничего не удаляет с диска."""
+        """
+        Архив прячет игру из витрины и сразу пакует её в zip.
+
+        Ждать три дня, как для залежавшихся, тут не нужно: человек уже сказал,
+        что игра ему сейчас не нужна. Возврат из архива, наоборот, ничего не
+        распаковывает — это сделает первое же действие, и распаковка ради
+        одной кнопки была бы работой впустую.
+        """
+        note = ""
         if archived:
             self.stop_play(slug)
         meta = project_meta.set_archived(slug, archived)
+
+        if archived and not self._project_busy(slug):
+            try:
+                result = archive.pack(slug, self._storage_log)
+                if result.get("archived"):
+                    note = f" · {result.get('message', '')}"
+            except archive.ArchiveError as exc:
+                # Не упаковалось — игра всё равно убрана с полки, это главное.
+                self._storage_log(f"⚠️ {slug}: упаковать при уборке в архив не вышло — {exc}")
+
         bus.publish("projects.changed")
         return {
             "status": "success",
             "archived": meta["archived"],
-            "message": "📦 Игра убрана в архив" if archived else "↩️ Игра возвращена из архива",
+            "message": (f"📦 Игра убрана в архив{note}" if archived
+                        else "↩️ Игра возвращена из архива"),
         }
 
     def set_project_favorite(self, slug: str, favorite: bool) -> Dict[str, Any]:
@@ -1203,7 +1264,7 @@ class FactoryService:
     def project_title(self, slug: str) -> str:
         """Как игра называется сейчас: имя от пользователя важнее имени из спеки."""
         meta = project_meta.get(slug)
-        data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
+        data = self._project_data(slug)
         return meta.get("title") or data.get("title") or slug
 
     def rename_project(self, slug: str, title: str) -> Dict[str, Any]:
@@ -1221,8 +1282,11 @@ class FactoryService:
             return {"status": "error", "message": "Название длиннее 120 символов."}
 
         try:
+            # Название пишется в GAME_DATA.yaml, а внутрь zip не пишут —
+            # значит переименование разворачивает архив.
+            self.live_dir(slug)
             data_path = sandbox.docs_dir(slug) / "GAME_DATA.yaml"
-        except sandbox.SandboxViolation as exc:
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
 
         meta = project_meta.set_title(slug, title)
@@ -1269,6 +1333,15 @@ class FactoryService:
                     removed.append(str(target))
                 except OSError as exc:
                     return {"status": "error", "message": f"Не удалось удалить {target}: {exc}"}
+        # Упакованная копия — тоже игра: оставить её значило бы «удалить»
+        # проект, который назавтра вернётся в витрину из архива.
+        try:
+            zip_path = archive.archive_path(slug)
+            if zip_path.is_file():
+                zip_path.unlink()
+                removed.append(str(zip_path))
+        except (archive.ArchiveError, OSError) as exc:
+            return {"status": "error", "message": f"Не удалось удалить архив проекта: {exc}"}
         project_meta.forget(slug)
         bus.publish("projects.changed")
         if not removed:
@@ -1278,8 +1351,8 @@ class FactoryService:
 
     def project_detail(self, slug: str) -> Dict[str, Any]:
         docs = sandbox.docs_dir(slug)
-        data = self._read_yaml(docs / "GAME_DATA.yaml")
-        preview = docs / "preview" / "concept_preview.png"
+        data = self._project_data(slug)
+        preview_stamp = archive.stamp(slug, "preview/concept_preview.png")
         meta = project_meta.get(slug)
         return {
             "slug": slug,
@@ -1291,9 +1364,10 @@ class FactoryService:
             "score": (data.get("scores") or {}).get("overall_score", "N/A"),
             "hook": data.get("hook", ""),
             "preview_status": data.get("preview_status", "unknown"),
-            "has_preview": preview.exists(),
-            "preview_mtime": int(preview.stat().st_mtime) if preview.exists() else 0,
+            "has_preview": bool(preview_stamp),
+            "preview_mtime": preview_stamp,
             "playable": self.project_is_playable(slug),
+            "packed": archive.is_archived(slug),
             "docs_dir": str(docs),
             "project_dir": str(sandbox.project_dir(slug)),
             "rating": int(meta.get("rating") or 0),
@@ -1311,27 +1385,27 @@ class FactoryService:
         return candidates[1]
 
     def read_doc(self, slug: str, doc_key: str) -> Dict[str, Any]:
+        """Текст документа проекта. Упакованную игру ради чтения не разворачиваем."""
         filename = DOC_FILES.get(doc_key, doc_key)
-        path = self.resolve_doc_path(slug, filename)
-        if path.exists():
-            try:
-                return {"name": filename, "exists": True, "content": path.read_text(encoding="utf-8")}
-            except Exception as exc:
-                return {"name": filename, "exists": True, "content": f"Ошибка чтения файла {filename}: {exc}"}
+        content = archive.read_text(slug, filename)
+        if content is not None:
+            return {"name": filename, "exists": True, "content": content}
         return {"name": filename, "exists": False,
-                "content": f"Файл {filename} не найден в {sandbox.docs_dir(slug).name}"}
+                "content": f"Файл {filename} не найден в проекте {slug}"}
 
-    def preview_image_path(self, slug: str) -> Optional[Path]:
-        path = sandbox.docs_dir(slug) / "preview" / "concept_preview.png"
-        return path if path.exists() else None
+    def preview_image_bytes(self, slug: str) -> Optional[bytes]:
+        """Картинка концепта — из папки проекта либо прямо из архива."""
+        return archive.read_file(slug, "preview/concept_preview.png")
 
     def generate_preview(self, slug: str) -> Dict[str, Any]:
+        self.live_dir(slug)
         docs = sandbox.docs_dir(slug)
         self.pipeline.rebuild_preview(docs.name, docs.parent)
         bus.publish("projects.changed")
         return {"status": "success", "message": "✅ Превью готово"}
 
     def validate_project(self, slug: str) -> Dict[str, Any]:
+        self.live_dir(slug)
         folder = sandbox.docs_dir(slug)
         valid = OutputValidator().run_all(folder)
         return {
@@ -1341,6 +1415,7 @@ class FactoryService:
         }
 
     def rebuild_section(self, slug: str, section: str) -> Dict[str, Any]:
+        self.live_dir(slug)
         self.pipeline.rebuild_section(slug, section, config.output_dir)
         bus.publish("projects.changed")
         return {"status": "success", "message": f"✅ Секция «{section}» успешно обновлена!"}
@@ -1350,7 +1425,7 @@ class FactoryService:
     # =====================================================================
 
     def export_zip(self, slug: str) -> Path:
-        folder = sandbox.project_dir(slug)
+        folder = self.live_dir(slug)
         docs = sandbox.docs_dir(slug)
         zip_path = config.output_dir / f"{slug}.zip"
         sources = {folder}
@@ -1470,6 +1545,9 @@ class FactoryService:
         }
 
     def create_chat(self, slug: str) -> Dict[str, Any]:
+        # Новый чат — заявка на работу с игрой, поэтому здесь архив уже
+        # разворачивается: беседа пишется файлом внутрь проекта.
+        self.live_dir(slug)
         session = chat_store.create_session(slug)
         bus.publish("chats.changed", slug=slug)
         return self._session_summary(session)
@@ -1478,6 +1556,7 @@ class FactoryService:
         if self.chat_jobs.is_running(session_id):
             return {"status": "error",
                     "message": "Нельзя удалить чат, пока в нём работает агент — сначала нажмите «⏹ Стоп»."}
+        self.live_dir(slug)
         chat_store.delete_session(slug, session_id)
         bus.publish("chats.changed", slug=slug)
         return {"status": "success"}
@@ -1538,8 +1617,10 @@ class FactoryService:
 
     def save_upload(self, slug: str, filename: str, payload: str) -> Dict[str, Any]:
         try:
-            sandbox.project_dir(slug)
-        except sandbox.SandboxViolation as exc:
+            # Вложение ложится файлом в .factory/uploads/ проекта — значит проект
+            # должен быть распакован.
+            self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
         try:
             item = uploads.save(slug, filename, payload)
@@ -1557,6 +1638,7 @@ class FactoryService:
         }
 
     def delete_upload(self, slug: str, name: str) -> Dict[str, Any]:
+        self.live_dir(slug)
         if uploads.delete(slug, name):
             return {"status": "success", "message": "🗑 Вложение удалено"}
         return {"status": "error", "message": "Вложение не найдено."}
@@ -1603,8 +1685,10 @@ class FactoryService:
         if not prompt:
             prompt = "Посмотри приложенные файлы и скажи, что с ними делать."
         try:
-            proj_dir = sandbox.project_dir(slug)
-        except sandbox.SandboxViolation as exc:
+            # Задача агента — первое, ради чего игру действительно нужно
+            # развернуть на диске: до этого момента она может лежать в архиве.
+            proj_dir = self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
         if not proj_dir.exists():
             return {"status": "error", "message": f"Проект {slug} не найден в workspace/."}
@@ -1767,6 +1851,9 @@ class FactoryService:
         if target is None:
             return {"status": "error", "message": "У этого запроса нет снимка — откатывать нечего."}
 
+        # Снимки живут в теневом git внутри проекта: без распаковки git не
+        # с чем сравнивать, и список изменённых файлов вышел бы пустым.
+        self.live_dir(slug)
         message = session.messages[target]
         files = snapshots.changed_files(slug, message.snapshot or "")
         # Сколько сообщений уйдёт из переписки вместе с этим запросом.
@@ -1803,6 +1890,7 @@ class FactoryService:
             return {"status": "error", "message": "У этого запроса нет снимка — откатывать нечего."}
 
         message = session.messages[target]
+        self.live_dir(slug)
         try:
             affected = snapshots.restore_snapshot(slug, message.snapshot or "")
         except snapshots.SnapshotError as exc:
@@ -1981,9 +2069,10 @@ class FactoryService:
         project_dir = None
         if slug:
             try:
-                candidate = sandbox.project_dir(slug)
+                # Терминал открывается в каталоге игры — упакованную разворачиваем.
+                candidate = self.live_dir(slug)
                 project_dir = candidate if candidate.is_dir() else None
-            except sandbox.SandboxViolation:
+            except (sandbox.SandboxViolation, archive.ArchiveError):
                 project_dir = None
         try:
             provider = self.agent_provider(key, model=model, yolo=yolo)
@@ -1996,6 +2085,117 @@ class FactoryService:
                     "message": f"Открыт терминал {AGENT_LABELS.get(key, key)}. {hint}"}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+
+    # =====================================================================
+    # Хранилище: упаковка неактивных игр и общий стор node-пакетов
+    # =====================================================================
+
+    # Как часто фоновый сборщик обходит workspace.
+    SWEEP_INTERVAL_SECONDS = 3600
+    # Пауза перед первым обходом: сразу после старта человек обычно открывает
+    # ту игру, с которой закончил вчера, и паковать её в этот момент — вредно.
+    SWEEP_FIRST_DELAY_SECONDS = 600
+
+    def _storage_log(self, message: str) -> None:
+        line = message if message.endswith("\n") else message + "\n"
+        self._storage_logs.append(line)
+        del self._storage_logs[:-200]
+        bus.publish("storage.log", line=line)
+
+    def _project_busy(self, slug: str) -> bool:
+        """Игра в работе: поднят dev-сервер или в её чате трудится агент."""
+        entry = self.play.get(slug) or {}
+        server = entry.get("server")
+        if entry.get("starting") or (server and server.is_running):
+            return True
+        if any(job.slug == slug for job in self.chat_jobs.running_jobs()):
+            return True
+        # active — это queued|running: игру, которая стоит в очереди студии,
+        # паковать тоже нельзя, прогон дойдёт до неё сам.
+        return any(job.slug == slug for job in self.studio_jobs.active_jobs())
+
+    def live_dir(self, slug: str) -> Path:
+        """
+        Каталог проекта, готовый к работе: упакованная игра здесь разворачивается.
+
+        Это единственная точка, где происходит распаковка. Всё, что читает
+        карточку или документ, ходит мимо неё — через `archive.read_*`.
+        """
+        return archive.ensure_unpacked(slug, self._storage_log)
+
+    def _start_sweeper(self) -> None:
+        def loop() -> None:
+            if self._sweeper_stop.wait(self.SWEEP_FIRST_DELAY_SECONDS):
+                return
+            while not self._sweeper_stop.is_set():
+                try:
+                    self._sweep()
+                except Exception as exc:  # фон не имеет права ронять фабрику
+                    self._storage_log(f"⚠️ Сборщик хранилища споткнулся: {exc}")
+                if self._sweeper_stop.wait(self.SWEEP_INTERVAL_SECONDS):
+                    return
+
+        threading.Thread(target=loop, daemon=True, name="archive-sweeper").start()
+
+    def _sweep(self) -> Dict[str, Any]:
+        result = archive.sweep(
+            archive.DEFAULT_MAX_AGE_DAYS,
+            is_busy=self._project_busy,
+            on_log=self._storage_log,
+        )
+        if result["packed"]:
+            self._storage_log(
+                f"🗜 Упаковано игр: {len(result['packed'])}, "
+                f"освобождено {result['freed_bytes'] / 1048576:.1f} МБ."
+            )
+            bus.publish("projects.changed")
+        return result
+
+    def storage_state(self) -> Dict[str, Any]:
+        """Сводка вкладки «Хранилище»: архивы, стор пакетов, журнал сборщика."""
+        archives = archive.stats()
+        packages = pkgstore.stats()
+        return {
+            "archives": archives,
+            "packages": packages,
+            "archived_slugs": archive.archived_slugs(),
+            "stale": archive.candidates(archive.DEFAULT_MAX_AGE_DAYS),
+            "logs": "".join(self._storage_logs),
+        }
+
+    def pack_project(self, slug: str) -> Dict[str, Any]:
+        if self._project_busy(slug):
+            return {"status": "error",
+                    "message": "Игра сейчас в работе — сначала остановите сервер и агента."}
+        try:
+            result = archive.pack(slug, self._storage_log)
+        except archive.ArchiveError as exc:
+            return {"status": "error", "message": str(exc)}
+        bus.publish("projects.changed")
+        return result
+
+    def unpack_project(self, slug: str) -> Dict[str, Any]:
+        try:
+            folder = archive.unpack(slug, self._storage_log)
+        except archive.ArchiveError as exc:
+            return {"status": "error", "message": str(exc)}
+        bus.publish("projects.changed")
+        return {"status": "success", "path": str(folder), "message": "Проект распакован."}
+
+    def sweep_storage(self) -> Dict[str, Any]:
+        """Ручной прогон сборщика — та же логика, что и по расписанию."""
+        result = self._sweep()
+        if not result["packed"]:
+            result["message"] = "Паковать нечего: все игры свежие или заняты."
+        else:
+            result["message"] = (f"Упаковано игр: {len(result['packed'])}, "
+                                 f"освобождено {result['freed_bytes'] / 1048576:.1f} МБ.")
+        result["status"] = "success"
+        return result
+
+    def prune_packages(self) -> Dict[str, Any]:
+        """Чистка общего стора: версии пакетов, которых нет ни в одной игре."""
+        return pkgstore.prune(self._storage_log)
 
     # =====================================================================
     # Запуск игры: dev-сервер и предпросмотр
@@ -2072,8 +2272,10 @@ class FactoryService:
 
     def start_play(self, slug: str) -> Dict[str, Any]:
         try:
-            proj_dir = sandbox.project_dir(slug)
-        except sandbox.SandboxViolation as exc:
+            # Запуск игры — второй повод развернуть архив: dev-серверу нужны
+            # настоящие файлы, а не содержимое zip.
+            proj_dir = self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
 
         entry = self._play_entry(slug)
@@ -2138,8 +2340,8 @@ class FactoryService:
 
     def build_play(self, slug: str) -> Dict[str, Any]:
         try:
-            proj_dir = sandbox.project_dir(slug)
-        except sandbox.SandboxViolation as exc:
+            proj_dir = self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
             return {"status": "error", "message": str(exc)}
         server = DevServer(proj_dir, on_log=lambda m: self._play_log(slug, m), on_url=lambda _u: None)
         threading.Thread(target=server.build, daemon=True).start()
@@ -2163,7 +2365,7 @@ class FactoryService:
         по каталогу при распаковке (этого же ждут площадки вроде Yandex Games).
         Ход сборки уходит в лог вкладки «Игра» обычными событиями play.log.
         """
-        proj_dir = sandbox.project_dir(slug)
+        proj_dir = self.live_dir(slug)
         server = DevServer(proj_dir, on_log=lambda m: self._play_log(slug, m), on_url=lambda _u: None)
 
         has_build = "build" in read_scripts(proj_dir)
@@ -2405,7 +2607,9 @@ class FactoryService:
                 "tokens_weekly_human": human_tokens(row["tokens_weekly"]),
                 "agents": [{**a, "label": AGENT_LABELS.get(a["agent"], a["agent"])}
                            for a in row["agents"]],
-                "exists": bool(slug) and sandbox.project_dir(slug).is_dir() if slug else False,
+                # Упакованная игра существует ровно так же, как распакованная.
+                "exists": bool(slug) and (sandbox.project_dir(slug).is_dir()
+                                          or archive.has_archive(slug)) if slug else False,
             })
 
         return {
@@ -2427,8 +2631,7 @@ class FactoryService:
         try:
             title = str(project_meta.get(slug).get("title") or "").strip()
             if not title:
-                data = self._read_yaml(sandbox.docs_dir(slug) / "GAME_DATA.yaml")
-                title = str((data or {}).get("title") or "").strip()
+                title = str(self._project_data(slug).get("title") or "").strip()
         except Exception:
             return slug
         return f"{title} · {slug}" if title else slug

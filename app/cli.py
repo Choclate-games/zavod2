@@ -433,12 +433,5 @@ def lessons():
     console.print(table)
 
 
-@app.command(name="gui", help="УСТАРЕЛО: десктопное окно. Используйте веб (run_web.py).")
-def launch_gui():
-    from app.gui.ctk_app import run_gui
-    console.print("[bold yellow]⚠ Десктопное окно устарело и не развивается — "
-                  "рабочий интерфейс фабрики это веб (start.bat / python run_web.py).[/bold yellow]")
-    run_gui()
-
 if __name__ == "__main__":
     app()

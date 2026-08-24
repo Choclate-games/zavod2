@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from app import pkgstore
 from app.sandbox import ensure_inside_workspace
 from generators.check_spec_script import CHECK_SPEC_MJS
 from generators.smoke_script import SMOKE_MJS
@@ -196,6 +197,8 @@ def _run(cmd: List[str], cwd: Path, on_log: LogFn, stop_check: Optional[StopFn],
             cmd, cwd=str(cwd),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
+            # Общий стор пакетов: npm в PATH подменён на pnpm со сквозным кешем.
+            env=pkgstore.env(bootstrap=False),
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
     except OSError as exc:
@@ -267,13 +270,17 @@ def _needs_install(project_dir: Path) -> bool:
     if not modules.exists():
         return True
     package = project_dir / "package.json"
-    stamp = modules / ".package-lock.json"
     if not package.exists():
         return False
-    if not stamp.exists():
+    # Отметка о последней установке: у npm это .package-lock.json, у pnpm —
+    # .modules.yaml. Берём ту, которая есть, иначе установка гонялась бы заново
+    # перед каждой приёмкой.
+    stamps = [p for p in (modules / ".package-lock.json", modules / ".modules.yaml")
+              if p.exists()]
+    if not stamps:
         return True
     try:
-        return package.stat().st_mtime > stamp.stat().st_mtime
+        return package.stat().st_mtime > max(p.stat().st_mtime for p in stamps)
     except OSError:
         return True
 
@@ -306,11 +313,14 @@ def run_gate(
     _drop_reports(project_dir)
 
     if _needs_install(project_dir):
-        on_log("📦 npm install перед приёмкой...\n")
-        code, tail = _run([_npm(), "install"], project_dir, on_log, stop_check, INSTALL_TIMEOUT)
+        on_log("📦 Установка зависимостей перед приёмкой...\n")
+        pnpm = pkgstore.ensure_pnpm(on_log)
+        pkgstore.ensure_project_config(project_dir)
+        install_cmd = [str(pnpm), "install"] if pnpm else [_npm(), "install"]
+        code, tail = _run(install_cmd, project_dir, on_log, stop_check, INSTALL_TIMEOUT)
         report.stages["install"] = code
         if code != 0:
-            report.blockers.append(f"npm install завершился с кодом {code}")
+            report.blockers.append(f"установка зависимостей завершилась с кодом {code}")
             report.log_tail = tail
             report.seconds = int(time.time() - started)
             return report

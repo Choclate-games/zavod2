@@ -81,8 +81,21 @@ def docs_dir(slug: str) -> Path:
     return project
 
 
+def archives_dir() -> Path:
+    """Где лежат упакованные проекты. Подробности — в app/archive.py."""
+    return config.archive_dir
+
+
 def list_projects() -> list[Path]:
-    """Каталоги проектов в workspace (спека и/или исходники), свежие сверху."""
+    """
+    Проекты фабрики, свежие сверху.
+
+    Возвращаются пути `workspace/<slug>/` — в том числе для игр, которые сейчас
+    упакованы в zip и на диске каталога не имеют. Витрина работает по слагу и
+    читает содержимое через `app/archive.read_file()`, поэтому список не обязан
+    ограничиваться распакованными играми (иначе половина витрины исчезала бы
+    после первого же прохода фонового сборщика).
+    """
     root = workspace_root()
     if not root.exists():
         return []
@@ -92,16 +105,36 @@ def list_projects() -> list[Path]:
         and not p.name.startswith(".")
         and ((p / "GAME_DATA.yaml").exists() or (p / "package.json").exists())
     ]
+    known = {p.name for p in projects}
+
+    archives = archives_dir()
+    if archives.is_dir():
+        for zip_path in archives.glob("*.zip"):
+            if zip_path.stem not in known:
+                projects.append(root / zip_path.stem)
+                known.add(zip_path.stem)
+
     # Игры, оставшиеся только в старом output/, тоже должны быть в списке —
     # иначе их спецификация пропадает из интерфейса.
-    known = {p.name for p in projects}
     legacy_root = config.base_dir / "output"
     if legacy_root.exists():
         for p in legacy_root.iterdir():
             if (p.is_dir() and not p.name.startswith(".")
                     and p.name not in known and (p / "GAME_DATA.yaml").exists()):
                 projects.append(p)
-    return sorted(projects, key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(projects, key=_sort_mtime, reverse=True)
+
+
+def _sort_mtime(path: Path) -> float:
+    """mtime каталога, а для упакованного проекта — mtime его архива."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        pass
+    try:
+        return (archives_dir() / f"{path.name}.zip").stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +181,12 @@ def ensure_project_docs(directory: Path, title: str = "") -> None:
     directory.mkdir(parents=True, exist_ok=True)
     title = title or directory.name
     date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Агент запускает `npm install` сам, посреди задачи. `.npmrc` в корне
+    # проекта уводит установку в общий стор фабрики независимо от того, кто и
+    # чем её запустил, — знать про pnpm агенту при этом не нужно.
+    from app import pkgstore  # локальный импорт: pkgstore читает config, как и мы
+    pkgstore.ensure_project_config(directory)
 
     devlog = directory / DEVLOG_NAME
     if not devlog.exists():

@@ -13,6 +13,11 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 # Единственный корень для всех проектов игр: и документация, и исходный код.
 # Кодовый агент запускается строго внутри него (см. app/sandbox.py).
 DEFAULT_WORKSPACE_DIR = BASE_DIR / "workspace"
+# Упакованные игры лежат ОТДЕЛЬНО от workspace, а не внутри него: workspace —
+# песочница кодового агента, и складывать архивы соседних проектов в каталог,
+# по которому он ходит, незачем. Плюс так папка с играми видна глазами:
+# «zip_projects/» рядом с «workspace/». См. app/archive.py.
+DEFAULT_ARCHIVE_DIR = BASE_DIR / "zip_projects"
 
 def _flag(name: str, default: bool) -> bool:
     """Булев ключ .env: 1/true/yes/on — включено, всё остальное — выключено."""
@@ -39,6 +44,8 @@ class AppConfig:
         # проекты создаются в workspace/, чтобы агент не выходил за её пределы.
         self.output_dir = Path(os.getenv("OUTPUT_DIR", str(self.workspace_dir))).resolve()
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        # Каталог упакованных игр. По умолчанию — рядом с workspace.
+        self.archive_dir = Path(os.getenv("ARCHIVE_DIR", str(DEFAULT_ARCHIVE_DIR))).resolve()
 
         # Load yaml configs
         self.factory_cfg = load_yaml(CONFIG_DIR / "factory.yaml")

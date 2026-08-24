@@ -27,6 +27,7 @@
     <button class="nav-btn" data-view="play"><span class="nav-icon">🌐</span> Играть<span class="nav-badge hidden" id="nav-play-badge"></span></button>
     <button class="nav-btn" data-view="demo"><span class="nav-icon">🧪</span> Демо-стенд<span class="nav-badge hidden" id="nav-demo-badge">●</span></button>
     <button class="nav-btn" data-view="quota"><span class="nav-icon">📊</span> Квоты агентов</button>
+    <button class="nav-btn" data-view="storage"><span class="nav-icon">🗜</span> Хранилище</button>
     <button class="nav-btn" data-view="settings"><span class="nav-icon">⚙️</span> Настройки</button>
 
     <!-- Активность: что агенты делают прямо сейчас -->
@@ -414,6 +415,52 @@
         <div class="usage-table" id="usage-projects"></div>
 
         <p class="dim" id="quota-meta" style="margin-top:18px;white-space:pre-line"></p>
+      </div>
+    </section>
+
+    <!-- ── Хранилище ────────────────────────────────────────────────── -->
+    <section class="view" id="view-storage">
+      <div class="panel grow scroll">
+        <div class="row spread">
+          <h2>🗜 Хранилище</h2>
+          <button class="btn small" id="btn-refresh-storage">🔄 Обновить</button>
+        </div>
+        <p class="dim" style="margin:6px 0 14px">
+          Игра, к которой давно не обращались, уезжает в zip и освобождает диск. Обратно она
+          разворачивается сама — при первом же действии: новый чат, задача агенту, запуск или сборка.
+          Витрина и вкладки ТЗ читают спецификацию прямо из архива и ничего не распаковывают.
+        </p>
+
+        <div class="settings-card">
+          <div class="row spread">
+            <h3>📦 Упакованные игры</h3>
+            <div class="row">
+              <span class="dim" id="storage-stale"></span>
+              <button class="btn small" id="btn-storage-sweep">🗜 Упаковать залежавшиеся</button>
+            </div>
+          </div>
+          <p class="small" id="storage-archives" style="margin:8px 0 0"></p>
+          <div id="storage-list" class="storage-list"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <div class="row spread">
+            <h3>📚 Общий стор node-пакетов</h3>
+            <button class="btn small" id="btn-storage-prune">🧹 Выбросить лишние пакеты</button>
+          </div>
+          <p class="dim" style="margin:8px 0">
+            Пакеты лежат в одном экземпляре на все игры, а в <code>node_modules</code> попадают
+            жёсткими ссылками: второй раз одна и та же зависимость не качается и места не занимает.
+            Привычный <code>npm install</code> уходит сюда сам — и когда его запускает фабрика,
+            и когда его посреди задачи запускает агент.
+          </p>
+          <p class="small" id="storage-packages"></p>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>📜 Журнал</h3>
+          <pre class="log small" id="storage-log" style="max-height:240px"></pre>
+        </div>
       </div>
     </section>
 

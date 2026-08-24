@@ -49,6 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from app import pkgstore
 from app.config import config
 
 from app.logging import log_warning
@@ -225,6 +226,10 @@ class CodingCLIAgent(AIProvider):
             env["ZAVOD_KNOWLEDGE_TOKEN"] = token
         env.setdefault("KNOWLEDGE_REPO", getattr(config, "knowledge_repo", ""))
         env.setdefault("KNOWLEDGE_REF", getattr(config, "knowledge_ref", "main"))
+        # Общий стор node-пакетов. Агент пишет и запускает `npm install` сам, и
+        # без этого каждая игра качала бы свои сто мегабайт заново; подмена npm
+        # в PATH уводит установку в стор, не заставляя агента знать про pnpm.
+        env = pkgstore.env(env, bootstrap=False)
         return env
 
     def effort_args(self) -> List[str]:
@@ -1133,6 +1138,7 @@ class OpenCodeCLIAgent(CodingCLIAgent):
     hidden_env_keys = ("DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL")
 
     def prepare_env(self, env: Dict[str, str]) -> Dict[str, str]:
+        env = super().prepare_env(env)
         for key in self.hidden_env_keys:
             env.pop(key, None)
         return env
@@ -1351,7 +1357,7 @@ AGENT_CLASSES: Dict[str, Type[CodingCLIAgent]] = {
     # Kimi отключён по решению пользователя: подпиской больше не пользуемся.
     # Класс KimiAgent намеренно оставлен рабочим — чтобы вернуть агента,
     # достаточно раскомментировать эту строку (и строку в AGENT_LABELS
-    # в app/web/service.py и app/gui/ctk_app.py).
+    # в app/web/service.py).
     # KimiAgent.key: KimiAgent,
     OpenCodeCLIAgent.key: OpenCodeCLIAgent,
 }

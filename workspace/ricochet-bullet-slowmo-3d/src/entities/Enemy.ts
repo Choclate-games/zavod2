@@ -1,3 +1,0 @@
-import * as THREE from 'three';
-import { RagdollController } from '../physics/RagdollController';
-export class Enemy { readonly mesh = new THREE.Group(); readonly ragdoll: RagdollController; alive = true; constructor(position: THREE.Vector3, material: THREE.Material) { const body = new THREE.Mesh(new THREE.BoxGeometry(.55, 1, .35), material); body.position.y = .55; this.mesh.add(body); this.mesh.position.copy(position); this.ragdoll = new RagdollController(this.mesh); } hit(direction: THREE.Vector3): void { if (!this.alive) return; this.alive = false; this.ragdoll.explode(direction); } update(dt: number): void { if (!this.alive) this.ragdoll.update(dt); } }

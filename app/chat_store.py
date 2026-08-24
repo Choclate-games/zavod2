@@ -72,15 +72,24 @@ class ChatSession:
         )
 
 
-def _chats_dir(slug: str) -> Path:
+def _chats_dir(slug: str, create: bool = True) -> Path:
+    """
+    Каталог бесед проекта.
+
+    `create=False` обязателен для всего, что только читает: у упакованного
+    проекта каталога на диске нет, и `mkdir` воскресил бы пустую папку — игра
+    перестала бы считаться заархивированной, а список чатов всё равно
+    оказался бы пустым.
+    """
     directory = ensure_inside_workspace(project_dir(slug) / CHATS_DIRNAME)
-    directory.mkdir(parents=True, exist_ok=True)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
-def _session_path(slug: str, session_id: str) -> Path:
+def _session_path(slug: str, session_id: str, create: bool = True) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_-]", "", session_id) or "session"
-    return _chats_dir(slug) / f"{safe}.json"
+    return _chats_dir(slug, create=create) / f"{safe}.json"
 
 
 def session_path(slug: str, session_id: str) -> Path:
@@ -89,17 +98,24 @@ def session_path(slug: str, session_id: str) -> Path:
 
 
 def list_sessions(slug: str) -> List[ChatSession]:
-    """Все беседы проекта, свежие сверху."""
-    try:
-        directory = _chats_dir(slug)
-    except Exception:
-        return []
+    """
+    Все беседы проекта, свежие сверху.
+
+    У упакованной игры читается прямо из архива: витрина показывает число чатов
+    на каждой карточке, и разворачивать ради этого полсотни архивов незачем.
+    """
+    from app import archive  # локально: archive тянет sandbox, как и этот модуль
 
     sessions: List[ChatSession] = []
-    for path in directory.glob("*.json"):
+    for name in archive.list_entries(slug, str(CHATS_DIRNAME)):
+        if not name.endswith(".json"):
+            continue
+        raw = archive.read_text(slug, name)
+        if raw is None:
+            continue
         try:
-            sessions.append(ChatSession.from_dict(json.loads(path.read_text(encoding="utf-8"))))
-        except (OSError, ValueError, TypeError):
+            sessions.append(ChatSession.from_dict(json.loads(raw)))
+        except (ValueError, TypeError):
             continue  # битый файл не должен ломать список чатов
     return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
 
@@ -120,12 +136,21 @@ def create_session(slug: str, title: str = "", kind: str = "chat",
 
 
 def load_session(slug: str, session_id: str) -> Optional[ChatSession]:
-    path = _session_path(slug, session_id)
-    if not path.exists():
+    from app import archive
+
+    path = _session_path(slug, session_id, create=False)
+    if path.exists():
+        try:
+            return ChatSession.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            return None
+
+    raw = archive.read_text(slug, f"{CHATS_DIRNAME.as_posix()}/{path.name}")
+    if raw is None:
         return None
     try:
-        return ChatSession.from_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError, TypeError):
+        return ChatSession.from_dict(json.loads(raw))
+    except (ValueError, TypeError):
         return None
 
 
