@@ -691,7 +691,12 @@ function renderFavorites() {
 }
 
 async function loadGallery() {
-  const { projects } = await api("/api/projects");
+  const res = await fetchProjectsList();
+  const projects = Array.isArray(res.projects) ? res.projects : null;
+  if (!projects) {
+    toast("Проекты", res.message || "Не удалось обновить список игр", "error");
+    return;
+  }
   state.projects = projects;
   const box = $("gallery");
   box.innerHTML = "";
@@ -751,8 +756,27 @@ async function loadGallery() {
 
 /* ── Проекты ──────────────────────────────────────────────────────────── */
 
+// loadProjects() и loadGallery() почти всегда запускаются вместе (например
+// при старте), и оба ходят за одним и тем же списком. Без разделения это
+// два параллельных запроса к /api/projects вместо одного.
+let _projectsInFlight = null;
+function fetchProjectsList() {
+  if (!_projectsInFlight) {
+    _projectsInFlight = api("/api/projects").finally(() => { _projectsInFlight = null; });
+  }
+  return _projectsInFlight;
+}
+
 async function loadProjects() {
-  const { projects } = await api("/api/projects");
+  const res = await fetchProjectsList();
+  const projects = Array.isArray(res.projects) ? res.projects : null;
+  if (!projects) {
+    // Запрос не удался (сервер ещё поднимается, оборвалось соединение) —
+    // список остаётся как был, лучше показать старые карточки, чем стереть
+    // всё и упасть на projects.length от undefined.
+    toast("Проекты", res.message || "Не удалось обновить список проектов", "error");
+    return;
+  }
   state.projects = projects;
   const box = $("projects-list");
   box.innerHTML = "";
@@ -3118,10 +3142,21 @@ async function boot() {
   connectEvents();
   loadActivity();          // панель активности не ждёт медленной витрины проектов
   startActivityTimer();
-  await loadProjects();
-  await loadStudioState();
-  await loadStudioAttachments();
-  await loadGallery();
+
+  // Сразу открываем сохранённую вкладку: showView запускает её собственный
+  // загрузчик (loadProjects/loadGallery) немедленно. Раньше это делалось
+  // самым последним шагом, в конце цепочки await'ов — из-за этого нужная
+  // вкладка простаивала пустой, пока грузилось совсем не связанное с ней
+  // состояние студии.
+  showView(state.view);
+
+  // Независимые загрузки — параллельно, а не одна за другой; loadProjects
+  // и loadGallery делят один запрос к /api/projects через fetchProjectsList.
+  await Promise.all([
+    loadProjects(),
+    loadStudioState(),
+    loadStudioAttachments(),
+  ]);
   loadQuota();
   refreshModels(true);
 
@@ -3129,7 +3164,6 @@ async function boot() {
     const exists = (state.projects || []).some((p) => p.slug === state.project);
     if (!exists) { state.project = null; localStorage.removeItem("project"); }
   }
-  showView(state.view);
   if (state.project && state.view === "projects") selectProject(state.project);
 }
 

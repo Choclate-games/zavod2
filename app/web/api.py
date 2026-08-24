@@ -293,7 +293,10 @@ def project_preview(slug: str):
     data = service.preview_image_bytes(_slug(slug))
     if not data:
         raise HTTPException(status_code=404, detail="Превью не найдено")
-    return Response(content=data, media_type="image/png")
+    # URL несёт версию через ?v=preview_mtime — при пересборке превью адрес
+    # меняется сам, поэтому старую картинку можно кешировать бессрочно.
+    return Response(content=data, media_type="image/png",
+                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.post("/api/projects/{slug}/preview")

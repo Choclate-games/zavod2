@@ -28,6 +28,12 @@ from urllib.parse import urlparse
 
 import yaml
 
+# PyYAML's Python SafeLoader parses at ~0.5 МБ/с — на полусотне GAME_DATA.yaml
+# (по ~200 КБ каждый) это превращало витрину проектов в десятки секунд
+# ожидания. CSafeLoader — те же правила безопасного парсинга, но через
+# libyaml на C, на порядок быстрее; используем его, если он доступен.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 from app import acceptance, chat_store, library, notify, project_meta, sandbox, snapshots, uploads
 from app import archive, gate_stats, pkgstore
 from app.build_loop import build_game
@@ -239,6 +245,11 @@ class FactoryService:
         self.agy_quota_tracker = AGYQuotaTracker()
         self.agent_usage_tracker = AgentUsageTracker()
         self.chat_jobs = ChatJobManager()
+        # Кеш разобранных GAME_DATA.yaml: витрину открывают заново при каждом
+        # переключении вкладки (студия/проекты/избранное), а YAML проекта не
+        # меняется между запусками агента. Без кеша разбор шёл заново на
+        # каждый показ — slug → (метка версии файла, разобранный словарь).
+        self._project_data_cache: Dict[str, tuple] = {}
 
         # ── Студия ──
         # Прогонов может идти сколько угодно сразу: у каждого свой журнал,
@@ -1071,7 +1082,7 @@ class FactoryService:
             return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
+                return yaml.load(f, Loader=_YAML_LOADER) or {}
         except Exception:
             return {}
 
@@ -1084,13 +1095,22 @@ class FactoryService:
 
     def _project_data(self, slug: str, filename: str = "GAME_DATA.yaml") -> Dict[str, Any]:
         """YAML проекта — с диска или прямо из архива, без распаковки."""
+        cache_key = f"{slug}/{filename}"
+        version = archive.stamp(slug, filename)
+        cached = self._project_data_cache.get(cache_key)
+        if cached and cached[0] == version:
+            return cached[1]
+
         raw = archive.read_text(slug, filename)
         if not raw:
-            return {}
-        try:
-            return yaml.safe_load(raw) or {}
-        except yaml.YAMLError:
-            return {}
+            data: Dict[str, Any] = {}
+        else:
+            try:
+                data = yaml.load(raw, Loader=_YAML_LOADER) or {}
+            except yaml.YAMLError:
+                data = {}
+        self._project_data_cache[cache_key] = (version, data)
+        return data
 
     def list_projects(self) -> List[Dict[str, Any]]:
         """

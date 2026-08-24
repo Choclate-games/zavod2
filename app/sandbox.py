@@ -27,10 +27,25 @@ class SandboxViolation(RuntimeError):
     """Путь выходит за пределы рабочего пространства."""
 
 
+_workspace_root_cache: Optional[Path] = None
+
+
 def workspace_root() -> Path:
-    root = config.workspace_dir
-    root.mkdir(parents=True, exist_ok=True)
-    return root.resolve()
+    """
+    Разрешённый корень песочницы — кешируется на процесс.
+
+    `config.workspace_dir` уже создан и абсолютен на момент старта (см.
+    `Config.__init__`), а сам путь не меняется, пока процесс жив. Раньше
+    здесь на каждый вызов заново шли `mkdir` и `resolve()` (разрешение
+    symlink'ов через диск) — витрина из полусотни проектов дергает этот
+    вызов сотни раз и ощутимо теряла на этом время.
+    """
+    global _workspace_root_cache
+    if _workspace_root_cache is None:
+        root = config.workspace_dir
+        root.mkdir(parents=True, exist_ok=True)
+        _workspace_root_cache = root.resolve()
+    return _workspace_root_cache
 
 
 def is_inside_workspace(path: Path) -> bool:
