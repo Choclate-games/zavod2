@@ -109,8 +109,8 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
 
 # Каталоги под bind-монты и состояние. Создаём заранее и с нужным владельцем:
 # иначе docker создаст их от root и контейнер не сможет туда писать.
-RUN mkdir -p /app/workspace /app/output /app/zip_projects /app/builds /app/state \
-    && chown -R ${APP_UID}:${APP_GID} /app/workspace /app/output /app/zip_projects /app/builds /app/state \
+RUN mkdir -p /app/workspace /app/output /app/zip_projects /app/builds /app/.pkgstore /app/state \
+    && chown -R ${APP_UID}:${APP_GID} /app/workspace /app/output /app/zip_projects /app/builds /app/.pkgstore /app/state \
     # Сам каталог /app создаётся директивой WORKDIR от root, и COPY --chown на
     # него не распространяется — он меняет владельца только у содержимого.
     # Без этого entrypoint не может создать в /app симлинки на файлы состояния

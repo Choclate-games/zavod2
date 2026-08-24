@@ -13,6 +13,7 @@ workspace/
 output/
 zip_projects/
 builds/
+.pkgstore/
 knowledge_archive/
 
 **/node_modules
