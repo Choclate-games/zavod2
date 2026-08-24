@@ -22,7 +22,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
-from app import sandbox
+from app import recent, sandbox
 from app.web import auth, terminals
 from app.web.bus import bus
 from app.web.service import AGENT_KEYS, DEMO_SLUG, service
@@ -365,6 +365,27 @@ async def run_continue(run_id: str, request: Request) -> Dict[str, Any]:
 
 
 # ── Проекты ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/recent")
+def recent_state(projects: int = recent.DEFAULT_LIMIT,
+                 chats: int = recent.DEFAULT_LIMIT,
+                 slug: str = "", order: str = recent.ORDER_CREATED) -> Dict[str, Any]:
+    """
+    Что фабрика делала последним: последние игры и последние беседы разом.
+
+    Это ответ на вопрос «над чем работали», а не витрина: `/api/projects`
+    отдаёт весь каталог с приёмкой и расходом токенов, `/api/chats/<slug>` —
+    беседы одной игры, и «последний чат фабрики» из них не складывался.
+
+    `?slug=` сужает беседы до одной игры, `?order=updated` сортирует игры по
+    последнему касанию каталога вместо даты появления. Неизвестный порядок —
+    не ошибка запроса: сводка отдаётся в порядке по умолчанию.
+    """
+    if order not in recent.ORDERS:
+        order = recent.ORDER_CREATED
+    return service.recent(projects=projects, chats=chats,
+                          slug=_slug(slug) if slug else "", order=order)
+
 
 @app.get("/api/projects")
 def list_projects() -> Dict[str, Any]:

@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 import yaml
 
 from app.config import BASE_DIR, config
+from app.sandbox import DEMO_SLUG
 
 # Каталоги стенда, где лежит переиспользуемое. `demos/` тоже нужен: демо
 # нельзя скопировать целиком, но как образец сборки механики он ценнее прозы.
@@ -84,10 +85,10 @@ class LibraryEntry:
 
 def showcase_root() -> Path:
     """Каталог стенда. Ищем рядом с проектами, затем в корне репозитория."""
-    candidate = config.workspace_dir / "knowledge-showcase"
+    candidate = config.workspace_dir / DEMO_SLUG
     if candidate.exists():
         return candidate
-    return BASE_DIR / "workspace" / "knowledge-showcase"
+    return BASE_DIR / "workspace" / DEMO_SLUG
 
 
 def _doc_header(text: str) -> str:

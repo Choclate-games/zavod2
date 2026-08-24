@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import webbrowser
@@ -17,6 +18,7 @@ from rich.table import Table
 from rich.prompt import Prompt
 import yaml
 
+from app import recent
 from app.logging import console, log_info, log_error, log_success
 from app.config import config
 from app.pipeline import Pipeline
@@ -261,6 +263,79 @@ def list_projects(
             table.add_row(proj.name, "Error reading metadata", "", "", "")
 
     console.print(table)
+
+@app.command(name="recent",
+             help="Что фабрика делала последним: свежие игры и свежие чаты.")
+def show_recent(
+    projects: int = typer.Option(recent.DEFAULT_LIMIT, "--projects", "-p",
+                                 help="Сколько игр показать"),
+    chats: int = typer.Option(recent.DEFAULT_LIMIT, "--chats", "-c",
+                              help="Сколько бесед показать"),
+    slug: str = typer.Option("", "--slug", "-s", help="Беседы только этой игры"),
+    order: str = typer.Option(recent.ORDER_CREATED, "--order",
+                              help="created — по дате появления игры, "
+                                   "updated — по последнему касанию каталога"),
+    as_json: bool = typer.Option(False, "--json",
+                                 help="Отдать сводку JSON-ом — для скриптов и агентов"),
+):
+    """Сводка последнего для человека и для агента в терминале.
+
+    Тот же ответ отдаёт ручка `GET /api/recent`, считает его `app/recent.py`.
+    Веб для этого поднимать не нужно: команда читает песочницу напрямую.
+    """
+    if order not in recent.ORDERS:
+        log_error(f"Неизвестный порядок: {order}. Допустимо: {', '.join(recent.ORDERS)}.")
+        raise typer.Exit(code=2)
+
+    data = recent.snapshot(projects=projects, chats=chats, slug=slug or None, order=order)
+
+    if as_json:
+        # Голый print, а не console.print: rich переносит длинные строки и
+        # красит вывод, а JSON обязан остаться разбираемым.
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if not data["projects"]:
+        console.print("[dim]Игр в песочнице нет.[/dim]")
+    else:
+        # Ширина колонок задана руками: слаг игры доходит до сорока восьми
+        # символов, и без потолка rich схлопывает все остальные колонки в ноль.
+        table = Table(title="Последние игры")
+        table.add_column("Слаг", style="cyan", max_width=28, overflow="ellipsis")
+        table.add_column("Игра", style="white", max_width=24, overflow="ellipsis")
+        table.add_column("Жанр", style="yellow", max_width=20, overflow="ellipsis")
+        table.add_column("Создана", no_wrap=True)
+        table.add_column("Чатов", justify="right")
+        table.add_column("Метки", style="dim")
+        for row in data["projects"]:
+            marks = " ".join(filter(None, [
+                "★" if row["favorite"] else "",
+                "📦" if row["packed"] else "",
+                "🗄" if row["archived"] else "",
+                "▶" if row["playable"] else "",
+            ]))
+            table.add_row(row["slug"], row["title"], row["genre"] or "[dim]—[/dim]",
+                          (row["created_at"] or "")[:16].replace("T", " "),
+                          str(row["chats"]), marks)
+        console.print(table)
+
+    if not data["chats"]:
+        console.print("[dim]Бесед разработки пока нет.[/dim]")
+        return
+    table = Table(title="Последние чаты")
+    table.add_column("Игра", style="magenta", max_width=22, overflow="ellipsis")
+    table.add_column("Чат", style="cyan", no_wrap=True)
+    table.add_column("Название", style="white", max_width=28, overflow="ellipsis")
+    table.add_column("Обновлён", no_wrap=True)
+    table.add_column("Реплик", justify="right")
+    table.add_column("Последнее", max_width=40, overflow="ellipsis")
+    for row in data["chats"]:
+        table.add_row(row["slug"], row["id"],
+                      row["title"] + (" [dim](прогон)[/dim]" if row["kind"] == "run" else ""),
+                      (row["updated_at"] or "")[:16].replace("T", " "),
+                      str(row["messages"]), row["preview"])
+    console.print(table)
+    console.print("[dim]Тот же ответ в JSON: python -m app.cli recent --json[/dim]")
 
 @app.command(name="test-provider", help="Test connectivity and response of an AI provider (agy, claude, codex, opencode).")
 def test_provider(
