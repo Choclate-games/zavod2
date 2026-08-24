@@ -391,6 +391,16 @@ def ensure_schema() -> None:
         _pool._ready = True
 
 
+# Как долго после неудачи не трогать базу. Без этой паузы каждый вызов
+# `available()` при мёртвом хостинге упирался бы в connect_timeout: постановка
+# оценки в витрине висла бы по десять секунд, и так на каждый клик. Полминуты —
+# достаточно редко, чтобы не мешать, и достаточно часто, чтобы восстановление
+# заметили без перезапуска.
+FAILURE_COOLDOWN_SECONDS = 30.0
+
+_failed_at: float = 0.0
+
+
 def available() -> bool:
     """
     Есть ли рабочая база прямо сейчас.
@@ -398,13 +408,19 @@ def available() -> bool:
     Единственная функция, на которую опирается остальной код. Ошибку она не
     выбрасывает — вызывающий просто уходит на файловое хранилище.
     """
+    global _failed_at
+
     if not settings.configured:
+        return False
+    if _failed_at and (time.time() - _failed_at) < FAILURE_COOLDOWN_SECONDS:
         return False
     try:
         ensure_schema()
+        _failed_at = 0.0
         return True
     except Exception as exc:
         _pool._remember_error(exc)
+        _failed_at = time.time()
         return False
 
 
@@ -418,6 +434,9 @@ def status() -> Dict[str, Any]:
                 "message": "Не заданы адрес, пользователь или имя базы."}
     started = time.time()
     try:
+        # Мимо available(): панель настроек спрашивает состояние осознанно, и
+        # отвечать ей «база недоступна» из-за паузы после прошлой неудачи —
+        # значит скрывать от человека, что связь уже восстановилась.
         ensure_schema()
         row = query_one("SELECT VERSION() AS v")
         latency = int((time.time() - started) * 1000)
@@ -436,6 +455,9 @@ def status() -> Dict[str, Any]:
 
 def reconfigure() -> None:
     """Перечитывает .env и роняет пул: реквизиты меняются из интерфейса."""
-    global settings
+    global settings, _failed_at
     _pool.close_all()
     settings = Settings()
+    # Пауза после неудачи сбрасывается: человек только что поправил настройки
+    # и ждёт ответа сейчас, а не через полминуты.
+    _failed_at = 0.0

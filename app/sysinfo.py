@@ -31,6 +31,7 @@ import os
 import platform
 import shutil
 import socket
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -278,41 +279,104 @@ def _fans() -> List[Dict[str, Any]]:
 
 # ── Процессы ────────────────────────────────────────────────────────────────
 
-# psutil считает загрузку процесса как разницу между двумя обращениями к
-# одному и тому же объекту Process. Поэтому объекты переживают вызов: иначе
-# каждый опрос честно возвращал бы ноль.
-_proc_cache: Dict[int, Any] = {}
+# Список процессов — самая дорогая часть снимка: на рабочем ПК с четырьмя
+# сотнями процессов обход занимал секунду, при том что всё остальное вместе
+# укладывается в шесть миллисекунд. Панель опрашивается раз в три секунды, то
+# есть опросы начали бы наезжать друг на друга.
+#
+# Лечится двумя приёмами. Первый: просить у psutil сразу набор полей —
+# `process_iter(attrs=...)` читает их под `oneshot()`, одним обращением к
+# системе на процесс вместо трёх. Второй: держать результат несколько секунд.
+# Топ тяжёлых процессов не та величина, за которой следят посекундно.
+_PROCESS_TTL = 15.0
+_processes_cache: List[Dict[str, Any]] = []
+_processes_at: float = 0.0
+_processes_lock = threading.Lock()
+_processes_busy = False
 
 
-def _processes() -> List[Dict[str, Any]]:
-    if psutil is None:
-        return []
+# Служебные «процессы», которые системой считаются за процессы, а человеком —
+# нет. Idle на Windows показывает долю простоя ядер и потому всегда лидирует
+# в списке по загрузке, вытесняя оттуда всё осмысленное.
+IDLE_NAMES = {"System Idle Process", "Idle"}
+
+# Процессы, которые уже наблюдались. Нужны из-за того, как считает psutil:
+# первый вызов cpu_percent для процесса возвращает среднее за всё время его
+# жизни, а не за интервал. Браузер, открытый два часа назад, выдавал бы в
+# списке четырёхзначные проценты.
+_seen_pids: set = set()
+
+
+def _scan_processes() -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     alive: set = set()
     try:
-        for proc in psutil.process_iter(["pid", "name"]):
-            pid = proc.info["pid"]
+        # Объекты Process psutil кеширует внутри process_iter сам, поэтому
+        # cpu_percent() считает разницу с прошлого обхода, а не выдаёт ноль.
+        for proc in psutil.process_iter(["pid", "name", "memory_info"]):
+            info = proc.info
+            pid = info.get("pid") or 0
+            name = info.get("name") or "?"
             alive.add(pid)
-            cached = _proc_cache.get(pid)
-            if cached is None:
-                cached = proc
-                _proc_cache[pid] = proc
-                cached.cpu_percent(None)     # первый вызов задаёт точку отсчёта
+            if name in IDLE_NAMES:
+                continue
+            memory = info.get("memory_info")
             try:
-                cpu = cached.cpu_percent(None)
-                mem = cached.memory_info().rss
-                name = cached.name()
+                cpu = float(proc.cpu_percent(None))
             except Exception:
                 continue
-            rows.append({"pid": pid, "name": name,
-                         "cpu": round(float(cpu), 1), "memory": int(mem)})
+            if pid not in _seen_pids:
+                # Первое наблюдение — только точка отсчёта, показывать нечего.
+                _seen_pids.add(pid)
+                cpu = 0.0
+            rows.append({
+                "pid": pid,
+                "name": name,
+                "cpu": round(cpu, 1),
+                "memory": int(getattr(memory, "rss", 0) or 0),
+            })
     except Exception:
         return []
-    for pid in list(_proc_cache):
-        if pid not in alive:
-            _proc_cache.pop(pid, None)
+    _seen_pids.intersection_update(alive)
     rows.sort(key=lambda row: (row["cpu"], row["memory"]), reverse=True)
     return rows[:TOP_PROCESSES]
+
+
+def _refresh_processes() -> None:
+    global _processes_cache, _processes_at, _processes_busy
+    try:
+        rows = _scan_processes()
+        if rows:
+            _processes_cache = rows
+        _processes_at = time.time()
+    finally:
+        with _processes_lock:
+            _processes_busy = False
+
+
+def _processes() -> List[Dict[str, Any]]:
+    """
+    Топ тяжёлых процессов. Никогда не ждёт: обход идёт в фоне.
+
+    Даже с `oneshot()` обход четырёх сотен процессов занимает секунду, и
+    честный синхронный вызов растянул бы ответ панели ровно на неё. Поэтому
+    запрос отдаёт последний известный список и, если он устарел, поручает
+    обновление отдельному потоку. Данные при этом отстают на секунды — для
+    списка «кто сейчас ест процессор» это ничего не значит.
+    """
+    global _processes_busy
+
+    if psutil is None:
+        return []
+    if (time.time() - _processes_at) >= _PROCESS_TTL:
+        with _processes_lock:
+            start = not _processes_busy
+            if start:
+                _processes_busy = True
+        if start:
+            threading.Thread(target=_refresh_processes,
+                             name="sysinfo-processes", daemon=True).start()
+    return _processes_cache
 
 
 # ── Сводка ──────────────────────────────────────────────────────────────────

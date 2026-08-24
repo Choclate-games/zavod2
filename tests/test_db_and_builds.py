@@ -19,6 +19,11 @@ from app import builds, db, project_meta, sysinfo
 from app.web import auth
 
 
+# Настоящая available() до подмены фикстурой ниже: одному тесту нужна именно
+# она, а не заглушка.
+_REAL_AVAILABLE = db.available
+
+
 @pytest.fixture(autouse=True)
 def _no_database(monkeypatch):
     """База выключена: во всём наборе проверяется поведение без неё."""
@@ -246,3 +251,38 @@ def test_database_status_is_honest_when_disabled(monkeypatch):
     assert status["enabled"] is False
     assert status["ok"] is False
     assert "JSON" in status["message"]
+
+
+def test_dead_database_does_not_stall_every_call(monkeypatch):
+    """
+    После неудачи база не трогается полминуты.
+
+    Иначе каждый вызов `available()` упирался бы в connect_timeout: при мёртвом
+    хостинге постановка оценки в витрине висла бы по десять секунд, и так на
+    каждый клик. Проверяем, что вторая попытка не доходит до подключения.
+    """
+    monkeypatch.setenv("MYSQL_ENABLED", "1")
+    monkeypatch.setenv("MYSQL_HOST", "192.0.2.1")     # TEST-NET-1, гарантированно никуда
+    monkeypatch.setenv("MYSQL_USER", "u")
+    monkeypatch.setenv("MYSQL_DB", "d")
+    monkeypatch.setattr(db, "available", _REAL_AVAILABLE)
+    db.reconfigure()
+
+    calls = []
+
+    def refuse():
+        calls.append(1)
+        raise db.DatabaseError("нет связи")
+
+    monkeypatch.setattr(db, "ensure_schema", refuse)
+
+    assert db.available() is False
+    assert db.available() is False
+    assert db.available() is False
+    assert len(calls) == 1, "к базе полезли повторно, не выждав паузу"
+
+    # Правка реквизитов паузу снимает: человек чинит настройку и ждёт ответа
+    # сейчас, а не через тридцать секунд.
+    db.reconfigure()
+    assert db.available() is False
+    assert len(calls) == 2
