@@ -213,3 +213,6 @@ desktop.ini
 # Файл-триггер деплоя: раннер пишет его в bind-монт, на хосте за ним следит
 # systemd (docker/systemd/zavod2-deploy.path). В git ему делать нечего.
 .deploy/
+
+# Секреты деплоя (PAT раннера). Отдельно от .env: фабрике токен не нужен.
+.env.deploy

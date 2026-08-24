@@ -102,14 +102,23 @@ services:
     container_name: zavod2-runner
     restart: always
     stop_grace_period: 90s
-    environment:
-      # Регистрация на уровне РЕПОЗИТОРИЯ, а не организации. Это принципиально:
-      # org-раннер доступен всем репозиториям организации, и любой из них смог
-      # бы запускать job'ы на этой машине. Здесь — только Choclate-games/zavod2.
-      GITHUB_REPO: ${GITHUB_REPO:-Choclate-games/zavod2}
-      GITHUB_PAT: ${GITHUB_PAT:?GITHUB_PAT не задан в .env}
-      RUNNER_NAME: ${ZAVOD_RUNNER_NAME:-minipc-zavod2}
-      RUNNER_LABELS: ${ZAVOD_RUNNER_LABELS:-self-hosted,linux,x64,zavod2}
+    # Отдельный файл, а не общий .env — намеренно.
+    #
+    # В .env лежат ключи, которые нужны фабрике, и она получает его целиком.
+    # PAT для GitHub фабрике не нужен ни для чего, а внутри её контейнера
+    # выполняется сгенерированный агентами код. Держать там токен с правами на
+    # запись в репозитории организации незачем, поэтому секреты деплоя живут
+    # в .env.deploy и видны только раннеру.
+    #
+    # Содержимое .env.deploy:
+    #   GITHUB_REPO=Choclate-games/zavod2   ← регистрация на уровне РЕПОЗИТОРИЯ,
+    #     а не организации: org-раннер доступен всем репозиториям организации,
+    #     и job из любого из них выполнялся бы на этой машине.
+    #   GITHUB_PAT=...                      ← scope `repo` (classic) либо
+    #     fine-grained с Administration: Read and write на этом репозитории.
+    #   RUNNER_NAME=minipc-zavod2
+    #   RUNNER_LABELS=self-hosted,linux,x64,zavod2
+    env_file: .env.deploy
     volumes:
       # Единственная связь раннера с внешним миром помимо сети. Job пишет сюда
       # файл, systemd на хосте это видит и запускает деплой. Ни docker.sock,
