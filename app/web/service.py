@@ -300,6 +300,7 @@ class FactoryService:
         # подмена npm в PATH должна существовать раньше первой задачи.
         pkgstore.warm_up(self._storage_log)
         self._start_sweeper()
+        self._start_mirror()
 
     # =====================================================================
     # Студия: журнал и прогресс
@@ -2180,6 +2181,131 @@ class FactoryService:
         snapshots.enforce_limit(is_busy=self._project_busy, on_log=self._storage_log)
         return result
 
+    # =====================================================================
+    # Зеркало живых проектов в базе
+    # =====================================================================
+
+    # Первый обход не сразу после старта: контейнер только поднялся, а зеркало
+    # это десятки мегабайт через WAN. Пусть фабрика сперва станет отзывчивой.
+    MIRROR_FIRST_DELAY_SECONDS = 300
+
+    def _start_mirror(self) -> None:
+        def loop() -> None:
+            if self._sweeper_stop.wait(self.MIRROR_FIRST_DELAY_SECONDS):
+                return
+            while not self._sweeper_stop.is_set():
+                try:
+                    self.mirror_sweep()
+                except Exception as exc:      # фон не имеет права ронять фабрику
+                    self._storage_log(f"⚠️ Зеркало споткнулось: {exc}")
+                if self._sweeper_stop.wait(builds.mirror_interval()):
+                    return
+
+        threading.Thread(target=loop, daemon=True, name="mysql-mirror").start()
+
+    def _mirror_sources(self, slug: str) -> Optional[List[Path]]:
+        """
+        Каталоги игры для зеркала. None — зеркалить нечего.
+
+        Упакованные игры пропускаем сознательно: у них своя копия в базе,
+        снятая при уборке в архив, и разворачивать игру с диска ради слепка
+        значило бы отменять уборку.
+        """
+        try:
+            project = sandbox.project_dir(slug)
+        except sandbox.SandboxViolation:
+            return None
+        if not project.is_dir():
+            return None
+        sources = [project]
+        try:
+            docs = sandbox.docs_dir(slug)
+            if docs != project and docs.is_dir():
+                sources.append(docs)
+        except sandbox.SandboxViolation:
+            pass
+        return sources
+
+    def mirror_sweep(self) -> Dict[str, Any]:
+        """
+        Раз в час: у кого на диске появилось что-то новее копии — обновить копию.
+
+        Занятые игры пропускаем. Агент в этот момент переписывает файлы, и
+        слепок с середины его работы — это не версия игры, а срез случайного
+        мгновения; следующий обход возьмёт её уже целой.
+        """
+        result = {"checked": 0, "updated": 0, "skipped": 0, "bytes": 0}
+        if not builds.mirror_enabled() or not db.available():
+            return result
+
+        known = builds.mirror_state()
+        budget = builds.mirror_budget_mb() * 1024 * 1024
+        used = builds.mirror_size()
+
+        for slug in sorted(self.project_slugs()):
+            if self._sweeper_stop.is_set():
+                break
+            if archive.is_archived(slug):
+                continue
+            if self._project_busy(slug):
+                result["skipped"] += 1
+                continue
+            sources = self._mirror_sources(slug)
+            if not sources:
+                continue
+            result["checked"] += 1
+
+            # Бюджет останавливает приём НОВЫХ игр, но не мешает обновлять уже
+            # взятые: замороженная копия месячной давности хуже её отсутствия,
+            # потому что выглядит как резервная.
+            if budget and used >= budget and slug not in known:
+                continue
+
+            entry = builds.mirror_project(slug, sources, known=known.get(slug),
+                                          on_log=self._storage_log)
+            if entry:
+                result["updated"] += 1
+                result["bytes"] += entry["size"]
+                used += entry["size"] - int((known.get(slug) or {}).get("size", 0))
+
+        if result["updated"]:
+            self._storage_log(
+                f"☁️ Зеркало: обновлено игр {result['updated']}, "
+                f"{result['bytes'] / 1048576:.1f} МБ."
+            )
+            bus.publish("builds.changed")
+        return result
+
+    def project_slugs(self) -> List[str]:
+        """Слаги всех игр — и распакованных, и упакованных."""
+        root = sandbox.workspace_root()
+        slugs = set(archive.archived_slugs())
+        try:
+            for entry in root.iterdir():
+                if entry.is_dir() and not entry.name.startswith("."):
+                    slugs.add(entry.name)
+        except OSError:
+            pass
+        slugs.discard(DEMO_SLUG)
+        return sorted(slugs)
+
+    def mirror_now(self) -> Dict[str, Any]:
+        """Ручной прогон зеркала — та же логика, что и по расписанию."""
+        if not builds.mirror_enabled():
+            return {"status": "error", "message": "Зеркало выключено (MYSQL_MIRROR=0)."}
+        if not db.available():
+            return {"status": "error", "message": "База недоступна — зеркалить некуда."}
+        result = self.mirror_sweep()
+        return {
+            "status": "success",
+            "result": result,
+            "message": (f"Обновлено игр: {result['updated']} "
+                        f"({result['bytes'] / 1048576:.1f} МБ), "
+                        f"проверено {result['checked']}."
+                        if result["updated"] else
+                        f"Всё уже свежее: проверено {result['checked']} игр."),
+        }
+
     def storage_state(self) -> Dict[str, Any]:
         """Сводка вкладки «Хранилище»: архивы, стор пакетов, журнал сборщика."""
         archives = archive.stats()
@@ -3005,7 +3131,16 @@ class FactoryService:
         return result
 
     def builds_payload(self, slug: str = "", limit: int = 50) -> Dict[str, Any]:
-        return {"builds": builds.listing(slug, limit), "stats": builds.stats()}
+        stats = builds.stats()
+        stats["mirror"] = {
+            "enabled": builds.mirror_enabled(),
+            "interval": builds.mirror_interval(),
+            "size": builds.mirror_size(),
+            "games": len(builds.mirror_state()),
+            "budget_mb": builds.mirror_budget_mb(),
+            "max_mb": builds.mirror_max_mb(),
+        }
+        return {"builds": builds.listing(slug, limit), "stats": stats}
 
     def build_download(self, build_id: int) -> Tuple[Optional[Path], Optional[bytes], str]:
         """

@@ -1145,7 +1145,10 @@ function activeProjects() {
    (каталог, ссылки в чатах), поэтому прячем его в подсказку. */
 function projectName(slug) {
   const p = (state.projects || []).find((x) => x.slug === slug);
-  return (p && p.title) || slug;
+  // Последняя запаска обязательна: без неё вкладка предпросмотра, открытая
+  // раньше, чем подгрузился список проектов, называлась «undefined» — и это
+  // же слово уезжало в адрес окна.
+  return (p && p.title) || slug || "Игра";
 }
 
 function fillChatProjects() {
@@ -3285,10 +3288,14 @@ async function loadBuilds() {
   if (!box) return;
   const data = await api("/api/builds?limit=60");
   const stats = data.stats || {};
+  const mirror = stats.mirror || {};
   $("builds-stats").textContent = stats.enabled
     ? `после прогонов: ${stats.files} · ${mb(stats.size)} · ` +
-      `в базе (архивные игры): ${stats.in_db} · ${mb(stats.db_size)} · ` +
-      `хранится последних: ${stats.keep || "все"}`
+      `в базе: ${stats.in_db} · ${mb(stats.db_size)}` +
+      (mirror.enabled
+        ? ` · зеркало: ${mirror.games} игр, ${mb(mirror.size)}` +
+          `, сверка раз в ${Math.round((mirror.interval || 3600) / 60)} мин`
+        : " · зеркало выключено")
     : "автоархивы выключены (BUILD_ZIP_ENABLED=0)";
 
   box.innerHTML = "";
@@ -3303,9 +3310,12 @@ async function loadBuilds() {
     // прогона. Путать их в одном списке нельзя: у первого удаление записи не
     // должно выглядеть как «удалить игру».
     const cold = item.kind === "cold";
+    const mirrored = item.kind === "mirror";
     const where = cold
       ? (item.stored ? "❄ в архиве · копия в базе" : "❄ в архиве · только файл")
-      : (item.stored ? "💾 база + диск" : (item.on_disk ? "💽 диск" : "⚠️ файла нет"));
+      : mirrored
+        ? "☁ зеркало живого проекта"
+        : (item.stored ? "💾 база + диск" : (item.on_disk ? "💽 диск" : "⚠️ файла нет"));
     const origin = item.reason && !cold ? ` · ${esc(item.reason)}` : "";
     row.appendChild(el("span", "storage-slug",
       `${esc(item.slug)}<span class="small dim"> — ${esc(item.created_at)}${origin} · ` +
@@ -3648,6 +3658,19 @@ function bindSettingsExtras() {
   if (saveDb) saveDb.onclick = saveDatabase;
   const refreshBuilds = $("btn-refresh-builds");
   if (refreshBuilds) refreshBuilds.onclick = loadBuilds;
+  const mirrorNow = $("btn-mirror-now");
+  if (mirrorNow) {
+    mirrorNow.onclick = async () => {
+      mirrorNow.disabled = true;
+      const before = mirrorNow.textContent;
+      mirrorNow.textContent = "☁ сверяю...";
+      const res = await api("/api/builds/mirror", { body: {} });
+      mirrorNow.disabled = false;
+      mirrorNow.textContent = before;
+      toast("Зеркало", res.message || "Готово", res.status === "error" ? "err" : "ok");
+      loadBuilds();
+    };
+  }
 
   const clear = $("btn-terminal-clear");
   if (clear) clear.onclick = () => term.xterm && term.xterm.clear();

@@ -47,6 +47,31 @@ def _npm_command() -> str:
     return "npm.cmd" if sys.platform == "win32" else "npm"
 
 
+def _script_args(runner: str, args: list) -> list:
+    """
+    Аргументы скрипту — так, как их понимает конкретный менеджер пакетов.
+
+    npm без `--` считает флаги своими и до скрипта их не доносит. pnpm
+    наоборот: `--` он передаёт дальше буквально, вместе с флагами. Для vite
+    это фатально — cac считает всё после `--` сырыми аргументами и берёт свой
+    порт по умолчанию.
+
+    Как это выглядело: фабрика запускала `pnpm run dev -- --port 5100
+    --strictPort`, в процессах красовалось `vite -- --host 0.0.0.0 --port
+    5100`, а vite слушал 5173. Наружу из контейнера опубликованы только
+    5100-5109, и предпросмотр игры открывался ошибкой соединения — при
+    полностью живом dev-сервере.
+
+    Проверено на мини-ПК:
+        pnpm run dev -- --port 5100 --strictPort  ->  Local: 5174
+        pnpm run dev    --port 5101 --strictPort  ->  Local: 5101
+    """
+    name = Path(runner).name.lower()
+    if name.startswith("pnpm"):
+        return args
+    return ["--"] + args
+
+
 def read_scripts(project_dir: Path) -> dict:
     pkg = project_dir / "package.json"
     if not pkg.exists():
@@ -288,7 +313,9 @@ class DevServer:
         if script and "vite" in script[1].lower():
             port = _free_port(avoid=self.avoid_port if self.reset_state else None)
             self.port = port
-            cmd = cmd + ["--", "--host", PREVIEW_BIND, "--port", str(port), "--strictPort"]
+            cmd = cmd + _script_args(
+                cmd[0], ["--host", PREVIEW_BIND, "--port", str(port), "--strictPort"]
+            )
             # --force заставляет Vite пересобрать пре-бандл зависимостей вместо
             # того, чтобы поверить своему кешу.
             if self.reset_state:

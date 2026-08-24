@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app import archive, builds, db, pkgstore, project_meta, sysinfo
+from app import archive, builds, db, game_runner, pkgstore, project_meta, sysinfo
 from app.web import auth
 
 
@@ -418,3 +418,104 @@ def test_pnpm_health_is_checked_once(tmp_path: Path, monkeypatch):
     pkgstore.find_pnpm()
     pkgstore.find_pnpm()
     assert len(runs) == 1
+
+
+# ── Порт предпросмотра ──────────────────────────────────────────────────────
+
+def test_pnpm_gets_arguments_without_the_separator():
+    """
+    `--` перед аргументами скрипта нужен npm и вреден pnpm.
+
+    npm без него считает флаги своими и до скрипта не доносит. pnpm наоборот —
+    передаёт `--` дальше буквально, и vite (на cac) считает всё после него
+    сырыми аргументами: `--port` игнорируется, сервер садится на 5173.
+
+    Ценой этого был неработающий предпросмотр: наружу из контейнера
+    опубликованы только 5100-5109, и браузер получал адрес, который не
+    открывается, при живом dev-сервере.
+    """
+    args = ["--host", "0.0.0.0", "--port", "5100", "--strictPort"]
+
+    assert game_runner._script_args("/app/.pkgstore/tooling/node_modules/.bin/pnpm",
+                                    args) == args
+    assert game_runner._script_args("pnpm", args) == args
+    assert game_runner._script_args("pnpm.cmd", args) == args
+
+    assert game_runner._script_args("npm", args) == ["--"] + args
+    assert game_runner._script_args("/usr/bin/npm", args) == ["--"] + args
+    assert game_runner._script_args("npm.cmd", args) == ["--"] + args
+
+
+def test_preview_port_stays_inside_the_published_range(monkeypatch):
+    """Порт вне 5100-5109 наружу из контейнера просто не опубликован."""
+    monkeypatch.setenv("PREVIEW_PORT_MIN", "5100")
+    monkeypatch.setenv("PREVIEW_PORT_MAX", "5109")
+    for _ in range(5):
+        assert 5100 <= game_runner._free_port() <= 5109
+
+
+# ── Зеркало живых проектов ──────────────────────────────────────────────────
+
+def test_newest_mtime_ignores_restorable_junk(game: Path):
+    """
+    Время правки считается по исходникам, а не по node_modules.
+
+    Иначе `npm install` выглядел бы как правка игры и гонял бы в базу слепок
+    после каждой установки зависимостей.
+    """
+    import os
+    import time
+
+    old = time.time() - 86400
+    for path in game.rglob("*"):
+        if path.is_file():
+            os.utime(path, (old, old))
+
+    assert builds.newest_mtime([game]) == pytest.approx(old, abs=2)
+
+    junk = game / "node_modules" / "three" / "three.js"
+    os.utime(junk, None)                      # «только что установили»
+    assert builds.newest_mtime([game]) == pytest.approx(old, abs=2)
+
+    (game / "src" / "main.ts").write_text("// правка", encoding="utf-8")
+    assert builds.newest_mtime([game]) > old + 100
+
+
+def test_mirror_skips_when_database_copy_is_newer(game: Path, monkeypatch):
+    """Самый частый исход обхода — «обновлять нечего», и он не должен стоить ничего."""
+    monkeypatch.setattr(db, "available", lambda: True)
+    packed = []
+    monkeypatch.setattr(builds, "make_zip",
+                        lambda *a, **k: packed.append(1) or {"path": Path("x"), "files": 1,
+                                                             "size": 1, "sha256": ""})
+    fresh = builds.newest_mtime([game]) + 60
+    assert builds.mirror_project("g", [game], known={"at": fresh, "size": 10}) is None
+    assert not packed, "зеркало полезло паковать игру, которая не менялась"
+
+
+def test_mirror_reuses_a_ready_archive(game: Path, tmp_path: Path, monkeypatch):
+    """
+    Готовый архив новее правок переупаковывать незачем.
+
+    Автоархив после прогона агента почти всегда новее самих файлов: агент
+    закончил — архив снялся. Паковать те же два мегабайта второй раз ради
+    заливки было бы чистой тратой.
+    """
+    store = tmp_path / "builds"
+    store.mkdir()
+    monkeypatch.setattr(builds, "builds_dir", lambda: store)
+    ready = store / "g-20260825-101010.zip"
+    ready.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+
+    assert builds._fresh_disk_archive("g", builds.newest_mtime([game])) == ready
+    # А несвежий — не годится: он старше правок.
+    import os
+    os.utime(ready, (1, 1))
+    assert builds._fresh_disk_archive("g", builds.newest_mtime([game])) is None
+
+
+def test_mirror_is_off_without_database(game: Path, monkeypatch):
+    """Без базы зеркало молчит, а не сыплет ошибками в журнал хранилища."""
+    assert builds.mirror_project("g", [game]) is None
+    assert builds.mirror_state() == {}
+    assert builds.mirror_size() == 0

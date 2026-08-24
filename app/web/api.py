@@ -959,6 +959,12 @@ def build_download(build_id: int):
     raise HTTPException(status_code=404, detail="Архив не найден ни на диске, ни в базе")
 
 
+@app.post("/api/builds/mirror")
+def builds_mirror() -> Dict[str, Any]:
+    """Ручной прогон зеркала — не дожидаясь часового обхода."""
+    return service.mirror_now()
+
+
 @app.delete("/api/builds/{build_id}")
 def build_delete(build_id: int) -> Dict[str, Any]:
     return service.delete_build(build_id)

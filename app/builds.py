@@ -504,6 +504,207 @@ def capture(slug: str, sources: List[Path], *, reason: str = "",
     }
 
 
+# ── Зеркало живых проектов ──────────────────────────────────────────────────
+#
+# Холодные архивы решают одну задачу: игра, убранная с диска, существует хотя
+# бы где-то. Но игра, лежащая на диске, тоже может пропасть вместе с диском —
+# а мини-ПК это один SSD без всякого RAID.
+#
+# Поэтому раз в час фабрика сверяет каждую игру с её копией в базе и, если на
+# диске появилось что-то новее, отправляет свежий слепок. Не после каждого
+# прогона: за ночь автономной работы их набегают десятки, и гонять через WAN
+# по два мегабайта на каждый значит занимать канал ради истории, которая никому
+# не нужна. Раз в час — компромисс между «потерять час работы» и «жить в
+# постоянной заливке».
+#
+# Копия на игру ровно одна: свежая заменяет предыдущую. Иначе база на
+# шаред-хостинге кончилась бы за неделю.
+
+
+def mirror_enabled() -> bool:
+    return _flag("MYSQL_MIRROR", True)
+
+
+def mirror_interval() -> int:
+    """Как часто сверять. Меньше пяти минут не даём — это WAN, а не диск."""
+    return max(300, _int("MYSQL_MIRROR_INTERVAL_SECONDS", 3600))
+
+
+def mirror_max_mb() -> int:
+    """Потолок на одну игру."""
+    return max(0, _int("MYSQL_MIRROR_MAX_MB", 64))
+
+
+def mirror_budget_mb() -> int:
+    """
+    Общий бюджет зеркала в базе. 0 — не ограничивать.
+
+    База на шаред-хостинге, и её объём — часть тарифа, а не бесконечность.
+    Дойдя до потолка, зеркало перестаёт брать НОВЫЕ игры, но продолжает
+    обновлять те, что уже в нём: иначе достигнутый лимит замораживал бы копии
+    в состоянии месячной давности, что хуже их отсутствия.
+    """
+    return max(0, _int("MYSQL_MIRROR_BUDGET_MB", 512))
+
+
+def newest_mtime(sources: List[Path]) -> float:
+    """Время последней правки в проекте. Ноль — файлов нет."""
+    newest = 0.0
+    for source in sources:
+        if not source or not source.is_dir():
+            continue
+        for path in _iter_files(source):
+            try:
+                stamp = path.stat().st_mtime
+            except OSError:
+                continue
+            if stamp > newest:
+                newest = stamp
+    return newest
+
+
+def mirror_state() -> Dict[str, Dict[str, Any]]:
+    """Что уже лежит в зеркале: слаг → {id, время, размер}."""
+    if not db.available():
+        return {}
+    try:
+        rows = db.query(
+            "SELECT id, slug, size_bytes, created_at FROM builds "
+            "WHERE kind = 'mirror' AND in_db = 1"
+        )
+    except Exception:
+        return {}
+    state: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        created = row.get("created_at")
+        state[str(row["slug"])] = {
+            "id": int(row["id"]),
+            "at": created.timestamp() if hasattr(created, "timestamp") else 0.0,
+            "size": int(row.get("size_bytes") or 0),
+        }
+    return state
+
+
+def _fresh_disk_archive(slug: str, since: float) -> Optional[Path]:
+    """
+    Готовый архив этой игры новее правок — тогда пакует не надо.
+
+    Автоархив после прогона агента почти всегда новее самих файлов: агент
+    закончил, архив снялся. Переупаковывать те же два мегабайта ради заливки
+    незачем.
+    """
+    try:
+        candidates = sorted(builds_dir().glob(f"{slug}-*.zip"),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for path in candidates:
+        try:
+            if path.stat().st_mtime >= since:
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def _drop_mirror(slug: str) -> None:
+    if not db.available():
+        return
+    try:
+        for row in db.query("SELECT id FROM builds WHERE slug = %s AND kind = 'mirror'",
+                            (slug,)):
+            db.execute("DELETE FROM builds WHERE id = %s", (row["id"],))
+    except Exception:
+        pass
+
+
+def mirror_project(slug: str, sources: List[Path], *,
+                   known: Optional[Dict[str, Any]] = None,
+                   on_log: Optional[LogFn] = None) -> Optional[Dict[str, Any]]:
+    """
+    Обновляет копию игры в базе, если на диске появилось что-то новее.
+
+    Возвращает None, когда обновлять нечего — это нормальный и самый частый
+    исход. Ошибки наружу не выпускает: зеркало это сервис, а не рабочий узел.
+    """
+    def log(message: str) -> None:
+        if on_log:
+            try:
+                on_log(message)
+            except Exception:
+                pass
+
+    if not mirror_enabled() or not db.available():
+        return None
+
+    newest = newest_mtime(sources)
+    if not newest:
+        return None
+    if known and known.get("at", 0.0) >= newest:
+        return None      # в базе уже свежее или ровно то же
+
+    reuse = _fresh_disk_archive(slug, newest)
+    temporary = False
+    if reuse is not None:
+        info = {"path": reuse, "files": 0, "size": reuse.stat().st_size,
+                "sha256": _sha256(reuse)}
+    else:
+        try:
+            info = make_zip(slug, sources,
+                            dest=builds_dir() / f".mirror-{slug}.zip")
+            temporary = True
+        except Exception as exc:
+            log(f"⚠️ {slug}: не удалось упаковать для зеркала — {exc}\n")
+            return None
+        if info["files"] == 0:
+            info["path"].unlink(missing_ok=True)
+            return None
+
+    limit = mirror_max_mb() * 1024 * 1024
+    try:
+        if limit and info["size"] > limit:
+            log(f"ℹ️ {slug}: {info['size'] / 1048576:.1f} МБ — крупнее лимита "
+                f"{mirror_max_mb()} МБ, в зеркало не беру.\n")
+            return None
+
+        _drop_mirror(slug)
+        build_id = record(slug, info, kind="mirror", reason="mirror",
+                          note="копия живого проекта", force_blob=True)
+        if not build_id:
+            return None
+    finally:
+        if temporary:
+            try:
+                info["path"].unlink()
+            except OSError:
+                pass
+
+    log(f"☁️ {slug}: копия в базе обновлена ({info['size'] / 1048576:.1f} МБ).\n")
+    return {"id": build_id, "size": info["size"]}
+
+
+def mirror_size() -> int:
+    """Сколько байт зеркало занимает в базе."""
+    if not db.available():
+        return 0
+    try:
+        row = db.query_one(
+            "SELECT COALESCE(SUM(size_bytes), 0) AS s FROM builds "
+            "WHERE kind = 'mirror' AND in_db = 1"
+        )
+        return int((row or {}).get("s") or 0)
+    except Exception:
+        return 0
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def store_cold(slug: str, path: Path, *, files: int = 0,
                on_log: Optional[LogFn] = None) -> Optional[int]:
     """
