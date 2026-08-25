@@ -29,6 +29,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
 SCRIPT = ROOT / "docker" / "deploy.sh"
 COMMAND = ROOT / "docker" / "deploy-command.sh"
 SETUP = ROOT / "docker" / "setup-deploy.sh"
+BOOTSTRAP = ROOT / "docker" / "bootstrap.sh"
 COMPOSE = ROOT / "compose.yml"
 RUNNER_DOCKERFILE = ROOT / "docker" / "runner" / "Dockerfile"
 
@@ -132,7 +133,7 @@ def test_the_deploy_script_never_wipes_the_working_tree():
 
     Игры на мини-ПК как раз нетрекаемые — это ровно тот случай.
     """
-    for path in (SCRIPT, COMMAND, SETUP):
+    for path in (SCRIPT, COMMAND, SETUP, BOOTSTRAP):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             bare = line.strip()
             if bare.startswith("#"):
@@ -198,3 +199,30 @@ def test_the_old_trigger_is_gone_for_good():
     # Выключение осиротевшего юнита — часть настройки, иначе один пуш давал бы
     # два деплоя.
     assert "zavod2-deploy.path" in SETUP.read_text(encoding="utf-8")
+
+
+def test_the_lock_is_not_a_shared_name_in_tmp():
+    """Общее имя в /tmp — отказ на ровном месте.
+
+    Файл, созданный однажды другим пользователем (руками, из-под root),
+    навсегда роняет деплой с «Permission denied» ещё до первой полезной
+    команды. Поймано на симуляции.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert '"/tmp/zavod2-deploy.lock"' not in script
+    assert 'LOCK="${LOCK:-$STATE_DIR/deploy.lock}"' in script
+    assert 'id -u' in script, "запасной путь в /tmp обязан различать пользователей"
+
+
+def test_the_bootstrap_never_reaches_for_git_pull():
+    """Ради этого он и существует: `git pull` здесь выносит папку игр с диска."""
+    boot = BOOTSTRAP.read_text(encoding="utf-8")
+    for number, line in enumerate(boot.splitlines(), 1):
+        bare = line.strip()
+        if bare.startswith("#"):
+            continue
+        assert not re.match(r"^git\s+pull", bare), f"bootstrap.sh:{number}"
+    assert "git show origin/main:docker/deploy.sh" in boot, (
+        "обновляться надо новым скриптом, а не тем, что лежит на машине"
+    )
+    assert "setup-deploy.sh" in boot

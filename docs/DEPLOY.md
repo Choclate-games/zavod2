@@ -109,10 +109,10 @@ workflow Deploy  →  раннер zavod2
 
 ### Разовая настройка
 
-На мини-ПК, один раз:
+На мини-ПК, один раз — одной командой:
 
 ```bash
-cd /opt/zavod2 && bash docker/setup-deploy.sh
+curl -fsSL https://raw.githubusercontent.com/Choclate-games/zavod2/main/docker/bootstrap.sh -o /tmp/b.sh && bash /tmp/b.sh
 ```
 
 Скрипт заводит ключ, прописывает его в `authorized_keys` с форсированной
@@ -140,7 +140,10 @@ sudo systemctl start zavod2-deploy && journalctl -u zavod2-deploy -f
 симуляции: `git merge --ff-only` делает это молча и с кодом 0.
 
 Безопасный путь — прогнать новый `deploy.sh` прямо из `origin`, не сливая
-ничего заранее. Он уводит игры из-под merge сам:
+ничего заранее: он уводит игры из-под merge сам. Ровно это и делает
+`docker/bootstrap.sh` из команды выше, и ради этого он существует — чтобы не
+пришлось помнить про запрет на `git pull`. Развёрнутый вид, если хочется
+видеть каждый шаг:
 
 ```bash
 cd /opt/zavod2
