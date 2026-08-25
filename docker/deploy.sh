@@ -105,16 +105,29 @@ close_group() {
 # удаление файлов — и выносит папку с диска. Такие папки уводятся в сторону
 # обычным mv (переименование в пределах ФС, мгновенное и для гигабайта), а
 # после merge возвращаются уже нетрекаемыми.
+#
+# zip_projects здесь по той же причине, что workspace и output: каталог
+# бинд-монтится в фабрику (compose.yml, /app/zip_projects) — это её рабочие
+# данные, а не архив в репозитории. При этом зипы пока ЧИСЛЯТСЯ в git, то есть
+# находятся ровно в том состоянии, из которого workspace вынесли: первый же
+# коммит, снимающий их с учёта, без этой строки удалил бы их с диска.
 # ---------------------------------------------------------------------------
-GAME_DIRS="workspace output"
+GAME_DIRS="workspace output zip_projects"
 STASHED_DIR=""
 INVENTORY_BEFORE="$(mktemp /tmp/zavod2-games.XXXXXX)"
 
+# Опись — каталоги первого уровня; служебный .factory игрой не считается.
+#
+# Отсев именем find, а не трубой в `grep -v`, и это не стиль: пустой список
+# каталогов давал бы grep код 1, а под `pipefail` это статус всей трубы — то
+# есть деплой на чистой машине падал бы на шаге «Игры на диске» ещё до того,
+# как ей стало что терять.
 inventory() {
     for dir in $GAME_DIRS; do
         [ -d "$REPO_DIR/$dir" ] || continue
-        find "$REPO_DIR/$dir" -mindepth 1 -maxdepth 1 -type d -printf "$dir/%P\n" 2>/dev/null
-    done | grep -v '/\.factory$' | LC_ALL=C sort
+        find "$REPO_DIR/$dir" -mindepth 1 -maxdepth 1 -type d \
+             ! -name '.factory' -printf "$dir/%P\n" 2>/dev/null
+    done | LC_ALL=C sort
 }
 
 restore_games() {
@@ -330,7 +343,7 @@ step "Сборка образа"
 # Пересобираем ТОЛЬКО фабрику. Контейнер раннера трогать нельзя: в нём прямо
 # сейчас выполняется job, который этот деплой и запустил. Раннер обновляется
 # руками: docker compose up -d --build runner
-docker compose build --progress plain factory
+docker compose --progress plain build factory
 
 step "Перезапуск фабрики"
 docker compose up -d --no-deps factory

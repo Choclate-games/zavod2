@@ -27,6 +27,12 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Подстановка выше меняет каталог только внутри себя, а `docker compose` ниже
+# ищет compose.yml в текущем. Без этой строки шаг «контейнер раннера» работал
+# бы лишь у того, кто и так стоял в корне репозитория, — и падал бы у всех
+# остальных, хотя путь к нему скрипт знает.
+cd "$REPO_DIR"
+
 KEY="$HOME/.ssh/zavod2-deploy"
 AUTHORIZED="$HOME/.ssh/authorized_keys"
 COMMAND_SCRIPT="$REPO_DIR/docker/deploy-command.sh"

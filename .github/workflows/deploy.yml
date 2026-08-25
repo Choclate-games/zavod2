@@ -59,26 +59,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Что хост говорит о себе
-        # ВРЕМЕННО. Пока ключ не заведён, это единственный способ узнать
-        # состояние мини-ПК: каталог .deploy смонтирован раннеру как /deploy,
-        # и прежняя схема писала туда исход последнего деплоя. Только чтение.
-        # Убрать вместе с этим комментарием, как только деплой пойдёт по ssh.
-        continue-on-error: true
-        run: |
-          if [ ! -d /deploy ]; then
-            echo "Каталог /deploy раннеру не виден — контейнер уже пересоздан без него."
-            exit 0
-          fi
-          echo "── что лежит в /deploy"
-          ls -la /deploy || true
-          echo "── исход последнего деплоя"
-          cat /deploy/status 2>/dev/null || echo "(файла status нет)"
-          echo "── шаг, на котором хост остановился"
-          cat /deploy/step 2>/dev/null || echo "(файла step нет)"
-          echo "── хвост лога хоста"
-          tail -n 40 /deploy/last.log 2>/dev/null || echo "(лога нет)"
-
       - name: Ключ до мини-ПК
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
