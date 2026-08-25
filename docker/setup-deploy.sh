@@ -51,7 +51,8 @@ if systemctl is-active --quiet ssh || systemctl is-active --quiet sshd; then
 else
     die "sshd не запущен. Поставить и включить: sudo apt install -y openssh-server && sudo systemctl enable --now ssh"
 fi
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+UFW="$(command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null || true)"
+if [ "${UFW#*Status: active}" != "$UFW" ]; then
     warn "включён ufw — если проверка связи ниже не пройдёт, дело в нём: sudo ufw allow from 172.16.0.0/12 to any port $SSH_PORT"
 fi
 
@@ -85,7 +86,11 @@ say "4/6 · старый триггер через systemd"
 # Файл-триггер больше не нужен: job теперь ходит по ssh и ждёт результата сам.
 # Оставленный включённым .path запускал бы деплой ещё и по старой записи —
 # два деплоя на один пуш.
-if systemctl list-unit-files 2>/dev/null | grep -q '^zavod2-deploy\.path'; then
+# Подстановкой, а не трубой в `grep -q`: та закрывает трубу на первой строке,
+# писатель получает SIGPIPE, и под pipefail это читается как «юнита нет» —
+# то есть шаг молча пропускается.
+UNITS="$(systemctl list-unit-files 2>/dev/null || true)"
+if [ "${UNITS#*zavod2-deploy.path}" != "$UNITS" ]; then
     if sudo -n true 2>/dev/null || [ -t 0 ]; then
         sudo systemctl disable --now zavod2-deploy.path || warn "не удалось выключить zavod2-deploy.path — сделай руками"
         ok "zavod2-deploy.path выключен"

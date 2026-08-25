@@ -55,6 +55,23 @@ GROUP_OPEN=0
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+report() {
+    # Печать чужого вывода построчно и с потолком — без труб.
+    # `... | head -n N` под pipefail роняет весь скрипт: head выходит после N-й
+    # строки, писатель получает SIGPIPE, статус трубы 141.
+    local prefix="$1" limit="$2" text="$3" n=0
+    [ -n "$text" ] || return 0
+    while IFS= read -r line; do
+        n=$((n + 1))
+        if [ "$n" -gt "$limit" ]; then
+            echo "${prefix}… и ещё строки, весь список — командой ниже"
+            break
+        fi
+        echo "${prefix}${line}"
+    done <<< "$text"
+}
+
+
 # Каждый шаг — свёрнутая группа в логе Actions. GitHub понимает эти маркеры от
 # любого шага, поэтому «видно каждый шаг» получается без единого лишнего шага
 # в самом workflow.
@@ -120,8 +137,18 @@ stash_games() {
     log "игры уведены в $STASHED_DIR на время merge — с диска они не денутся"
 }
 
+# Ответ забирается подстановкой, а не трубой в `grep -q`, и это не стиль.
+#
+# `grep -q` закрывает трубу на первой же строке, git получает SIGPIPE и умирает
+# с кодом 141, а `set -o pipefail` делает 141 статусом всей трубы. Защита
+# читала это как «удалений нет» — и молчала ровно тогда, когда была нужна: на
+# машине с 1639 удаляемыми файлами это воспроизводится 30 раз из 30, а на
+# коротком выводе (симуляции) не воспроизводится никогда, потому что git
+# успевает дописать всё в буфер трубы раньше, чем grep выйдет.
 merge_would_delete_games() {
-    git diff --name-only --diff-filter=D HEAD origin/main -- $GAME_DIRS 2>/dev/null | grep -q .
+    local deleted
+    deleted="$(git diff --name-only --diff-filter=D HEAD origin/main -- $GAME_DIRS 2>/dev/null)" || return 1
+    [ -n "$deleted" ]
 }
 
 # Возврат обязан случиться и при падении посреди merge, и по сигналу — иначе
@@ -205,8 +232,18 @@ fi
 # Именно --ff-only. reset --hard стёр бы незакоммиченное молча, а нам нужно
 # наоборот: скорее встать с внятной ошибкой, чем что-то потерять.
 if ! git merge --ff-only origin/main; then
-    echo "::error::Fast-forward не прошёл: в рабочей копии на мини-ПК есть свои коммиты. Насильно перезаписывать не буду."
-    echo "::error::Разобрать руками: cd $REPO_DIR && git status && git log --oneline origin/main..HEAD"
+    echo "::error::Обновить код не вышло: fast-forward не прошёл. Насильно перезаписывать не буду."
+    dirty="$(git status --short --untracked-files=no 2>/dev/null || true)"
+    own="$(git log --oneline origin/main..HEAD 2>/dev/null || true)"
+    if [ -n "$own" ]; then
+        echo "::error::В рабочей копии есть свои коммиты:"
+        report "::error::  · " 5 "$own"
+    fi
+    if [ -n "$dirty" ]; then
+        echo "::error::В рабочей копии есть незакоммиченные правки:"
+        report "::error::  · " 15 "$dirty"
+    fi
+    echo "::error::Разобрать: cd $REPO_DIR && git status && git log --oneline origin/main..HEAD"
     exit 1
 fi
 
@@ -218,7 +255,7 @@ restore_games
 # правка, сделанная руками год назад, а деплой каждый раз зелёный.
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
     echo "::warning::В рабочей копии есть коммиты, которых нет в main:"
-    git log --oneline origin/main..HEAD | head -n 5 | sed 's/^/::warning::  · /'
+    report "::warning::  · " 5 "$(git log --oneline origin/main..HEAD 2>/dev/null || true)"
     echo "::warning::Фабрика поднимется вместе с ними. Убрать: cd $REPO_DIR && git reset --hard origin/main — игры не в git и не пострадают."
 fi
 
@@ -280,7 +317,7 @@ lost="$(LC_ALL=C comm -23 "$INVENTORY_BEFORE" "$after" || true)"
 rm -f "$after"
 if [ -n "$lost" ]; then
     echo "::error::С диска пропали игры за время деплоя:"
-    printf '%s\n' "$lost" | sed 's/^/::error::  · /'
+    report "::error::  · " 40 "$lost"
     exit 1
 fi
 log "игры на месте: $(wc -l < "$INVENTORY_BEFORE") шт."

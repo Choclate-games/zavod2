@@ -226,3 +226,75 @@ def test_the_bootstrap_never_reaches_for_git_pull():
         "обновляться надо новым скриптом, а не тем, что лежит на машине"
     )
     assert "setup-deploy.sh" in boot
+
+
+def test_the_games_guard_survives_a_real_repository(tmp_path):
+    """Защита игр проверяется запуском, а не чтением.
+
+    Написанная через `... | grep -q .`, она молчала ровно тогда, когда была
+    нужна: grep закрывает трубу на первой строке, git умирает с SIGPIPE (141),
+    и `set -o pipefail` делает 141 статусом всей трубы. На коротком выводе это
+    не воспроизводится никогда — git успевает дописать всё в буфер, — а на
+    настоящей машине с 1639 удаляемыми файлами воспроизводилось 30 раз из 30.
+    Поэтому тест поднимает репозиторий, где удалений заведомо больше буфера
+    трубы, и гоняет ровно ту функцию, что лежит в скрипте.
+    """
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "workspace" / "game" / "src" / "deep" / "nested" / "dir").mkdir(parents=True)
+    games = repo / "workspace" / "game" / "src" / "deep" / "nested" / "dir"
+    for number in range(3000):
+        (games / f"module-with-a-longish-name-{number:05d}.ts").write_text("x")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "игры в git")
+    was = git("rev-parse", "HEAD").strip()
+
+    git("rm", "-r", "-q", "--cached", "workspace")
+    (repo / ".gitignore").write_text("/workspace/*\n")
+    git("add", "-A")
+    git("commit", "-qm", "игры сняты с учёта")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    # HEAD возвращается назад, файлы остаются на диске — состояние мини-ПК.
+    git("reset", "-q", "--mixed", was)
+
+    source = SCRIPT.read_text(encoding="utf-8")
+    start = source.index("merge_would_delete_games() {")
+    body = source[start:source.index("\n}", start) + 2]
+
+    probe = subprocess.run(
+        ["bash", "-c", f'set -euo pipefail\nGAME_DIRS="workspace output"\n{body}\n'
+                       'if merge_would_delete_games; then echo ДА; else echo НЕТ; fi'],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert probe.stdout.strip() == "ДА", (
+        "защита не увидела удалений — игры на мини-ПК уехали бы вместе с merge"
+    )
+
+
+def test_no_pipe_into_a_consumer_that_quits_early():
+    """Ловушка, стоившая защиты игр, не должна вернуться другим местом.
+
+    `grep -q` и `head` выходят, не дочитав, писатель получает SIGPIPE, и под
+    `set -o pipefail` статусом трубы становится 141. В условии `if` это тихо
+    неверный ответ, в теле — смерть скрипта по `set -e`.
+    """
+    for path in (SCRIPT, COMMAND, SETUP, BOOTSTRAP):
+        text = path.read_text(encoding="utf-8")
+        assert "set -o pipefail" in text or "set -euo pipefail" in text
+        for number, line in enumerate(text.splitlines(), 1):
+            bare = line.strip()
+            if bare.startswith("#") or "|" not in bare:
+                continue
+            after = bare.split("|", 1)[1]
+            assert "grep -q" not in after, f"{path.name}:{number} — труба в grep -q"
+            assert not re.search(r"\bhead\s+-n?\s*\d", after), f"{path.name}:{number} — труба в head"
