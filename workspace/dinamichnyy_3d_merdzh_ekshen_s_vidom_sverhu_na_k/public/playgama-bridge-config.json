@@ -1,7 +1,0 @@
-{
-  "version": 2,
-  "leaderboards": ["weekly_colosseum_champions", "all_time_ringouts"],
-  "placements": {
-    "revive": "revive_lava_rescue"
-  }
-}
