@@ -220,6 +220,7 @@ desktop.ini
 .agy_quota_history.json
 .agy_quota_live.json
 .agent_usage_history.json
+.agent_quota_probe.json
 .token_usage_totals.json
 .agy/
 .gemini/

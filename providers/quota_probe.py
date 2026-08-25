@@ -25,6 +25,7 @@ IDE, ни agy не запущены, честнее показать «данн�
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -207,9 +208,24 @@ def _humanize(delta_seconds: int) -> str:
     return f"{hours}ч {minutes:02d}м" if hours else f"{minutes}м"
 
 
+# Как часто позволено спрашивать остаток у самого CLI, когда локального
+# сервера нет. Вызов стоит около шести секунд и уходит в сеть, а вкладка
+# «Квоты» опрашивает фабрику раз в тридцать: без этого порога agy дёргался бы
+# сотню раз в час ради цифры, которая меняется от запуска к запуску.
+CLI_ASK_COOLDOWN_SECONDS = 10 * 60
+
+
 def read_live_quota() -> Optional[Dict[str, Any]]:
     """
-    Реальные остатки квот по группам моделей либо None, если сервер недоступен.
+    Реальные остатки квот по группам моделей либо None, если узнать негде.
+
+    Порядок источников — от дешёвого к дорогому:
+
+    1. локальный RPC запущенной IDE или `agy` (мгновенно, без сети);
+    2. свежий снимок прошлого ответа — чтобы не дёргать CLI на каждый опрос;
+    3. `agy -p /usage` — единственный работающий путь на сервере, где ни IDE,
+       ни постоянного `agy` нет и не будет;
+    4. снимок любой давности в пределах TTL.
 
     Формат:
         {"source": "language-server",
@@ -239,15 +255,129 @@ def read_live_quota() -> Optional[Dict[str, Any]]:
             break
 
     if not payload:
-        return cached_live_quota()
+        return _without_server()
 
     groups = _parse_groups(payload)
     if not groups:
-        return cached_live_quota()
+        return _without_server()
 
     snapshot = {
         "endpoint": _LAST_ENDPOINT,
         "source": owner or "language-server",
+        "fresh": True,
+        "checked_at": datetime.now().strftime("%H:%M:%S"),
+        "checked_ts": datetime.now().timestamp(),
+        "groups": groups,
+    }
+    _save_snapshot(snapshot)
+    return snapshot
+
+
+def _without_server() -> Optional[Dict[str, Any]]:
+    """Ни IDE, ни запущенного agy: спрашиваем сам CLI, но не чаще чем изредка."""
+    cached = cached_live_quota()
+    if cached is not None and _snapshot_age() < CLI_ASK_COOLDOWN_SECONDS:
+        return cached
+
+    asked = ask_cli_quota()
+    return asked if asked is not None else cached
+
+
+def _snapshot_age() -> float:
+    """Возраст снимка в секундах (огромное число — снимка нет)."""
+    try:
+        with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+            stamp = float((json.load(f) or {}).get("checked_ts") or 0)
+    except (OSError, ValueError, TypeError):
+        return float("inf")
+    return datetime.now().timestamp() - stamp if stamp else float("inf")
+
+
+# Строка ответа `agy -p /usage` — табуляции, проценты уже остаточные:
+#   Gemini Models\tWeekly Limit Remaining\t82%\t2026-08-31T06:46:39Z
+_CLI_USAGE_LINE = re.compile(
+    r"^(?P<group>.+?)\t+(?P<window>.+?)\t+(?P<percent>\d+(?:[.,]\d+)?)\s*%"
+    r"(?:\t+(?P<reset>\S+))?\s*$"
+)
+_CLI_WINDOWS = ((("five hour", "5-hour", "5h"), "5h"),
+                (("weekly", "week"), "weekly"))
+
+
+def _cli_window(label: str) -> str:
+    low = (label or "").lower()
+    for needles, window in _CLI_WINDOWS:
+        if any(needle in low for needle in needles):
+            return window
+    return ""
+
+
+def agy_cli_path() -> str:
+    return os.getenv("AGY_CLI_PATH", "") or "agy"
+
+
+def ask_cli_quota(timeout_seconds: int = 120) -> Optional[Dict[str, Any]]:
+    """
+    Остаток квот из ответа самого CLI: `agy -p /usage`.
+
+    На мини-ПК это единственный источник. Локальный RPC поднимают IDE и
+    работающий `agy`; ни того, ни другого на сервере нет — агенты там
+    запускаются на одну задачу и умирают, а Antigravity IDE негде показывать.
+    Слэш-команды в неинтерактивном режиме agy разворачивает сам, модель при
+    этом не дёргается.
+    """
+    raw = _run([agy_cli_path(), "-p", "/usage"], timeout=timeout_seconds)
+    if not raw.strip():
+        return None
+
+    now = datetime.now(timezone.utc)
+    collected: Dict[str, Dict[str, Any]] = {}
+
+    for line in raw.splitlines():
+        match = _CLI_USAGE_LINE.match(line.rstrip())
+        if not match:
+            continue
+        window = _cli_window(match.group("window"))
+        if not window:
+            continue
+
+        title = " ".join(match.group("group").split())
+        key = model_group(title)
+        reset_at = _parse_reset(match.group("reset"))
+        reset_seconds = int((reset_at - now).total_seconds()) if reset_at else 0
+        group = collected.setdefault(key, {"title": title, "buckets": []})
+        group["buckets"].append({
+            "id": "",
+            "window": window,
+            "label": _WINDOW_TITLES_RU.get(window, window),
+            "percent": max(0.0, min(100.0, float(match.group("percent").replace(",", ".")))),
+            "reset_in": _humanize(reset_seconds),
+            "reset_at": reset_at.astimezone().strftime("%d.%m %H:%M") if reset_at else "—",
+            "reset_seconds": max(0, reset_seconds),
+            "note": "",
+        })
+
+    groups: Dict[str, Any] = {}
+    for key, group in collected.items():
+        buckets = sorted(group["buckets"], key=lambda b: 0 if b["window"] == "5h" else 1)
+        worst = min(buckets, key=lambda b: b["percent"])
+        groups[key] = {
+            "title": group["title"] or GROUP_TITLES[key],
+            "description": "",
+            "buckets": buckets,
+            "percent": worst["percent"],
+            "reset_in": worst["reset_in"],
+            "reset_at": worst["reset_at"],
+            # Состав группы CLI не печатает — и подставлять сюда догадку
+            # нельзя: карточка подписывает этой строкой список моделей.
+            "model_names": "",
+        }
+
+    if not groups:
+        return None
+
+    snapshot = {
+        "endpoint": {},
+        "source": f"{agy_cli_path()} -p /usage",
         "fresh": True,
         "checked_at": datetime.now().strftime("%H:%M:%S"),
         "checked_ts": datetime.now().timestamp(),

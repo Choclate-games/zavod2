@@ -586,6 +586,18 @@ def chats_stop(slug: str, session_id: str) -> Dict[str, Any]:
     return service.stop_chat(session_id)
 
 
+@app.post("/api/chats/{slug}/{session_id}/handoff")
+async def chats_handoff(slug: str, session_id: str, request: Request) -> Dict[str, Any]:
+    """Повторить последний запрос другим CLI — когда у прежнего кончился лимит."""
+    payload = await _body(request)
+    return service.handoff_chat(
+        _slug(slug), session_id,
+        agent_key=(payload.get("agent") or "").strip(),
+        model=(payload.get("model") or "").strip() or None,
+        yolo=bool(payload.get("yolo", True)),
+    )
+
+
 @app.get("/api/chats/{slug}/{session_id}/undo")
 def chats_undo_info(slug: str, session_id: str, index: Optional[int] = None) -> Dict[str, Any]:
     """Что уберёт откат — для окна подтверждения. `index` — запрос в ленте."""
@@ -862,6 +874,14 @@ def quota() -> Dict[str, Any]:
 def usage() -> Dict[str, Any]:
     """Расход токенов: итог по фабрике и разбивка по проектам."""
     return service.usage_payload()
+
+
+@app.post("/api/quota/{key}/refresh")
+def quota_refresh(key: str) -> Dict[str, Any]:
+    """Спросить остаток у самого CLI — на мини-ПК это единственный источник."""
+    if key not in AGENT_KEYS:
+        raise HTTPException(status_code=404, detail="Неизвестный агент")
+    return service.refresh_agent_quota(key)
 
 
 @app.post("/api/quota/{key}/terminal")

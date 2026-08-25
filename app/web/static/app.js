@@ -1461,6 +1461,41 @@ function addAnswerBubble(text) {
   return node;
 }
 
+/* Лимит у агента кончается посреди работы, и продолжать приходится другим CLI.
+   Кнопка на каждого — прямо в ленте: переписка переходит вместе с задачей, а
+   формулировку запроса набирать заново не нужно. */
+function addHandoffBubble(event) {
+  const bubble = addBubble("system",
+    `${esc(event.icon || "🔁")} ${esc(event.text)} <span class="stamp">${now()}</span>`);
+  const row = el("div", "row");
+  row.style.marginTop = "8px";
+  row.style.flexWrap = "wrap";
+  (event.agents || []).forEach((agent) => {
+    const btn = el("button", "btn small", esc(agent.label));
+    btn.onclick = async () => {
+      row.querySelectorAll("button").forEach((node) => (node.disabled = true));
+      const res = await api(
+        `/api/chats/${encodeURIComponent(state.project)}/${state.session}/handoff`,
+        { body: { agent: agent.key, yolo: $("chk-yolo") ? $("chk-yolo").checked : true } });
+      if (res.status === "started") {
+        // Агент чата сменился — селектор наверху должен показывать того, кто
+        // на самом деле ведёт беседу, иначе следующий запрос уйдёт прежнему.
+        $("chat-agent").value = agent.key;
+        state.sessionRunning = true;
+        updateChatButtons();
+        showTyping(true);
+        row.remove();
+      } else {
+        row.querySelectorAll("button").forEach((node) => (node.disabled = false));
+        toast("Чат", res.message || "Не удалось передать задачу", "err");
+      }
+    };
+    row.appendChild(btn);
+  });
+  if (row.children.length) { bubble.appendChild(row); scrollFeed(); }
+  return bubble;
+}
+
 function pushChatEvent(event) {
   const kind = event.kind || "raw";
 
@@ -1513,6 +1548,8 @@ function pushChatEvent(event) {
       `<span class="who">✅ ${esc(event.status)} · токенов ${esc(event.tokens)} · ${esc(event.duration)}</span>${body}`);
     const node = bubble.querySelector(".body");
     if (node) attachClamp(bubble, node);
+  } else if (kind === "handoff") {
+    addHandoffBubble(event);
   } else if (kind === "error") {
     addBubble("error", `❌ ${esc(event.text)}`);
   } else if (kind === "meta") {
@@ -2274,6 +2311,27 @@ function quotaCard(card) {
     link.style.display = "inline-block";
     node.appendChild(link);
   }
+  // Спросить остаток у самого CLI. На мини-ПК это единственный работающий
+  // путь: ни файловый кэш, ни локальный RPC там не заводятся — в терминале
+  // никто не сидит, а IDE негде показывать. У карточек Antigravity ключ свой
+  // (`probe_key`): обе группы моделей обновляются одним ответом одного agy.
+  const probeKey = card.probe_key || (card.can_probe ? card.key : "");
+  if (probeKey) {
+    const ask = el("button", "btn small", "🔄 Спросить CLI");
+    ask.style.marginTop = "10px";
+    ask.style.marginRight = "8px";
+    ask.onclick = async () => {
+      ask.disabled = true;
+      const before = ask.textContent;
+      ask.textContent = "🔄 спрашиваю…";
+      const res = await api(`/api/quota/${probeKey}/refresh`, { method: "POST" });
+      ask.disabled = false;
+      ask.textContent = before;
+      toast("Квота", res.message || "", res.status === "success" ? "ok" : "err");
+      loadQuota();
+    };
+    node.appendChild(ask);
+  }
   if (!card.live && card.supports_usage_command !== false
       && card.key && card.key !== "gemini" && card.key !== "claude_family"
       && !card.console_url) {
@@ -2940,7 +2998,11 @@ function handleEvent(topic, data) {
 function notifyChatDone(data) {
   const actions = [["Открыть чат", () => { state.project = data.slug; localStorage.setItem("project", data.slug); openChat(data.session_id); }]];
   if (data.playable) actions.unshift(["▶ Играть", () => openPlay(data.slug)]);
-  toast(`${data.icon} ${data.text}`, `${data.slug} · ${data.title} · ${data.duration}`,
+  // Про лимит говорим отдельной строкой: «завершено с кодом 1» ничего не
+  // объясняет, а в чате уже ждут кнопки «продолжить другим CLI».
+  const head = data.limit_hit ? `🚫 Лимит агента исчерпан` : `${data.icon} ${data.text}`;
+  toast(head, `${data.slug} · ${data.title} · ${data.duration}` +
+    (data.limit_hit ? " · в чате можно продолжить другим CLI" : ""),
     data.status === "done" ? "ok" : "warn", actions);
 
   if ($("chk-notify").checked && "Notification" in window && Notification.permission === "granted") {

@@ -46,6 +46,7 @@ import subprocess
 import tempfile
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
@@ -53,7 +54,12 @@ from app import pkgstore
 from app.config import config
 
 from app.logging import log_warning
-from providers.agent_usage import AgentUsageTracker, project_from_path, sniff_tokens
+from providers.agent_usage import (
+    AgentUsageTracker,
+    project_from_path,
+    sniff_tokens,
+    window_sort_key,
+)
 from providers.base import AIProvider, T
 from providers import json_output
 # from providers.local import LocalAIProvider   # офлайн-режим отключён
@@ -594,6 +600,19 @@ class CodingCLIAgent(AIProvider):
         """
         return []
 
+    def read_usage(self, timeout_seconds: int = 90) -> Optional[Dict[str, Any]]:
+        """
+        Остаток квоты, спрошенный у самого CLI (None — этот CLI так не умеет).
+
+        Файловые кэши агентов (`~/.claude.json`, `~/.codex/sessions`) заводятся
+        только там, где человек сидит в CLI руками. На мини-ПК такого не
+        происходит никогда: фабрика гоняет агентов неинтерактивно, кэш не
+        появляется, и вкладка «Квоты» честно показывает «остаток неизвестен» —
+        то есть ничего. Поэтому у остатка должен быть и второй путь: спросить
+        CLI напрямую и сложить ответ в свой кэш.
+        """
+        return None
+
     def run_cli(self, args: List[str], timeout_seconds: int = 60) -> str:
         """Служебный вызов CLI (`models`, `provider list` и т. п.) → stdout."""
         cli = self.resolve_cli()
@@ -763,6 +782,72 @@ class ClaudeCodeAgent(CodingCLIAgent):
         они всегда указывают на актуальную версию модели.
         """
         return list(self.default_models)
+
+    # Ответ `/usage` — три строки вида
+    #   Current session: 19% used · resets Aug 25, 11:29pm (Asia/Yekaterinburg)
+    #   Current week (all models): 52% used · resets Aug 28, 8:59am (…)
+    # Проценты здесь — израсходованные, а не остаток.
+    _USAGE_LINE = re.compile(
+        r"^(?P<label>[^:]+?):\s*(?P<used>\d+(?:[.,]\d+)?)\s*%\s*used"
+        r"(?:\s*[·•|-]\s*resets?\s+(?P<reset>.+?))?\s*$",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _usage_label(raw: str) -> str:
+        """Английское имя окна из `/usage` → то же имя, что у остальных карточек."""
+        text = " ".join((raw or "").split())
+        low = text.lower()
+        if low.startswith("current session"):
+            return "5 часов"
+        if low.startswith("current week"):
+            scope = re.search(r"\((.+?)\)", text)
+            if not scope or scope.group(1).lower() in ("all models", "all"):
+                return "неделя"
+            return f"неделя ({scope.group(1)})"
+        return text or "лимит"
+
+    def read_usage(self, timeout_seconds: int = 90) -> Optional[Dict[str, Any]]:
+        """
+        Остаток квоты из ответа самого CLI: `claude -p /usage`.
+
+        Именно ответ, а не файл: Claude Code 2.1 кладёт `cachedUsageUtilization`
+        в `~/.claude.json` только после интерактивного `/usage`, и на машине,
+        где в CLI никто не заходит руками, этого ключа не появляется вовсе.
+        Неинтерактивный `/usage` печатает те же цифры и модель не дёргает.
+        """
+        raw = self.run_cli(["-p", "/usage"], timeout_seconds=timeout_seconds)
+
+        windows: List[Dict[str, Any]] = []
+        for line in raw.splitlines():
+            match = self._USAGE_LINE.match(line.strip())
+            if not match:
+                continue
+            used = float(match.group("used").replace(",", "."))
+            windows.append({
+                "label": self._usage_label(match.group("label")),
+                "pct_left": max(0.0, 100.0 - used),
+                "used_percent": used,
+                # Момент сброса CLI печатает уже в местном времени и словами;
+                # разбирать его обратно в дату незачем — показываем как есть.
+                "reset_at": " ".join((match.group("reset") or "").split()) or "—",
+                "reset_ts": 0.0,
+                "expired": False,
+            })
+
+        if not windows:
+            return None
+
+        windows.sort(key=lambda window: window_sort_key(window["label"]))
+        now = time.time()
+        return {
+            "windows": windows,
+            "stale": False,
+            "plan": "",
+            "source": f"{self.cli_path} -p /usage",
+            "fetched_ts": now,
+            "updated_at": datetime.fromtimestamp(now).strftime("%d.%m %H:%M"),
+        }
 
     def build_stream_command(self, prompt: str, conversation_id: Optional[str] = None) -> List[str]:
         cmd = [self.cli_path, "-p", prompt, "--output-format", "stream-json", "--verbose"]

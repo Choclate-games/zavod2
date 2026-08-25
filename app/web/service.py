@@ -48,13 +48,13 @@ from app.run_session import RunPaused, RunSession
 from app.web.bus import bus
 
 from providers import agent_usage
-from providers.agent_usage import AgentUsageTracker, human_tokens
+from providers.agent_usage import AgentUsageTracker, human_tokens, window_sort_key
 from providers.agy import AGYProvider, AGYQuotaTracker
 from providers.fish_audio import FishAudioClient, FishAudioError, FORMATS as TTS_FORMATS, \
     FREE_MODEL as TTS_FREE_MODEL, MODELS as TTS_MODELS
-from providers.cli_agents import AGENT_CLASSES, make_cli_agent
+from providers.cli_agents import AGENT_CLASSES, CodingCLIAgent, make_cli_agent
 from providers.factory import ProviderFactory
-from providers.quota_probe import read_live_quota
+from providers.quota_probe import ask_cli_quota as read_cli_quota, read_live_quota
 from validators.output_validator import OutputValidator
 
 from agents.art_director import ArtDirectorAgent
@@ -202,9 +202,15 @@ LINE_THIN = BR + chr(9472) * 65 + BR
 MAX_STUDIO_LOG_LINES = 3000
 MAX_PLAY_LOG_LINES = 1500
 
-# Сколько времени завершённый чат ещё висит в панели активности сайдбара.
-# Раньше — если пользователь сам не убрал тему крестиком (см. dismiss_activity).
-RECENT_CHAT_WINDOW_SECONDS = 15 * 60
+# Сколько чат может молчать, прежде чем тема уйдёт из панели активности.
+#
+# Считается от последнего события в чате, а не от завершения задачи, и
+# обновляется, когда чат открывают. Раньше отсчёт шёл строго от финиша:
+# ответ агента прочитан наполовину, человек ушёл за чаем — и вернулся к
+# панели, в которой темы уже нет. Продолжать беседу при этом никто не мешал,
+# но искать её приходилось в списке чатов проекта, а не там, где она была.
+# Крестик (dismiss_activity) убирает тему сразу и никуда не делся.
+IDLE_CHAT_WINDOW_SECONDS = 30 * 60
 
 # Куда складываются реплики, озвученные через Fish Audio.
 TTS_DIRNAME = Path("assets") / "audio" / "voice"
@@ -225,6 +231,33 @@ def _port_of(url: Optional[str]) -> Optional[int]:
         return urlparse(url).port
     except ValueError:
         return None
+
+
+# Признаки «у агента кончился лимит» в его же ответе.
+#
+# Ловим не ради красивой формулировки: пока причина падения выглядела как
+# «завершено с кодом 1», человек шёл разбираться в логи и узнавал о лимите
+# через полчаса. А узнать нужно сразу — потому что работа продолжается в том
+# же чате другим CLI, и решение принимается в эту минуту.
+_LIMIT_PATTERNS = (
+    re.compile(r"usage limit reached", re.IGNORECASE),
+    re.compile(r"hit your usage limit", re.IGNORECASE),
+    re.compile(r"rate[_ ]?limit", re.IGNORECASE),
+    re.compile(r"quota (?:exceeded|exhausted)", re.IGNORECASE),
+    re.compile(r"insufficient[_ ]quota", re.IGNORECASE),
+    re.compile(r"out of (?:credits|tokens)", re.IGNORECASE),
+    re.compile(r"resource[_ ]exhausted", re.IGNORECASE),
+    re.compile(r"too many requests", re.IGNORECASE),
+    # По-русски порядок слов свободный: «лимит запросов исчерпан» и
+    # «исчерпана квота» — одно и то же событие.
+    re.compile(r"(?:лимит|квот)\w*[^\n]{0,40}(?:исчерпан|закончил|превышен)", re.IGNORECASE),
+    re.compile(r"(?:исчерпан|превышен)\w*[^\n]{0,40}(?:лимит|квот)", re.IGNORECASE),
+)
+
+
+def looks_like_limit(text: str) -> bool:
+    """Похоже ли падение агента на исчерпанный лимит тарифа."""
+    return any(pattern.search(text or "") for pattern in _LIMIT_PATTERNS)
 
 
 def plural_runs(count: int) -> str:
@@ -279,6 +312,13 @@ class FactoryService:
         # ── Квота ──
         self._live_quota: Optional[Dict[str, Any]] = None
         self._quota_probe_running = False
+        # Опрос CLI об остатке: кто сейчас опрашивается и когда спрашивали
+        # прошлый раз. Второе — по агенту и на неудачные попытки тоже, иначе
+        # ненайденный CLI переспрашивался бы каждые тридцать секунд, пока
+        # открыта вкладка.
+        self._agent_probe_running: set = set()
+        self._agent_probe_at: Dict[str, float] = {}
+        self._agent_probe_lock = threading.Lock()
 
         # Порт прошлого запуска игры: следующий раз поднимаем её на другом, чтобы
         # localStorage (а с ним и прогресс) стартовал пустым.
@@ -1633,9 +1673,24 @@ class FactoryService:
             else:
                 events.append({"kind": "system", "icon": "ℹ️", "text": message.text})
 
+        # Чат открыли — значит, он ещё нужен: отсчёт бездействия начинается
+        # заново, и тема не уйдёт из панели, пока её читают.
+        self.chat_jobs.touch(session_id)
+
         job = self.chat_jobs.get(session_id)
         running = bool(job and job.status == "running")
         live_events: List[Dict[str, Any]] = list(job.events) if running else []
+
+        # Предложение уйти к другому CLI переживает перезагрузку страницы:
+        # лимит кончается ровно тогда, когда человек отошёл, и возвращается он
+        # уже в новую вкладку. Живёт оно столько же, сколько тема в панели
+        # активности (IDLE_CHAT_WINDOW_SECONDS) — то есть пока задачу вообще
+        # имеет смысл продолжать.
+        if job and job.status == "failed":
+            offer = self._handoff_offer(session, job,
+                                        looks_like_limit(self._job_failure_text(job)))
+            if offer:
+                events.append(offer)
 
         return {
             "status": "success",
@@ -1874,6 +1929,18 @@ class FactoryService:
         job.record(final_event)
         bus.publish("chat.event", slug=job.slug, session_id=job.session_id, event=final_event)
 
+        # Упал — предлагаем доиграть тем же чатом, но другим CLI. Лимит
+        # кончается посреди работы, и переносить задачу руками (найти чат,
+        # переключить агента, вспомнить формулировку) — это ровно тот труд,
+        # который фабрика и должна снимать.
+        limit_hit = False
+        if job.status == "failed":
+            limit_hit = looks_like_limit(self._job_failure_text(job))
+            offer = self._handoff_offer(stored, job, limit_hit)
+            if offer:
+                job.record(offer)
+                bus.publish("chat.event", slug=job.slug, session_id=job.session_id, event=offer)
+
         playable = self.project_is_playable(job.slug)
         if playable:
             hint = {"kind": "system", "icon": "🎮",
@@ -1885,7 +1952,7 @@ class FactoryService:
             "chat.finished",
             slug=job.slug, session_id=job.session_id, status=job.status,
             icon=status_icon, text=status_text, duration=job.duration_str,
-            title=job.title, playable=playable,
+            title=job.title, playable=playable, limit_hit=limit_hit,
         )
         bus.publish("chats.changed", slug=job.slug)
         bus.publish("projects.changed")
@@ -1902,6 +1969,71 @@ class FactoryService:
         if notify.notifications_enabled():
             notify.send(f"{status_icon} {status_text}",
                         f"{job.slug} · {job.title} · {job.duration_str}")
+
+    # ── Передача чата другому CLI ─────────────────────────────────────
+
+    @staticmethod
+    def _job_failure_text(job) -> str:
+        """Всё, что агент сказал напоследок, — включая ошибки.
+
+        Ответ (`job.answer`) собирается только из `result` и `assistant`, а
+        текст про исчерпанный лимит приходит событием `error` и туда не
+        попадает. Ищем причину по обоим.
+        """
+        tail = [str(event.get("text") or "") for event in job.events[-30:]
+                if event.get("kind") in ("error", "result", "assistant", "system")]
+        return BR.join(tail + [job.answer or ""])
+
+    def _handoff_offer(self, session, job, limit_hit: bool) -> Optional[Dict[str, Any]]:
+        """Событие «продолжить другим агентом» с кнопками по каждому CLI."""
+        current = (getattr(session, "agent", "") or self.default_agent())
+        others = [key for key in AGENT_KEYS if key != current]
+        if not others:
+            return None
+
+        label = AGENT_LABELS.get(current, current)
+        return {
+            "kind": "handoff",
+            "icon": "🚫" if limit_hit else "🔁",
+            "text": (f"Похоже, у {label} кончился лимит. Тот же запрос можно "
+                     f"продолжить другим CLI — переписка перейдёт вместе с ним."
+                     if limit_hit else
+                     f"{label} не справился. Тот же запрос можно повторить "
+                     f"другим CLI — переписка перейдёт вместе с ним."),
+            "prompt": job.prompt,
+            "agents": [{"key": key, "label": AGENT_LABELS.get(key, key)} for key in others],
+        }
+
+    def handoff_chat(self, slug: str, session_id: str, *, agent_key: str,
+                     model: Optional[str] = None, yolo: bool = True) -> Dict[str, Any]:
+        """
+        Повторяет последний запрос чата другим CLI.
+
+        Беседу самого агента передать нельзя — `conversation_id` принадлежит
+        конкретному CLI. Поэтому новый агент получает выжимку переписки
+        (`chat_store.history_digest`), как и при обычной смене агента в чате:
+        он видит, о чём шла речь, и продолжает с того же места.
+        """
+        if agent_key not in AGENT_KEYS:
+            return {"status": "error", "message": f"Неизвестный агент: {agent_key}"}
+        if self.chat_jobs.is_running(session_id):
+            return {"status": "error",
+                    "message": "В этом чате агент ещё работает — сначала «⏹ Стоп»."}
+
+        session = chat_store.load_session(slug, session_id)
+        if not session:
+            return {"status": "error", "message": "Чат не найден."}
+        if (session.agent or self.default_agent()) == agent_key:
+            return {"status": "error",
+                    "message": f"Чат и так ведёт {AGENT_LABELS.get(agent_key, agent_key)}."}
+
+        index = chat_store.last_user_index(session)
+        if index is None:
+            return {"status": "error", "message": "В этом чате ещё не было запросов."}
+        prompt = session.messages[index].text
+
+        return self.send_chat_task(slug, session_id, prompt, agent_key=agent_key,
+                                   model=model, yolo=yolo, continue_dialog=True)
 
     def undo_info(self, slug: str, session_id: str,
                   index: Optional[int] = None) -> Dict[str, Any]:
@@ -2018,8 +2150,12 @@ class FactoryService:
     def activity_chats(self, limit: int = 12) -> List[Dict[str, Any]]:
         """
         Лента активности для боковой панели: что работает прямо сейчас и что
-        завершилось недавно (в пределах RECENT_CHAT_WINDOW_SECONDS).
+        завершилось, но ещё может быть продолжено (см. IDLE_CHAT_WINDOW_SECONDS).
         """
+        # Молчащие темы забываем здесь же: панель — единственный, кто на них
+        # смотрит, и отдельный сборщик ради этого заводить незачем.
+        self.chat_jobs.purge_idle(IDLE_CHAT_WINDOW_SECONDS)
+
         moment = datetime.now()
         rows: List[Dict[str, Any]] = []
         for job in self.chat_jobs.all_jobs():
@@ -2028,10 +2164,7 @@ class FactoryService:
             if not running:
                 if not job.finished_at:
                     continue
-                seconds = int((moment - job.finished_at).total_seconds())
-                if seconds > RECENT_CHAT_WINDOW_SECONDS:
-                    continue
-                finished_ago = seconds
+                finished_ago = int((moment - job.finished_at).total_seconds())
             rows.append({
                 "session_id": job.session_id,
                 "slug": job.slug,
@@ -2691,12 +2824,17 @@ class FactoryService:
     def quota_payload(self, probe: bool = True) -> Dict[str, Any]:
         if probe:
             self._probe_live_quota_async()
+            self._probe_stale_agents()
 
         status = self.agy_quota_tracker.get_quota_status()
         families = {f["family"]: f for f in status.get("families", [])}
         live = self._live_quota
 
         stale = bool(live) and not live.get("fresh", True)
+        # Снимок снимку рознь: ответ CLI минутной давности — это не «IDE не
+        # запущена», а «переспросим через десять минут». Подписи ниже должны
+        # различать эти два случая, иначе рабочий сервер выглядит сломанным.
+        asked_cli = "/usage" in str((live or {}).get("source") or "")
         agy_cards: List[Dict[str, Any]] = []
 
         for family in AGYQuotaTracker.FAMILIES:
@@ -2716,9 +2854,20 @@ class FactoryService:
                 agy_cards.append({
                     "key": family, "title": group.get("title") or title, "live": True,
                     "state": "snapshot" if stale else "live",
-                    "badge": (f"снимок · {live.get('age_str', '')}" if stale
+                    # Обе карточки AGY обновляются одним ответом одного CLI,
+                    # поэтому и кнопка у них общая по смыслу — «agy», а не
+                    # группа моделей, которой команды не задать.
+                    "probe_key": "agy",
+                    "supports_usage_command": False,
+                    "badge": ((f"ответ agy · {live.get('age_str', '')}" if asked_cli
+                               else f"снимок · {live.get('age_str', '')}") if stale
                               else f"живые данные · {live.get('source', '')}"),
-                    "subtitle": f"Модели группы: {group['model_names']}", "rows": rows,
+                    # Состав группы знает только RPC: `agy -p /usage` печатает
+                    # одни проценты. Пустая строка «Модели группы:» выглядела
+                    # бы как потерянные данные — лучше не писать ничего.
+                    "subtitle": (f"Модели группы: {group['model_names']}"
+                                 if group.get("model_names") else ""),
+                    "rows": rows,
                 })
                 continue
 
@@ -2753,6 +2902,8 @@ class FactoryService:
             agy_cards.append({
                 "key": family, "title": title, "live": False,
                 "state": "local" if manual else "unknown",
+                "probe_key": "agy",
+                "supports_usage_command": False,
                 "badge": "лимит из .env" if manual else "остаток неизвестен",
                 "subtitle": ("запустите agy или Antigravity IDE — фабрика подхватит "
                              "реальные проценты автоматически"),
@@ -2770,6 +2921,9 @@ class FactoryService:
                 f"Живые данные Antigravity ({live.get('source')}) — то же, что показывает "
                 f"/usage: недельное и пятичасовое окно по каждой группе моделей."
                 if live and live.get("fresh", True) else
+                f"Остаток спрошен у agy {live.get('age_str', '')}: фабрика переспрашивает CLI "
+                f"не чаще раза в десять минут, кнопка «🔄 Спросить CLI» делает это сейчас."
+                if live and asked_cli else
                 f"Antigravity сейчас не запущен: показан последний снимок ({live.get('age_str', '')}). "
                 f"Запустите agy или IDE — цифры обновятся сами."
                 if live else
@@ -2780,8 +2934,15 @@ class FactoryService:
             "last_agy_request": status["last_used_at"],
             "summary": self._quota_summary(families, live),
             "meta": ("Откуда берутся цифры:\n"
-                     "• Antigravity — язык-сервер IDE, реальные проценты по группам моделей.\n"
-                     "• Claude Code — кэш его команды /usage (~/.claude.json).\n"
+                     "• Antigravity — язык-сервер запущенной IDE или agy, реальные "
+                     "проценты по группам моделей. Ни IDE, ни постоянного agy нет "
+                     "(мини-ПК) — фабрика спрашивает сам CLI: agy -p /usage, "
+                     "не чаще раза в 10 минут.\n"
+                     "• Claude Code — ответ его же команды /usage: фабрика "
+                     "спрашивает CLI сама (кнопка «🔄 Спросить CLI» и раз в "
+                     "10 минут при открытой вкладке). Если в CLI работали "
+                     "руками, берётся тот источник, что свежее — ответ или "
+                     "кэш ~/.claude.json.\n"
                      "• Codex — файлы сессий ~/.codex/sessions.\n"
                      "• OpenCode — остаток отдаёт только личный кабинет на сайте, "
                      "в CLI его нет: показан расход фабрики и ссылка в кабинет "
@@ -2923,15 +3084,20 @@ class FactoryService:
                     "note": f"израсходовано {window['used_percent']:.1f}% · "
                             f"сброс {window['reset_at']}",
                 })
+            source = str(live.get("source") or "")
+            asked = "/usage" in source          # спросили сами, а не нашли в файле
             return {
                 "key": agent_key,
                 "title": AGENT_LABELS.get(agent_key, agent_key),
                 "live": True,
                 "state": "snapshot" if stale else "live",
-                "badge": ("часть данных устарела" if stale else "живые данные CLI"),
+                "badge": ("часть данных устарела" if stale
+                          else "ответ CLI" if asked else "живые данные CLI"),
                 "spent": spent_note,
                 "supports_usage_command": agent_key in ("claude", "codex"),
-                "subtitle": f"реальные данные CLI{plan} · обновлены {live.get('updated_at', '—')}",
+                "can_probe": self._agent_supports_probe(agent_key),
+                "subtitle": (f"{'спрошено у CLI' if asked else 'реальные данные CLI'}"
+                             f"{plan} · обновлены {live.get('updated_at', '—')}"),
                 "rows": rows,
             }
 
@@ -2976,6 +3142,11 @@ class FactoryService:
             # команды. Врать процентами хуже, чем честно отправить в кабинет.
             subtitle = f"{subtitle} · остаток смотрится только в личном кабинете"
 
+        can_probe = self._agent_supports_probe(agent_key)
+        if can_probe:
+            # Пустая карточка без объяснения читается как «квота кончилась».
+            subtitle = f"{subtitle} · остаток ещё не спрошен у CLI"
+
         return {"key": agent_key, "title": AGENT_LABELS.get(agent_key, agent_key),
                 "live": False,
                 "state": "external" if console_url else "local",
@@ -2984,7 +3155,123 @@ class FactoryService:
                 "spent": spent_note,
                 "console_url": console_url,
                 "supports_usage_command": agent_key in ("claude", "codex"),
+                "can_probe": can_probe,
                 "subtitle": subtitle, "rows": rows}
+
+    # ── Опрос CLI об остатке квоты ────────────────────────────────────
+    #
+    # Файловые кэши агентов заводятся только там, где в CLI сидят руками. На
+    # мини-ПК так не сидит никто — фабрика гоняет агентов неинтерактивно, — и
+    # вкладка «Квоты» показывала «остаток неизвестен» всегда, а не когда
+    # остаток действительно неизвестен. Поэтому есть второй путь: спросить
+    # CLI напрямую (`claude -p /usage`) и сложить ответ в свой кэш.
+
+    # Насколько старым должен стать остаток, чтобы фабрика переспросила сама.
+    AGENT_PROBE_AFTER_SECONDS = 10 * 60
+    # Чаще этого один агент не опрашивается ни при каких условиях — включая
+    # неудачные попытки: вкладка обновляется раз в 30 секунд.
+    AGENT_PROBE_COOLDOWN_SECONDS = 5 * 60
+
+    def _agent_supports_probe(self, agent_key: str) -> bool:
+        """Умеет ли CLI этого агента отвечать на вопрос об остатке."""
+        try:
+            provider = self.agent_provider(agent_key)
+        except Exception:
+            return False
+        reader = getattr(type(provider), "read_usage", None)
+        base = getattr(CodingCLIAgent, "read_usage", None)
+        return bool(reader) and reader is not base
+
+    def refresh_agent_quota(self, agent_key: str) -> Dict[str, Any]:
+        """Спрашивает у CLI остаток прямо сейчас (кнопка «Спросить CLI»)."""
+        if agent_key == "agy":
+            return self._refresh_agy_quota()
+        if agent_key not in AGENT_CLASSES:
+            return {"status": "error", "message": f"Неизвестный агент: {agent_key}"}
+        if not self._agent_supports_probe(agent_key):
+            return {"status": "error",
+                    "message": f"{AGENT_LABELS.get(agent_key, agent_key)} не умеет "
+                               f"называть остаток по запросу — цифры появятся сами "
+                               f"после первой работы агента."}
+
+        with self._agent_probe_lock:
+            if agent_key in self._agent_probe_running:
+                return {"status": "success", "message": "Уже спрашиваю…"}
+            self._agent_probe_running.add(agent_key)
+            self._agent_probe_at[agent_key] = time.time()
+
+        try:
+            payload = self.agent_provider(agent_key).read_usage()
+        except Exception as exc:
+            return {"status": "error",
+                    "message": f"{AGENT_LABELS.get(agent_key, agent_key)}: "
+                               f"не удалось спросить остаток — {exc}"}
+        finally:
+            with self._agent_probe_lock:
+                self._agent_probe_running.discard(agent_key)
+            bus.publish("quota.changed")
+
+        if not payload:
+            return {"status": "error",
+                    "message": f"{AGENT_LABELS.get(agent_key, agent_key)} ответил, "
+                               f"но процентов в ответе не было."}
+
+        agent_usage.save_probe(agent_key, payload)
+        bus.publish("quota.changed")
+        shortest = min(payload["windows"], key=lambda w: window_sort_key(w["label"]))
+        return {"status": "success",
+                "message": f"{AGENT_LABELS.get(agent_key, agent_key)}: "
+                           f"{shortest['label']} — остаток {shortest['pct_left']:.0f}%."}
+
+    def _refresh_agy_quota(self) -> Dict[str, Any]:
+        """
+        Остаток Antigravity по прямому вопросу CLI, в обход выдержки.
+
+        Обычный путь — локальный RPC запущенной IDE или `agy`; на сервере нет
+        ни того, ни другого, а `read_live_quota` спрашивает CLI не чаще раза в
+        десять минут. Нажатие кнопки — это и есть «спроси сейчас».
+        """
+        try:
+            payload = read_cli_quota()
+        except Exception as exc:
+            return {"status": "error", "message": f"agy: не удалось спросить остаток — {exc}"}
+        finally:
+            bus.publish("quota.changed")
+
+        if not payload:
+            return {"status": "error",
+                    "message": "agy ответил, но процентов в ответе не было — "
+                               "проверьте вход в CLI."}
+
+        self._live_quota = payload
+        bus.publish("quota.changed")
+        worst = min(payload["groups"].values(), key=lambda g: g["percent"])
+        return {"status": "success",
+                "message": f"Antigravity: самое узкое место — {worst['title']}, "
+                           f"остаток {worst['percent']:.0f}%."}
+
+    def _probe_agent_quota_async(self, agent_key: str) -> None:
+        """Фоновый опрос: карточка не должна ждать запуска чужого процесса."""
+        now = time.time()
+        with self._agent_probe_lock:
+            if agent_key in self._agent_probe_running:
+                return
+            last = self._agent_probe_at.get(agent_key, 0.0)
+            if now - last < self.AGENT_PROBE_COOLDOWN_SECONDS:
+                return
+
+        threading.Thread(target=self.refresh_agent_quota, args=(agent_key,),
+                         daemon=True, name=f"quota-probe-{agent_key}").start()
+
+    def _probe_stale_agents(self) -> None:
+        """Переспрашивает тех, чей остаток протух или не известен вовсе."""
+        for agent_key in AGENT_CLASSES:
+            if not self._agent_supports_probe(agent_key):
+                continue
+            live = self.agent_usage_tracker.live_status(agent_key)
+            age = time.time() - float((live or {}).get("fetched_ts") or 0)
+            if not live or age > self.AGENT_PROBE_AFTER_SECONDS:
+                self._probe_agent_quota_async(agent_key)
 
     def _probe_live_quota_async(self) -> None:
         """Опрос language server Antigravity в фоне — вызовы там блокирующие."""

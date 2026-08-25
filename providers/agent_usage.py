@@ -31,6 +31,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -766,12 +767,23 @@ class AgentUsageTracker:
             return []
 
     def live_status(self, agent: str) -> Optional[Dict[str, Any]]:
-        """Реальный остаток квоты, если CLI хранит его на диске."""
+        """
+        Реальный остаток квоты: файл самого CLI или наш опрос — что свежее.
+
+        Файл ведёт CLI, когда в нём работают руками; опрос (`save_probe`)
+        делает фабрика. На мини-ПК живёт только второй, на рабочем ПК —
+        обычно первый, и вперёд должен выходить тот, чьи цифры новее.
+        """
+        native = None
         if agent == "codex":
-            return read_codex_rate_limits()
-        if agent == "claude":
-            return read_claude_usage()
-        return None
+            native = read_codex_rate_limits()
+        elif agent == "claude":
+            native = read_claude_usage()
+
+        probe = load_probe(agent)
+        if native and probe:
+            return probe if probe.get("fetched_ts", 0) > native.get("fetched_ts", 0) else native
+        return native or probe
 
     def _save(self, history: List[Dict[str, Any]]) -> None:
         cutoff = datetime.now().timestamp() - HISTORY_TTL_DAYS * 86_400
@@ -867,6 +879,7 @@ def read_codex_rate_limits(max_files: int = 6) -> Optional[Dict[str, Any]]:
             "stale": any(w.get("expired") for w in windows),
             "plan": payload.get("plan_type") or "",
             "source": str(path),
+            "fetched_ts": float(path.stat().st_mtime),
             "updated_at": datetime.fromtimestamp(path.stat().st_mtime).strftime("%d.%m %H:%M"),
         }
     return None
@@ -890,6 +903,78 @@ def _last_rate_limits(path: Path) -> Optional[Dict[str, Any]]:
     except OSError:
         return None
     return found
+
+
+# ---------------------------------------------------------------------------
+# Кэш опроса CLI: остаток, спрошенный фабрикой, а не найденный в чужом файле
+# ---------------------------------------------------------------------------
+#
+# Зачем отдельный файл. Кэши самих CLI (`~/.claude.json`, `~/.codex/sessions`)
+# заводятся только при работе руками в терминале. На мини-ПК так не работает
+# никто: агентов гоняет фабрика неинтерактивно, и вкладка «Квоты» показывала
+# пустоту вечно. Опрос (`CodingCLIAgent.read_usage`) даёт те же цифры, но
+# ответ живёт в памяти процесса — а фабрику перезапускают, и переспрашивать
+# CLI на каждый старт значило бы дёргать его почём зря.
+
+PROBE_PATH_ENV = "AGENT_QUOTA_PROBE_PATH"
+DEFAULT_PROBE_PATH = Path(__file__).resolve().parent.parent / ".agent_quota_probe.json"
+
+
+def _probe_path() -> Path:
+    override = os.getenv(PROBE_PATH_ENV)
+    return Path(override) if override else DEFAULT_PROBE_PATH
+
+# Опрос старше этого считается снимком: карточка так и подписывается, а не
+# выдаёт вчерашние проценты за сегодняшние.
+PROBE_STALE_SECONDS = 10 * 60
+# А старше этого не показывается вовсе: пятичасовое окно к тому моменту уже
+# сбросилось, и «остаток» из такого опроса — просто неверное число.
+PROBE_TTL_SECONDS = WINDOW_5H
+
+
+def save_probe(agent: str, payload: Optional[Dict[str, Any]]) -> None:
+    """Кладёт ответ CLI в кэш (payload=None — забывает прошлый ответ)."""
+    try:
+        data = json.loads(_probe_path().read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+
+    if payload is None:
+        data.pop(agent, None)
+    else:
+        data[agent] = {**payload, "fetched_ts": payload.get("fetched_ts") or time.time()}
+
+    try:
+        _probe_path().write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_probe(agent: str) -> Optional[Dict[str, Any]]:
+    """Последний ответ CLI из кэша — или None, если его нет или он протух."""
+    try:
+        data = json.loads(_probe_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    payload = data.get(agent) if isinstance(data, dict) else None
+    if not isinstance(payload, dict) or not payload.get("windows"):
+        return None
+
+    age = time.time() - float(payload.get("fetched_ts") or 0)
+    if age > PROBE_TTL_SECONDS:
+        return None
+    return {**payload, "stale": age > PROBE_STALE_SECONDS}
+
+
+def probe_age(agent: str) -> Optional[float]:
+    """Сколько секунд назад опрашивали CLI (None — не опрашивали)."""
+    payload = load_probe(agent)
+    if not payload:
+        return None
+    return time.time() - float(payload.get("fetched_ts") or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1092,7 @@ def read_claude_usage() -> Optional[Dict[str, Any]]:
         "stale": any(w.get("expired") for w in windows),
         "plan": "",
         "source": str(path),
+        "fetched_ts": (fetched_ms / 1000) if fetched_ms else 0.0,
         "updated_at": datetime.fromtimestamp(fetched_ms / 1000).strftime("%d.%m %H:%M")
         if fetched_ms else "—",
     }

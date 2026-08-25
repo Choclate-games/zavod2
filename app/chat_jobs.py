@@ -33,7 +33,20 @@ class ChatJob:
     answer: str = ""
     stop_requested_at: Optional[datetime] = None
     detached: bool = False
+    # Когда в этом чате в последний раз что-то происходило: событие агента,
+    # завершение задачи или открытие чата человеком. По этому времени тема
+    # уходит из панели активности — не по времени завершения. Разница видна
+    # ровно там, ради чего это и сделано: пока человек читает ответ и решает,
+    # продолжать ли, тема остаётся на месте.
+    last_seen: datetime = field(default_factory=datetime.now)
     _stop: bool = False
+
+    def touch(self) -> None:
+        self.last_seen = datetime.now()
+
+    def idle_for(self) -> float:
+        """Сколько секунд в чате ничего не происходит."""
+        return (datetime.now() - self.last_seen).total_seconds()
 
     def should_stop(self) -> bool:
         return self._stop
@@ -54,6 +67,7 @@ class ChatJob:
         self.events.append(event)
         if len(self.events) > MAX_BUFFERED_EVENTS:
             del self.events[:-MAX_BUFFERED_EVENTS]
+        self.touch()
 
     @property
     def duration_str(self) -> str:
@@ -72,6 +86,12 @@ class ChatJobManager:
 
     def get(self, session_id: str) -> Optional[ChatJob]:
         return self._jobs.get(session_id)
+
+    def touch(self, session_id: str) -> None:
+        """Отмечает, что в чат заглянули: тема не должна уйти из-под рук."""
+        job = self._jobs.get(session_id)
+        if job:
+            job.touch()
 
     def is_running(self, session_id: str) -> bool:
         job = self._jobs.get(session_id)
@@ -183,3 +203,19 @@ class ChatJobManager:
         for session_id in finished:
             self._jobs.pop(session_id, None)
         return len(finished)
+
+    def purge_idle(self, idle_seconds: float) -> List[str]:
+        """
+        Забывает завершённые темы, в которых давно ничего не происходит.
+
+        Раньше тема просто переставала показываться через четверть часа после
+        завершения, а запись о ней оставалась в памяти навсегда. Теперь одно
+        правило на оба случая: пока в чате что-то происходит — или пока в него
+        заглядывают, — тема на месте; молчит дольше порога — уходит.
+        """
+        with self._lock:
+            stale = [sid for sid, job in self._jobs.items()
+                     if job.status != "running" and job.idle_for() > idle_seconds]
+            for session_id in stale:
+                self._jobs.pop(session_id, None)
+        return stale
