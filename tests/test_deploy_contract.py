@@ -93,3 +93,25 @@ def test_games_are_out_of_git_but_the_registry_stays():
     assert "/workspace/*" in ignore
     assert "/output/*" in ignore
     assert "!/workspace/.factory/projects.json" in ignore
+
+
+def test_the_job_recognises_its_deploy_by_the_commit_too():
+    """Только по времени старта — значит висеть до таймаута в обычном случае.
+
+    Хост начинает сборку раньше, чем прилетает наш триггер (предыдущий деплой
+    ещё идёт), догоняющий цикл доводит её до нашего коммита — и по времени
+    старта такой деплой выглядит чужим. Живой случай: прогон прождал так
+    семнадцать минут и продолжал ждать.
+    """
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert '[ "$sha" = "$GITHUB_SHA" ] && mine=1' in workflow
+    assert '"${started:-0}" -ge "${TRIGGERED_AT:-0}"' in workflow
+
+
+def test_the_wait_shows_the_deploy_while_it_runs():
+    """Молчать пять минут и вывалить простыню — это не «ожидание», это слепота."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "relay_log" in workflow, "лог хоста обязан идти в job по ходу дела"
+    assert "relay_step" in workflow, "шаг нужен там, где лог молчит"
+    assert "/deploy/step" in workflow
+    assert "step()" in SCRIPT.read_text(encoding="utf-8")
