@@ -39,6 +39,8 @@ export interface SaveData {
   version: number;
   coins: number;
   bestDelivery: number;
+  /** Суммарно доставлено за всё время: значение доски totalCargoDelivered. */
+  totalDelivered: number;
   currentLevel: number;
   unlockedLevels: number;
   levelStars: Record<number, number>;
@@ -53,6 +55,8 @@ export interface SaveData {
     sides: number;
   };
   settings: {
+    /** Куплено «Отключение рекламы навсегда» (product remove_ads_forever). */
+    adsRemoved: boolean;
     muted: boolean;
     invertSteering: boolean;
     volume: number;
@@ -71,6 +75,7 @@ export const DEFAULT_SAVE: SaveData = {
   version: 3,
   coins: 0,
   bestDelivery: 0,
+  totalDelivered: 0,
   currentLevel: 1,
   unlockedLevels: 1,
   levelStars: { 1: 0 },
@@ -84,7 +89,7 @@ export const DEFAULT_SAVE: SaveData = {
     ural: { engine: 0, tires: 0, suspension: 0, sides: 0, color: '#a83232' },
   },
   upgrades: { engine: 0, tires: 0, suspension: 0, sides: 0 },
-  settings: { muted: false, invertSteering: false, volume: 0.65, language: 'ru' },
+  settings: { adsRemoved: false, muted: false, invertSteering: false, volume: 0.65, language: 'ru' },
 };
 
 export interface GameEvents {
@@ -97,6 +102,10 @@ export interface GameEvents {
   'cargo:lost': { remaining: number; total: number; kind?: CargoKind };
   'game:finish': RunResult;
   'game:save': undefined;
+  /** Игрок досмотрел rewarded-ролик: площадка подтвердила состояние 'rewarded'. */
+  'ads:rewarded': { placement: string };
+  /** Покупка совершена и погашена. */
+  'shop:purchased': { productId: string };
   'audio:impact': { strength: number };
   'ui:toast': { text: string; tone: 'good' | 'warn' | 'bad' };
 }

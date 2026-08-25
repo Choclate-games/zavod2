@@ -33,6 +33,8 @@ html, body, #game-root {
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Требование 1.6.2.7: меню по долгому тапу на iOS. */
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -421,8 +423,9 @@ button {
   pointer-events: auto;
   border: 1px solid var(--border-light);
   border-radius: 12px;
-  width: 40px;
-  height: 40px;
+  /* Требование Яндекса 1.8: минимальная область нажатия 44×44. */
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;

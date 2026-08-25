@@ -6,6 +6,8 @@ const SAVE_KEY = 'player_coins';
 export class StorageService {
   private timer = 0;
   private pending: SaveData | null = null;
+  /** Куда уходит сохранение помимо локального зеркала — облако площадки. */
+  private cloudWrite: ((save: SaveData) => void) | null = null;
 
   constructor() {
     window.addEventListener('pagehide', this.flush);
@@ -21,20 +23,26 @@ export class StorageService {
     }
   }
 
-  schedule(save: SaveData): void {
+  schedule(save: SaveData, cloudWrite?: (payload: SaveData) => void): void {
     this.pending = this.normalize(save);
+    if (cloudWrite) this.cloudWrite = cloudWrite;
     window.clearTimeout(this.timer);
     this.timer = window.setTimeout(this.flush, 1500);
   }
 
   flush = (): void => {
-    if (!this.pending) return;
+    const payload = this.pending;
+    if (!payload) return;
+    this.pending = null;
+    window.clearTimeout(this.timer);
     try {
-      window.localStorage.setItem(SAVE_KEY, JSON.stringify(this.pending));
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
     } catch {
       // The platform may deny third-party local storage. Gameplay remains available.
     }
-    this.pending = null;
+    // Внутри iframe площадки локальное зеркало — секционированное стороннее
+    // хранилище, поэтому истина живёт в облаке.
+    this.cloudWrite?.(payload);
   };
 
   private readonly onVisibilityChange = (): void => {
@@ -80,6 +88,7 @@ export class StorageService {
       version: 3,
       coins: typeof source.coins === 'number' && Number.isFinite(source.coins) ? Math.max(0, source.coins) : 0,
       bestDelivery: typeof source.bestDelivery === 'number' ? Math.max(0, source.bestDelivery) : 0,
+      totalDelivered: typeof source.totalDelivered === 'number' ? Math.max(0, source.totalDelivered) : 0,
       currentLevel: typeof source.currentLevel === 'number' ? Math.max(1, Math.min(50, source.currentLevel)) : 1,
       unlockedLevels: typeof source.unlockedLevels === 'number' ? Math.max(1, Math.min(50, source.unlockedLevels)) : 1,
       levelStars: stars,
@@ -94,6 +103,7 @@ export class StorageService {
         sides: currentTruckUpgrades.sides,
       },
       settings: {
+        adsRemoved: settings.adsRemoved === true,
         muted: settings.muted === true,
         invertSteering: settings.invertSteering === true,
         volume: typeof settings.volume === 'number' ? Math.max(0, Math.min(1, settings.volume)) : .65,

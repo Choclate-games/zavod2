@@ -200,7 +200,13 @@ desktop.ini
 .token_usage_totals.json
 .agy/
 .gemini/
-.claude/
+# Локальные настройки и кэш Claude Code игнорируются целиком, кроме скиллов:
+# скилл — это инструмент завода, он должен ехать в репозиторий вместе с ним.
+# (.claude/* вместо .claude/ — в исключённый каталог git не заходит и отменить
+# исключение для содержимого уже нельзя)
+.claude/*
+!.claude/skills/
+.claude/skills/*/.cache/
 .codex/
 .kimi/
 

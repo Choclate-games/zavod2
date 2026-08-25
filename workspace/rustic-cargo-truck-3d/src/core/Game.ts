@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { EventBus } from './EventBus';
 import { GameLoop, type FixedUpdateTarget } from './GameLoop';
-import type { GameState, RunResult, SaveData, TruckId } from './types';
+import type { GameState, RunResult, SaveData, TruckId, TruckUpgrades } from './types';
 import { AudioManager } from '../audio/AudioManager';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { SceneManager } from '../rendering/SceneManager';
@@ -10,7 +10,7 @@ import { UIManager } from '../ui/UIManager';
 import { RoadGenerator } from '../world/RoadGenerator';
 import { TruckController } from '../vehicle/TruckController';
 import { CargoManager } from '../vehicle/CargoManager';
-import { PlaygamaService } from '../platform/PlaygamaService';
+import { bridgeService, REWARDED_PLACEMENT, PRODUCT, LEADERBOARD } from '../platform/BridgeService';
 import { getLevelConfig } from '../world/levels';
 
 export class Game implements FixedUpdateTarget {
@@ -19,7 +19,9 @@ export class Game implements FixedUpdateTarget {
   readonly scene = new SceneManager();
   readonly input = new InputManager();
   readonly audio = new AudioManager();
-  readonly platform = new PlaygamaService();
+  // Синглтон, а не собственный экземпляр: иначе у игры свой флаг готовности
+  // и своя очередь сохранения, отдельные от загрузчика.
+  readonly platform = bridgeService;
   readonly road = new RoadGenerator();
   readonly truck = new TruckController(this.physics, this.scene, this.road);
   readonly cargo = new CargoManager(this.physics, this.scene, this.truck, this.road);
@@ -31,6 +33,12 @@ export class Game implements FixedUpdateTarget {
   private save: SaveData;
   private lastHudUpdate = 0;
   private currentLevelId = 1;
+  /** Магнит груза даётся не чаще одного раза за заезд (MONETIZATION.md). */
+  private reviveUsedThisRun = false;
+  private revivePromptShown = false;
+  /** Тест-драйв прокачки действует ровно на следующий рейс. */
+  private superTuningRuns = 0;
+  private lastResult: RunResult | null = null;
 
   constructor(root: HTMLElement, save: SaveData) {
     this.save = save;
@@ -42,12 +50,15 @@ export class Game implements FixedUpdateTarget {
     this.events.on('game:garage-preview', ({ truckId, color }) => this.previewTruckInGarage(truckId, color));
     this.events.on('game:save', () => {
       this.syncSaveUpgrades();
-      void this.platform.save(this.save);
+      this.platform.save(this.save);
     });
+    this.events.on('ads:rewarded', ({ placement }) => this.grantReward(placement));
+    this.events.on('shop:purchased', ({ productId }) => this.grantPurchase(productId));
     this.events.on('cargo:lost', ({ remaining, kind }) => {
       this.audio.playCargoImpact();
       const name = kind === 'log' ? 'Бревно' : kind === 'barrel' ? 'Бочка ГСМ' : kind === 'concrete' ? 'Бетонный блок' : kind === 'hay' ? 'Тюк сена' : kind === 'pipe' ? 'Труба' : kind === 'fragile' ? 'Хрупкий груз' : 'Ящик';
       this.ui.toast(`${name} потерян! Осталось: ${remaining}`, 'bad');
+      this.maybeOfferRevive(remaining);
     });
     window.addEventListener('keydown', this.onPauseKey);
   }
@@ -65,13 +76,27 @@ export class Game implements FixedUpdateTarget {
 
     this.scene.resetCamera(this.truck.position);
     this.scene.onResize();
-    this.platform.bindLifecycle((paused) => {
-      if (paused && this.state === 'running') this.setPaused(true);
-    }, (muted) => this.audio.setPlatformMuted(muted));
+    this.platform.bindLifecycle(
+      (paused) => {
+        // Контекст встаёт всегда: пауза площадки — это в том числе открывшийся
+        // межстраничный ролик, под которым звук игры играть не должен (п. 4.7).
+        this.audio.setPlatformPaused(paused);
+        if (paused && this.state === 'running') this.setPaused(true);
+      },
+      // Событие несёт «звук разрешён», а не «заглушен».
+      (enabled) => this.audio.setPlatformMuted(!enabled),
+    );
     window.addEventListener('resize', this.scene.onResize);
     window.addEventListener('blur', this.input.releaseAll);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.ui.showMenu(this.save);
+    // Непогашенные покупки прошлых сессий: платёж мог пройти, а выдача — нет.
+    void this.platform.pendingPurchases().then((productIds) => {
+      for (const productId of productIds) {
+        this.grantPurchase(productId);
+        void this.platform.consume(productId);
+      }
+    });
   }
 
   start(): void {
@@ -83,7 +108,7 @@ export class Game implements FixedUpdateTarget {
     const controls = this.input.snapshot();
     this.elapsed += dt;
 
-    const currentUpgrades = this.save.truckUpgrades[this.truck.currentTruckId] || this.save.upgrades;
+    const currentUpgrades = this.effectiveUpgrades();
     // The vehicle controller writes into the chassis velocity, so it has to run before the world step.
     this.truck.fixedUpdate(dt, controls, currentUpgrades, this.save.settings.invertSteering);
     this.physics.step();
@@ -195,12 +220,16 @@ export class Game implements FixedUpdateTarget {
     this.state = 'running';
     this.elapsed = 0;
     this.distance = 0;
+    this.reviveUsedThisRun = false;
+    this.revivePromptShown = false;
     // Reset order matters: the truck must be back at the depot before cargo is placed in its bed.
     this.truck.reset();
     this.cargo.reset();
     this.scene.resetCamera(this.truck.position);
     this.input.releaseAll();
     this.ui.showHud(lvl);
+    // Управление передано игроку: на Яндексе это GameplayAPI.start().
+    this.platform.gameplayStarted();
     this.events.emit('game:state', { state: this.state });
   }
 
@@ -211,6 +240,7 @@ export class Game implements FixedUpdateTarget {
     this.loop.resetAccumulator();
     this.ui.setPaused(paused, this.save);
     this.input.setEnabled(!paused);
+    if (paused) this.platform.gameplayStopped(); else this.platform.gameplayStarted();
     this.events.emit('game:state', { state: this.state });
   }
 
@@ -229,10 +259,106 @@ export class Game implements FixedUpdateTarget {
     }
 
     this.syncSaveUpgrades();
-    void this.platform.save(this.save);
+    this.platform.save(this.save);
     this.audio.stopEngine();
+    this.platform.gameplayStopped();
+    if (this.superTuningRuns > 0) this.superTuningRuns -= 1;
+    this.lastResult = result;
+    // Накопительная доска: счёт живёт в сохранении, иначе после перезагрузки
+    // игрок отправит меньшее значение, чем уже имеет.
+    this.save.totalDelivered += result.delivered;
+    void this.platform.submitScore(LEADERBOARD.TOTAL_CARGO, this.save.totalDelivered);
+    // Доска «самый быстрый рейс» имеет смысл только для доставленного груза,
+    // и только по секундам: доска сортирует по убыванию, поэтому в неё уходит
+    // остаток от порогового времени, а не само время.
+    if (result.delivered > 0) {
+      void this.platform.submitScore(LEADERBOARD.FASTEST_RUN, Math.max(0, 600 - Math.round(result.duration)));
+    }
     this.ui.showResult(result, this.save);
     this.events.emit('game:state', { state: this.state });
+    // Межстраничная — только между рейсами и никогда во время заезда.
+    // Сервис сам соблюдает минимальный интервал и покупку «без рекламы».
+    void this.platform.showInterstitial('between_runs');
+  }
+
+
+  // ─────────────────────────────────────────── реклама и покупки
+
+  /**
+   * Награда выдаётся только отсюда: сюда попадают лишь те плейсменты, по
+   * которым площадка прислала состояние `rewarded`. Промис showRewarded()
+   * не существует — сервис резолвит `true` строго по событию.
+   */
+  private grantReward(placement: string): void {
+    if (placement === REWARDED_PLACEMENT.DOUBLE_REWARD) {
+      const result = this.lastResult;
+      if (!result) return;
+      this.save.coins += result.coins;
+      this.syncSaveUpgrades();
+      this.platform.save(this.save);
+      this.ui.toast(`Награда удвоена: +${result.coins} 🪙`, 'good');
+      this.ui.refreshResultAfterReward(this.save);
+      return;
+    }
+
+    if (placement === REWARDED_PLACEMENT.CARGO_MAGNET_REVIVE) {
+      this.reviveUsedThisRun = true;
+      this.cargo.restoreAll();
+      this.ui.toast('Магнит груза: кузов загружен заново!', 'good');
+      if (this.state === 'paused') this.setPaused(false);
+      return;
+    }
+
+    if (placement === REWARDED_PLACEMENT.FREE_SUPER_TUNING) {
+      this.superTuningRuns = 1;
+      this.ui.toast('Супер-подвеска и шины — на один рейс!', 'good');
+    }
+  }
+
+  private grantPurchase(productId: string): void {
+    // Суммы — из GAME_DATA.yaml, раздел iap.
+    if (productId === PRODUCT.REMOVE_ADS) {
+      const firstTime = !this.save.settings.adsRemoved;
+      this.save.settings.adsRemoved = true;
+      this.platform.markAdsRemoved();
+      if (firstTime) this.save.coins += 5000;
+      this.ui.toast('Реклама отключена навсегда' + (firstTime ? ' · +5000 🪙' : ''), 'good');
+    } else if (productId === PRODUCT.COIN_PACK_LARGE) {
+      this.save.coins += 15_000;
+      this.ui.toast('+15 000 🪙 деревенского золота', 'good');
+    } else {
+      return;
+    }
+    this.syncSaveUpgrades();
+    this.platform.save(this.save);
+  }
+
+  /**
+   * Магнит груза: предлагается один раз за заезд и только когда потеряно
+   * больше половины груза. Игра встаёт на паузу — ролик не должен крутиться
+   * поверх едущего грузовика.
+   */
+  private maybeOfferRevive(remaining: number): void {
+    if (this.state !== 'running' || this.reviveUsedThisRun || this.revivePromptShown) return;
+    if (!this.platform.capabilities.rewarded) return;
+    const total = this.cargo.total;
+    if (total <= 0 || remaining > Math.floor(total * 0.5)) return;
+
+    this.revivePromptShown = true;
+    this.setPaused(true);
+    this.ui.showRewardedOffer({
+      title: 'Груз рассыпался',
+      text: 'Магнит вернёт все брёвна в кузов и восстановит целостность. Посмотреть рекламу?',
+      placement: REWARDED_PLACEMENT.CARGO_MAGNET_REVIVE,
+      onDismiss: () => { if (this.state === 'paused') this.setPaused(false); },
+    });
+  }
+
+  /** Уровни прокачки на текущий рейс с учётом тест-драйва за рекламу. */
+  private effectiveUpgrades(): TruckUpgrades {
+    const base = this.save.truckUpgrades[this.truck.currentTruckId] || this.save.truckUpgrades.zil;
+    if (this.superTuningRuns <= 0) return base;
+    return { ...base, suspension: 3, tires: 4 };
   }
 
   private syncSaveUpgrades(): void {
