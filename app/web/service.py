@@ -947,13 +947,20 @@ class FactoryService:
             return {"status": "error", "message": "У проекта ещё нет кода — принимать нечего."}
 
         static_only = bool(opts.get("static"))
+        # Прогон на площадке — отдельная кнопка, а не часть обычной приёмки:
+        # он стоит минуты и требует поднятого SDK площадки. Смешивать их значило
+        # бы либо ждать площадку на каждой проверке вёрстки, либо не иметь
+        # способа прогнать её по требованию вовсе.
+        with_tester = bool(opts.get("platform"))
+        title = f"Прогон на площадке: {slug}" if with_tester else f"Приёмка: {slug}"
 
         def body(job: StudioJob) -> None:
             job.slug = slug
-            self.update_progress(5, f"Приёмка {slug}...")
+            self.update_progress(5, f"{'Прогон на площадке' if with_tester else 'Приёмка'} {slug}...")
             report = acceptance.run_gate(
                 project, on_log=self.append_log, stop_check=job.should_stop,
-                phase="manual", with_smoke=not static_only,
+                phase="platform" if with_tester else "manual",
+                with_smoke=not static_only, with_tester=with_tester,
             )
             acceptance.write_gate_report(project, report)
             acceptance.stamp_generation(project, report)
@@ -961,12 +968,20 @@ class FactoryService:
 
             self.append_log(LINE_THIN + report.summary() + BR +
                             (report.metrics_line() or "") + BR)
+            # Отчёт тестера — кадры и подробности по каждой находке. Без ссылки
+            # на него в журнале его пришлось бы искать в .factory руками.
+            tester_report = report.tester_run.get("report")
+            if tester_report:
+                self.append_log(f"📄 Отчёт тестера: {tester_report}" + BR)
+            skipped = report.tester_run.get("skipped")
+            if skipped:
+                self.append_log(f"↷ Прогон на площадке пропущен: {skipped}" + BR)
             self.update_progress(100, "✅ Приёмка зелёная" if report.ok
                                  else "⚠️ Приёмка красная")
             bus.publish("projects.changed")
             self.studio_done(slug, job)
 
-        job = self._launch_job(kind="gate", title=f"Приёмка: {slug}", prompt=slug,
+        job = self._launch_job(kind="gate", title=title, prompt=slug,
                                provider="", mode="gate", body=body)
         return {"status": "started", "job_id": job.id}
 

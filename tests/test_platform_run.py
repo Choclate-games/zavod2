@@ -361,3 +361,38 @@ def test_a_red_platform_run_comes_back_to_the_agent(monkeypatch):
     assert len(prompts) == 1, "до прогона агенту сказать нечего — зовут только чинить"
     assert "Y-saves" in prompts[0]
     assert "тестером" in prompts[0], "агенту объяснили, откуда взялись находки"
+
+
+# --------------------------------------------------------------- запуск по кнопке
+
+def test_the_platform_run_has_its_own_button(monkeypatch):
+    """Прогон на площадке стоит минуты и требует поднятого SDK площадки.
+
+    Складывать его в обычную приёмку значило бы либо ждать площадку на каждой
+    проверке вёрстки, либо не иметь способа прогнать её по требованию вовсе.
+    """
+    from app.config import config
+    from app.web import service as web_service
+
+    project = config.workspace_dir / "by-button"
+    project.mkdir(parents=True)
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    seen = {}
+
+    def fake_gate(project_dir, on_log=None, stop_check=None, phase="",
+                  with_smoke=True, with_tester=False):
+        seen.update(phase=phase, with_tester=with_tester)
+        return GateReport(project="g", phase=phase)
+
+    monkeypatch.setattr(web_service.acceptance, "run_gate", fake_gate)
+    monkeypatch.setattr(web_service.service, "live_dir", lambda _slug: project)
+    launched = {}
+    monkeypatch.setattr(web_service.service, "_launch_job",
+                        lambda **kw: launched.update(kw) or type("J", (), {"id": "1"})())
+
+    web_service.service.start_gate("by-button", {"platform": True})
+    assert "площадке" in launched["title"], "в журнале студии видно, что именно идёт"
+
+    web_service.service.start_gate("by-button", {})
+    assert "Приёмка" in launched["title"]

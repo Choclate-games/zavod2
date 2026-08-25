@@ -503,6 +503,21 @@ async function runGate(slug) {
   toast("Приёмка пошла", "Сборка, запуск в браузере, проверки — смотрите журнал студии");
 }
 
+// Прогон на площадке Яндекса: игру открывают так, как её откроет игрок — с SDK
+// площадки, в полутора десятках разрешений. Стоит минуты, поэтому отдельная
+// кнопка, а не часть обычной приёмки.
+async function runPlatform(slug) {
+  const answer = await api(`/api/projects/${encodeURIComponent(slug)}/gate`, {
+    body: { platform: true, static: false },
+  });
+  if (answer && answer.status === "error") {
+    toast("Прогон на площадке", answer.message || "Запустить не удалось", "error");
+    return;
+  }
+  toast("Прогон на площадке пошёл",
+        "Это минуты: сборка, SDK Яндекса, обход игры. Ход дела — в журнале студии");
+}
+
 /* Обложка проекта в кадре 16:9 — она же и есть карточка: на ней лежат
  * название и пометка приёмки. Один конструктор на все списки: витрину,
  * избранное, список проектов и вкладку превью. Раньше каждый список строил
@@ -748,6 +763,11 @@ async function loadGallery() {
     gate.title = "Прогнать приёмку: собрать, открыть в браузере, проверить";
     gate.disabled = !p.playable;
     gate.onclick = (e) => { e.stopPropagation(); runGate(p.slug); };
+    const platform = el("button", "btn small icon-only", "🎮");
+    platform.title = "Прогон на площадке Яндекса: вёрстка во всех разрешениях, "
+      + "сохранения, локали, правила площадки (минуты)";
+    platform.disabled = !p.playable;
+    platform.onclick = (e) => { e.stopPropagation(); runPlatform(p.slug); };
     const rename = el("button", "btn small icon-only", "✏️");
     rename.title = "Переименовать игру";
     rename.onclick = (e) => { e.stopPropagation(); renameProject(p); };
@@ -757,7 +777,7 @@ async function loadGallery() {
     const remove = el("button", "btn small danger icon-only", "🗑");
     remove.title = "Удалить игру безвозвратно";
     remove.onclick = (e) => { e.stopPropagation(); deleteProject(p); };
-    actions.append(play, open, gate, rename, archive, remove);
+    actions.append(play, open, gate, platform, rename, archive, remove);
     card.appendChild(actions);
 
     card.onclick = () => selectProject(p.slug);
