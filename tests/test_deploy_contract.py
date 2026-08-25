@@ -188,8 +188,11 @@ def test_the_old_trigger_is_gone_for_good():
     """Файл-триггер был односторонним сигналом, о судьбе которого никто не знал."""
     assert not (ROOT / "docker" / "systemd" / "zavod2-deploy.path").exists()
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "/deploy/trigger" not in workflow
-    assert "/deploy/status" not in workflow
+    assert "/deploy/trigger" not in workflow, "триггер больше не пишется"
+    # Читать оттуда временная диагностика пока может — но ход деплоя от этого
+    # каталога не зависит: он идёт по ssh и ждёт код возврата, а не файла.
+    assert "/deploy" not in _step("Деплой на мини-ПК")["run"]
+    assert not any("Дождаться" in str(s.get("name", "")) for s in _steps())
     # Ручной запуск с самой машины остаётся — им разворачивают без GitHub.
     assert (ROOT / "docker" / "systemd" / "zavod2-deploy.service").exists()
     # Выключение осиротевшего юнита — часть настройки, иначе один пуш давал бы
