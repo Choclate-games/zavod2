@@ -90,6 +90,7 @@ export class Game implements FixedUpdateTarget {
     window.addEventListener('blur', this.input.releaseAll);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.ui.showMenu(this.save);
+    this.platform.showBanner();
     // Непогашенные покупки прошлых сессий: платёж мог пройти, а выдача — нет.
     void this.platform.pendingPurchases().then((productIds) => {
       for (const productId of productIds) {
@@ -228,6 +229,8 @@ export class Game implements FixedUpdateTarget {
     this.scene.resetCamera(this.truck.position);
     this.input.releaseAll();
     this.ui.showHud(lvl);
+    // Баннер уходит на время заезда: поверх игрового поля он нарушает п. 4.4.
+    this.platform.hideBanner();
     // Управление передано игроку: на Яндексе это GameplayAPI.start().
     this.platform.gameplayStarted();
     this.events.emit('game:state', { state: this.state });
@@ -262,6 +265,7 @@ export class Game implements FixedUpdateTarget {
     this.platform.save(this.save);
     this.audio.stopEngine();
     this.platform.gameplayStopped();
+    this.platform.showBanner();
     if (this.superTuningRuns > 0) this.superTuningRuns -= 1;
     this.lastResult = result;
     // Накопительная доска: счёт живёт в сохранении, иначе после перезагрузки

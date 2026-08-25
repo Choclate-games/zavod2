@@ -338,6 +338,39 @@ for (const doc of designDocs) {
         declaredPlacements.add(id)
     }
 }
+// Возможности, обещанные документом целиком, а не идентификатором плейсмента:
+// «инициализация баннерной рекламы», «лидерборды», «покупки». Плейсмент-правило
+// их не видит — у них нет id в обратных кавычках.
+const DECLARED_FEATURES = [
+    [/баннерн|\bbanner ad|sticky banner/i, /\bshowBanner\s*\(/, 'баннерная реклама', 'showBanner()'],
+    [/лидерборд|leaderboard/i, /\b(?:setScore|submitScore)\s*\(/, 'лидерборды', 'leaderboards.setScore()'],
+    [/\bIAP\b|in-app purchase|покупк/i, /\bpurchase\s*\(/, 'покупки', 'payments.purchase()'],
+]
+// Смотреть надо на код ИГРЫ, а не на обёртку: обёртка объявляет showBanner()
+// всегда, и по всему проекту правило было бы выполнено даже тогда, когда
+// баннер не показывается ни на одном экране. Обёртка — это файл, который
+// импортирует сам SDK; всё остальное — игра.
+const gameText = sources
+    .filter((f) => !/@playgama\/bridge/.test(f.text))
+    .map((f) => f.text)
+    .join('\n')
+
+for (const [inDocs, inCode, feature, call] of DECLARED_FEATURES) {
+    const doc = designDocs.find((d) => {
+        const at = d.text.search(inDocs)
+        if (at === -1) return false
+        return !REMOVAL_MARKER.test(d.text.slice(Math.max(0, at - 200), at + 200))
+    })
+    if (doc && !inCode.test(gameText)) {
+        fail('FEATURE_NOT_WIRED',
+            `Документ обещает «${feature}», а ${call} не вызывается из кода игры`,
+            'Возможность, описанная в документах и отсутствующая в коде, — дефект. '
+            + 'Подключи либо убери из документа, объяснив почему. '
+            + (inCode.test(allText) ? 'Обёртка метод объявляет, но игра его не зовёт ни на одном экране.' : ''),
+            doc.name)
+    }
+}
+
 const missingPlacements = [...declaredPlacements].filter((id) => !allText.includes(id))
 if (declaredPlacements.size > 0 && missingPlacements.length > 0) {
     fail('PLACEMENTS_NOT_WIRED',

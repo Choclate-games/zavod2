@@ -15,6 +15,7 @@ import bridge, {
   PLATFORM_MESSAGE,
   REWARDED_STATE,
   INTERSTITIAL_STATE,
+  BANNER_POSITION,
   PLATFORM_ID,
   type RewardedState,
   type InterstitialState,
@@ -298,6 +299,23 @@ export class BridgeService {
       this.gameplayStopped();
       this.safe(() => ad.showInterstitial(placement ?? null));
     });
+  }
+
+  /**
+   * Баннер — только на экранах меню, гаража и итога. Во время заезда он
+   * перекрывал бы игровое поле, а это требование Яндекса 4.4.
+   */
+  showBanner(): void {
+    if (this.adsRemoved) return;
+    const ad = this.safe(() => bridge.advertisement);
+    if (!ad || ad.isBannerSupported !== true) return;
+    this.safe(() => ad.showBanner(BANNER_POSITION.BOTTOM));
+  }
+
+  hideBanner(): void {
+    const ad = this.safe(() => bridge.advertisement);
+    if (!ad || ad.isBannerSupported !== true) return;
+    this.safe(() => ad.hideBanner());
   }
 
   get areAdsRemoved(): boolean { return this.adsRemoved; }
