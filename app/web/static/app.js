@@ -2595,10 +2595,168 @@ function renderSettings() {
   $("set-knowledge-ref").value = knowledge.ref || "main";
   $("set-knowledge-token").value = knowledge.token || "";
 
+  fillGametest(settings.gametest || {});
+
+  const bridge = settings.bridge || {};
+  $("set-bridge-source").value = bridge.source || "";
+  $("bridge-hint").textContent = bridge.tag
+    ? `Сейчас: ${bridge.name} ${bridge.tag} из ${bridge.repo}`
+    : "";
+
   const defaults = $("set-default-agent");
   defaults.innerHTML = "";
   state.boot.agents.forEach((a) => defaults.appendChild(new Option(a.label, a.key)));
   defaults.value = settings.default_agent;
+}
+
+/* ── Прогон на площадке ────────────────────────────────────────────────
+ *
+ * Полей полтора десятка, и держать их в общем коде настроек значит потерять
+ * их среди агентов и озвучки. Что означает каждое — в подписях формы.
+ */
+
+const GAMETEST_CHECK_LABELS = {
+  smoke: "запуск",
+  ui: "вёрстка",
+  saves: "сохранения",
+  i18n: "локали",
+  text: "тексты",
+  rules: "правила площадки",
+  ads: "реклама",
+  payments: "покупки",
+  debugcheck: "чекер Яндекса",
+};
+
+function fillGametest(gt) {
+  $("gt-dir").textContent = gt.dir || "tools/gametest";
+  $("gt-enabled").checked = !!gt.enabled;
+  $("gt-update").checked = !!gt.update;
+  $("gt-install-browsers").checked = !!gt.install_browsers;
+
+  const mode = $("gt-mode");
+  mode.innerHTML = "";
+  (gt.modes || ["auto", "dev", "draft"]).forEach((m) => mode.appendChild(new Option(m, m)));
+  mode.value = gt.mode || "auto";
+
+  $("gt-viewports").value = gt.viewports || "smoke";
+  $("gt-orientation").value = gt.orientation || "both";
+
+  const block = $("gt-block-on");
+  block.innerHTML = "";
+  (gt.severities || ["blocker", "major", "minor"]).forEach((s) => block.appendChild(new Option(s, s)));
+  block.value = gt.block_on || "major";
+
+  $("gt-jobs").value = gt.jobs ?? 3;
+  $("gt-play-ms").value = gt.play_ms ?? 45000;
+  $("gt-timeout").value = gt.timeout ?? 2700;
+  $("gt-repo").value = gt.repo || "";
+  $("gt-ref").value = gt.ref || "main";
+  $("gt-token").value = gt.token || "";
+
+  const checks = $("gt-checks");
+  checks.innerHTML = "";
+  Object.entries(gt.checks || {}).forEach(([name, on]) => {
+    const label = el("label", "check");
+    const input = el("input");
+    input.type = "checkbox";
+    input.dataset.check = name;
+    input.checked = !!on;
+    label.append(input, document.createTextNode(` ${GAMETEST_CHECK_LABELS[name] || name}`));
+    checks.appendChild(label);
+  });
+
+  const llm = gt.llm || {};
+  $("gt-llm-enabled").checked = !!llm.enabled;
+  const provider = $("gt-llm-provider");
+  provider.innerHTML = "";
+  (llm.providers || []).forEach((p) => provider.appendChild(new Option(p, p)));
+  provider.value = llm.provider || "opencode";
+  $("gt-llm-model").value = llm.model || "";
+  $("gt-llm-key-env").value = llm.key_env || "LLM_API_KEY";
+  $("gt-llm-key").value = llm.key || "";
+  $("gt-llm-base-url").value = llm.base_url || "";
+
+  renderYandexSession(gt.session || {}, gt.login || {});
+}
+
+function collectGametest() {
+  const checks = {};
+  document.querySelectorAll("#gt-checks [data-check]").forEach((node) => {
+    checks[node.dataset.check] = node.checked;
+  });
+  return {
+    enabled: $("gt-enabled").checked,
+    update: $("gt-update").checked,
+    install_browsers: $("gt-install-browsers").checked,
+    mode: $("gt-mode").value,
+    viewports: $("gt-viewports").value,
+    orientation: $("gt-orientation").value,
+    block_on: $("gt-block-on").value,
+    jobs: Number($("gt-jobs").value) || 3,
+    play_ms: Number($("gt-play-ms").value) || 0,
+    timeout: Number($("gt-timeout").value) || 2700,
+    repo: $("gt-repo").value.trim(),
+    ref: $("gt-ref").value.trim(),
+    token: $("gt-token").value.trim(),
+    checks,
+    llm: {
+      enabled: $("gt-llm-enabled").checked,
+      provider: $("gt-llm-provider").value,
+      model: $("gt-llm-model").value.trim(),
+      key_env: $("gt-llm-key-env").value.trim(),
+      key: $("gt-llm-key").value.trim(),
+      base_url: $("gt-llm-base-url").value.trim(),
+    },
+  };
+}
+
+function renderYandexSession(session, login) {
+  const box = $("yandex-session");
+  if (login && login.running) {
+    box.textContent = "⏳ Окно браузера открыто на машине фабрики — войдите в аккаунт.";
+    return;
+  }
+  if (!session.available) {
+    box.textContent = session.reason ? `· ${session.reason}` : "";
+    return;
+  }
+  if (session.signedIn) {
+    box.textContent = `✅ Вход есть (профиль ${session.profile}${session.expiresAt ? `, до ${session.expiresAt}` : ""})`;
+  } else if (session.expired) {
+    box.textContent = "⚠️ Сессия просрочена — войдите заново.";
+  } else {
+    box.textContent = "· Входа нет — режим draft недоступен, прогон пойдёт в dev.";
+  }
+}
+
+let yandexPoll = null;
+
+async function pollYandex() {
+  const data = await api("/api/yandex/status");
+  renderYandexSession(data.session || {}, data.login || {});
+  const running = data.login && data.login.running;
+  if (!running) {
+    clearInterval(yandexPoll);
+    yandexPoll = null;
+    const message = (data.login && data.login.message) || "";
+    if (message) {
+      $("yandex-msg").textContent = message;
+      setTimeout(() => { $("yandex-msg").textContent = ""; }, 6000);
+    }
+  }
+}
+
+async function startYandexLogin() {
+  $("yandex-msg").textContent = "";
+  const res = await api("/api/yandex/login", { method: "POST" });
+  renderYandexSession(res.session || {}, res.state || { running: true });
+  if (!res.ok) {
+    $("yandex-msg").textContent = res.message || "";
+    return;
+  }
+  // Вход занимает минуты: пароль, иногда СМС, иногда капча. Держать запрос
+  // открытым всё это время нельзя, поэтому состояние опрашивается.
+  if (!yandexPoll) yandexPoll = setInterval(pollYandex, 3000);
 }
 
 async function saveSettings() {
@@ -2621,6 +2779,8 @@ async function saveSettings() {
         ref: $("set-knowledge-ref").value.trim(),
         token: $("set-knowledge-token").value.trim(),
       },
+      gametest: collectGametest(),
+      bridge: { source: $("set-bridge-source").value.trim() },
     },
   });
   $("settings-msg").textContent = res.message || "";
@@ -3123,6 +3283,13 @@ function bindCommon() {
   $("btn-refresh-quota").onclick = loadQuota;
   bindStorage();
   $("btn-save-settings").onclick = saveSettings;
+  $("btn-yandex-login").onclick = startYandexLogin;
+  $("btn-yandex-logout").onclick = async () => {
+    const res = await api("/api/yandex/logout", { method: "POST" });
+    $("yandex-msg").textContent = res.message || "";
+    renderYandexSession(res.session || {}, {});
+    setTimeout(() => { $("yandex-msg").textContent = ""; }, 4000);
+  };
   $("btn-activity-clear").onclick = clearActivity;
   $("btn-fish-test").onclick = async () => {
     const btn = $("btn-fish-test");

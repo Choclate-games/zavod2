@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from app import pkgstore
+from app import bridge_package, gametest, pkgstore
 from app.sandbox import ensure_inside_workspace
 from generators.check_spec_script import CHECK_SPEC_MJS
 from generators.smoke_script import SMOKE_MJS
@@ -37,6 +37,8 @@ StopFn = Callable[[], bool]
 FACTORY_DIR = ".factory"
 SPEC_REPORT = "spec-report.json"
 SMOKE_REPORT = "smoke-report.json"
+# Откуда игра обязана ставить мост площадки — читает check-spec.mjs (проверка C16).
+BRIDGE_SOURCE = "bridge-source.json"
 
 # Дымовой запуск сам собирает игру и держит внутри себя ограничение в четыре
 # минуты на браузерную часть. Снаружи ему нужен запас на установку и сборку.
@@ -72,6 +74,10 @@ class GateReport:
     stages: Dict[str, int] = field(default_factory=dict)   # install/spec/smoke → код возврата
     spec: List[GateCheck] = field(default_factory=list)
     smoke: List[GateCheck] = field(default_factory=list)
+    # Прогон настоящим тестером на площадке: то, чего не видят ни чтение
+    # исходников, ни дымовой запуск в пустом браузере.
+    tester: List[GateCheck] = field(default_factory=list)
+    tester_run: Dict[str, object] = field(default_factory=dict)
     metrics: Dict[str, object] = field(default_factory=dict)
     blockers: List[str] = field(default_factory=list)      # то, что не дало прогону состояться
     log_tail: str = ""
@@ -79,7 +85,7 @@ class GateReport:
 
     @property
     def failures(self) -> List[GateCheck]:
-        return [c for c in (*self.spec, *self.smoke) if c.failed]
+        return [c for c in (*self.spec, *self.smoke, *self.tester) if c.failed]
 
     @property
     def ok(self) -> bool:
@@ -93,13 +99,14 @@ class GateReport:
     @property
     def ran(self) -> bool:
         """Прогон состоялся: хоть один скрипт приёмки отработал и дал отчёт."""
-        return bool(self.spec or self.smoke)
+        return bool(self.spec or self.smoke or self.tester)
 
     def summary(self) -> str:
         if self.blockers:
             return "приёмка не состоялась: " + "; ".join(self.blockers)
         if self.ok:
-            return f"приёмка зелёная ({len(self.spec) + len(self.smoke)} проверок)"
+            total = len(self.spec) + len(self.smoke) + len(self.tester)
+            return f"приёмка зелёная ({total} проверок)"
         broken = self.failures
         return (f"провалено {len(broken)} проверок: "
                 + ", ".join(c.id for c in broken[:12])
@@ -136,6 +143,7 @@ class GateReport:
 
         broken_spec = [c for c in self.spec if c.failed]
         broken_smoke = [c for c in self.smoke if c.failed]
+        broken_tester = [c for c in self.tester if c.failed]
         if broken_spec:
             lines.append("## Статическая приёмка (`node scripts/check-spec.mjs`)")
             lines += [f"- **{c.id}** {c.title}" + (f"\n  {c.note}" if c.note else "")
@@ -145,6 +153,19 @@ class GateReport:
             lines.append("## Дымовой запуск (`node scripts/smoke.mjs`) — это видит игрок")
             lines += [f"- **{c.id}** {c.title}" + (f"\n  {c.note}" if c.note else "")
                       for c in broken_smoke]
+            lines.append("")
+        if broken_tester:
+            mode = self.tester_run.get("mode") or ""
+            lines.append("## Прогон на площадке Яндекса"
+                         + (f" (режим {mode})" if mode else "")
+                         + " — игру открывали так, как её откроет игрок")
+            lines += [f"- **{c.id}** {c.title}" + (f"\n  {c.note}" if c.note else "")
+                      for c in broken_tester]
+            report = self.tester_run.get("report")
+            if report:
+                lines.append("")
+                lines.append(f"Кадры и подробности: `{report}`. Это отчёт тестера, "
+                             "а не файл проекта — правь игру, а не отчёт.")
             lines.append("")
         if self.log_tail.strip():
             lines += ["## Хвост лога", "```", self.log_tail.strip()[-3000:], "```", ""]
@@ -167,9 +188,11 @@ class GateReport:
             "blockers": self.blockers,
             "seconds": self.seconds,
             "failed": [c.id for c in self.failures],
+            "tester": self.tester_run,
             "checks": [
                 {"id": c.id, "title": c.title, "ok": c.ok, "note": c.note, "kind": kind}
-                for kind, group in (("spec", self.spec), ("smoke", self.smoke))
+                for kind, group in (("spec", self.spec), ("smoke", self.smoke),
+                                    ("tester", self.tester))
                 for c in group
             ],
         }
@@ -238,6 +261,32 @@ def install_scripts(project_dir: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     (scripts / "check-spec.mjs").write_text(CHECK_SPEC_MJS, encoding="utf-8")
     (scripts / "smoke.mjs").write_text(SMOKE_MJS, encoding="utf-8")
+    _write_bridge_source(project_dir)
+
+
+def _write_bridge_source(project_dir: Path) -> None:
+    """Сообщает приёмке, откуда игра обязана ставить мост площадки.
+
+    Адрес живёт в конфиге фабрики и меняется с каждым релизом форка, а
+    `check-spec.mjs` уезжает в игру дословно. Передавать через файл дешевле,
+    чем переписывать скрипт на каждый релиз, и заодно видно в проекте, какой
+    именно мост от него ждут.
+    """
+    target = project_dir / FACTORY_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "name": bridge_package.package_name(),
+        "source": bridge_package.package_source(),
+        "repo": bridge_package.repo(),
+        "tag": bridge_package.tag(),
+        "docs": bridge_package.docs_url(),
+    }
+    try:
+        (target / BRIDGE_SOURCE).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def _read_report(project_dir: Path, name: str) -> Optional[dict]:
@@ -288,12 +337,77 @@ def _needs_install(project_dir: Path) -> bool:
 # ---------------------------------------------------------------- прогон
 
 
+def checks_from_findings(run: "gametest.TesterRun", block_rank: int) -> List[GateCheck]:
+    """Находки тестера в виде пунктов приёмки.
+
+    По одному пункту на тему, а не на находку: пятнадцать одинаковых карточек
+    «элемент шире экрана» из пятнадцати разрешений — это одна поломка вёрстки,
+    и возвращать агенту пятнадцать строк значит просить его пятнадцать раз
+    починить одно и то же.
+
+    Находки, которые модель сама пометила спорными, тему не валят: она смотрела
+    на кадр прогона и говорит, что дефекта там нет. В примечании они всё равно
+    перечислены — решение за человеком, а модель ошибается не реже автопроверки.
+    """
+    checks: List[GateCheck] = []
+    grouped = run.by_category()
+    for category in gametest.CATEGORY_TITLES:
+        found = grouped.get(category)
+        if not found:
+            continue
+        title = gametest.CATEGORY_TITLES[category]
+        blocking = [f for f in found if f.rank <= block_rank and not f.disputed]
+        disputed = [f for f in found if f.disputed]
+        if blocking:
+            note = "; ".join(
+                f"[{f.severity}] {f.title}" + (f" ({f.where})" if f.where else "")
+                for f in blocking[:6]
+            )
+            if len(blocking) > 6:
+                note += f"; … ещё {len(blocking) - 6}"
+            checks.append(GateCheck(id=f"Y-{category}", title=title, ok=False, note=note))
+            continue
+        # Тема зелёная по двум разным причинам, и путать их нельзя: «мелочи, не
+        # дотягивающие до порога» и «серьёзное было, но модель сняла его как
+        # ложное» — разные новости для того, кто читает отчёт.
+        waived = [f for f in disputed if f.rank <= block_rank]
+        parts = [f"находок: {len(found)}"]
+        if waived:
+            parts.append(f"снято моделью как ложные: {len(waived)} "
+                         f"({waived[0].disputed[:120]})")
+        else:
+            parts.append(f"ни одна не дотягивает до «{run.threshold_name}»")
+        checks.append(GateCheck(id=f"Y-{category}", title=title, ok=True,
+                                note=", ".join(parts)))
+
+    # Тема без единой находки — это тоже результат, и он должен быть виден:
+    # иначе зелёная приёмка не отличается от непройденной проверки.
+    for entry in run.checks:
+        if not isinstance(entry, dict):
+            continue
+        category = str(entry.get("check") or "")
+        if not category or any(c.id == f"Y-{category}" for c in checks):
+            continue
+        status = str(entry.get("status") or "")
+        title = gametest.CATEGORY_TITLES.get(category, category)
+        if status == "skipped":
+            checks.append(GateCheck(id=f"Y-{category}", title=title, ok=None,
+                                    note=str(entry.get("note") or "проверка не выполнялась")))
+        elif status == "ok":
+            checks.append(GateCheck(id=f"Y-{category}", title=title, ok=True, note="находок нет"))
+        else:
+            checks.append(GateCheck(id=f"Y-{category}", title=title, ok=False,
+                                    note=str(entry.get("note") or "проверка не прошла")))
+    return checks
+
+
 def run_gate(
     project_dir: Path,
     on_log: LogFn = lambda _line: None,
     stop_check: Optional[StopFn] = None,
     phase: str = "",
     with_smoke: bool = True,
+    with_tester: bool = False,
 ) -> GateReport:
     """Прогоняет приёмку игры и возвращает машинный отчёт.
 
@@ -368,9 +482,45 @@ def run_gate(
         else:
             report.blockers.append(f"smoke.mjs не оставил отчёта (код {code})")
 
+    if with_tester and not (stop_check and stop_check()):
+        _run_tester(project_dir, report, on_log, stop_check)
+
     report.log_tail = (spec_tail + smoke_tail)[-4000:]
     report.seconds = int(time.time() - started)
     return report
+
+
+def _run_tester(project_dir: Path, report: GateReport, on_log: LogFn,
+                stop_check: Optional[StopFn]) -> None:
+    """Прогон игры настоящим тестером на площадке.
+
+    Недоступный тестер — не провал игры. Его может не быть на этой машине, у
+    фабрики может не быть токена к репозиторию, вход в аккаунт мог протухнуть;
+    красить из-за любого из этого приёмку игры в красный значит врать о ней.
+    Такое пишется в лог и в отчёт причиной, а не проваленной проверкой.
+    """
+    cfg = gametest.settings()
+    run = gametest.run(project_dir, on_log=on_log, stop_check=stop_check, cfg=cfg)
+    report.tester_run = {
+        "ran": run.ran,
+        "mode": run.mode,
+        "runDir": run.run_dir,
+        "report": run.report_html,
+        "counts": run.counts,
+        "seconds": run.seconds,
+        "skipped": run.skipped_reason,
+    }
+    if run.skipped_reason:
+        on_log(f"↷ Прогон на площадке пропущен: {run.skipped_reason}\n")
+        return
+    if run.blockers:
+        report.blockers.extend(run.blockers)
+        return
+
+    report.stages["tester"] = 0
+    report.tester = checks_from_findings(run, cfg.block_rank)
+    if run.report_html:
+        on_log(f"📄 Отчёт тестера: {run.report_html}\n")
 
 
 def write_gate_report(project_dir: Path, report: GateReport) -> None:

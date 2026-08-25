@@ -224,9 +224,25 @@ def test_final_phase_blocks_on_everything():
 def test_phases_go_from_a_playable_core_to_acceptance():
     """Порядок фаз — это порядок работ, а не список тем."""
     keys = [p.key for p in PHASES]
-    assert keys == ["core", "content", "shell", "polish"]
+    assert keys == ["core", "content", "shell", "polish", "platform"]
     assert "магазин" in PHASES[0].task, "фаза ядра обязана прямо запретить лишнее"
-    assert "ACCEPTANCE.md" in PHASES[-1].task
+    assert "ACCEPTANCE.md" in next(p for p in PHASES if p.key == "polish").task
+
+
+def test_the_platform_phase_starts_with_the_run_not_with_the_agent():
+    """Последняя фаза — прогон на площадке, и работы у агента до него нет.
+
+    Игра к этому моменту собрана и принята. Просить агента «сделай что-нибудь,
+    потом проверим» значит сжечь вызов на выдуманную работу, поэтому фаза
+    начинается с прогона, а задачей агента становится починка по находкам.
+    """
+    platform = next(p for p in PHASES if p.key == "platform")
+    assert platform.with_tester is True
+    assert platform.agent_first is False
+    assert platform.with_smoke is False, "тестер открывает ту же игру, дымовой запуск лишний"
+    assert all(p.with_tester is False for p in PHASES if p.key != "platform"), (
+        "прогон тестера стоит минуты — на каждой фазе ему не место"
+    )
 
 
 # --------------------------------------------------------------- петля сборки
@@ -257,7 +273,8 @@ def test_a_red_gate_comes_back_to_the_agent_as_a_task(monkeypatch):
     provider = FakeProvider()
     calls = {"n": 0}
 
-    def fake_gate(project_dir, on_log=None, stop_check=None, phase="", with_smoke=True):
+    def fake_gate(project_dir, on_log=None, stop_check=None, phase="", with_smoke=True,
+                  with_tester=False):
         calls["n"] += 1
         # Первый прогон красный, второй — зелёный: агент починил.
         ok = calls["n"] > 1

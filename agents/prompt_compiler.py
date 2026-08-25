@@ -1,7 +1,7 @@
 import re
 
 from agents.ux_designer import normalize_screens
-from app import knowledge, library
+from app import bridge_package, knowledge, library
 from app.context import GenerationContext
 from app.logging import log_agent
 
@@ -870,6 +870,13 @@ class PromptCompilerAgent:
             for phase in concept.roadmap
         ])
 
+        # Мост площадки ставится из форка студии, а не из реестра npm. Адрес
+        # приезжает из config/playgama.yaml: угадать его агент не может, поэтому
+        # строка диктуется дословно, а приёмка (C16) проверяет, что она стоит.
+        bridge_dependency = bridge_package.dependency_line()
+        bridge_package_name = bridge_package.package_name()
+        bridge_source_docs = bridge_package.docs_url()
+
         prompt_content = f"""# FINAL AI DEVELOPER PROMPT: {concept.title.upper()} 🎮⚡
 
 > **ИНСТРУКЦИЯ КОДОВОМУ АГЕНТУ**
@@ -898,7 +905,7 @@ class PromptCompilerAgent:
 1. `ACCEPTANCE.md` — чем закончится работа. Дальше всё делается под него.
 2. Секция 1b — чем эта игра является и чем она не является. Рамка всего остального.
 3. `DESIGN.md` — написать самому, до первой строчки кода. Секция 7 говорит, что в нём должно быть и чего в нём быть не должно.
-4. Каркас: `package.json`, Vite, TypeScript strict, `src/vite-env.d.ts` с `/// <reference types="vite/client" />` (TypeScript 5 пропускает `import './ui/theme.css'` молча, TypeScript 6 роняет на нём сборку — один файл снимает вопрос навсегда), пустая сцена Three.js, цикл с фиксированным шагом. Playgama Bridge и `game_ready` — сразу, а не в конце (проверки **C1–C4**).
+4. Каркас: `package.json` (мост площадки — строкой из раздела 5, не диапазоном версий), Vite, TypeScript strict, `src/vite-env.d.ts` с `/// <reference types="vite/client" />` (TypeScript 5 пропускает `import './ui/theme.css'` молча, TypeScript 6 роняет на нём сборку — один файл снимает вопрос навсегда), пустая сцена Three.js, цикл с фиксированным шагом. Playgama Bridge и `game_ready` — сразу, а не в конце (проверки **C1–C4**).
 5. Главная механика из секции 3 — одна, до играбельного состояния. Не все сразу. Перед тем как писать её с нуля — секция 3c: возможно, она уже написана.
 6. Дальше по фазам роадмапа (секция 8), каждая фаза закрывает свои номера проверок.
 7. `node scripts/check-spec.mjs` — после каждой фазы, а не один раз в конце.
@@ -1025,7 +1032,20 @@ The game must be built with a clean, decoupled layer architecture:
 ---
 
 ## 5. PLAYGAMA BRIDGE INTEGRATION SPECIFICATION
-Platform integration is powered by `@playgama/bridge`.
+Platform integration is powered by `{bridge_package_name}`.
+
+**Зависимость пишется ровно так и никак иначе** — в `dependencies` пакета игры:
+
+```json
+{bridge_dependency}
+```
+
+Это сборка форка студии, а не пакет из реестра npm. Диапазон версий
+(`^2.x`, `latest`) означает апстримовский мост: в нём нет ни настоящей
+авторизации VK, ни платежей через `VKWebAppShowOrderBox`, ни OK поверх VK
+Bridge, ни GameMonetize, ни Android, ни экрана загрузки студии. Проверяет
+**C16**. Импорты при этом обычные — имя пакета то же самое.
+Подробности: {bridge_source_docs}
 
 ### 1. Initialization & Ready Event
 `game_ready` is **NOT** sent after `initialize()` — that dismisses the platform splash over an unloaded game. It is sent once, after assets are loaded and the menu is interactive.

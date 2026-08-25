@@ -149,7 +149,7 @@ class SkillGeneratorAgent:
                 skill_id="playgama_skill",
                 name="Playgama Bridge SDK Integration",
                 filename="PLAYGAMA_SKILL.md",
-                purpose="Defines implementation patterns for @playgama/bridge v2 (Ads, Cloud Storage, Auth, Leaderboards, Lifecycle).",
+                purpose="Defines implementation patterns for @playgama/bridge v2 — the studio fork build, installed from its release tarball rather than the npm registry (Ads, Cloud Storage, Auth, Leaderboards, Lifecycle).",
                 when_to_use="Use when implementing advertising triggers, cloud save/load, authorization, and portal lifecycle hooks.",
                 rules=[
                     "Always await bridge.initialize() (with a timeout) before any other SDK call.",

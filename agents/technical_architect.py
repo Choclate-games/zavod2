@@ -25,7 +25,7 @@ class TechnicalArchitectAgent:
         {"name": "src/core/Game.ts", "desc": "Main coordinator & state machine"},
         {"name": "src/core/GameLoop.ts", "desc": "60Hz fixed update loop with delta accumulator"},
         {"name": "src/core/EventBus.ts", "desc": "Typed publish/subscribe event dispatcher"},
-        {"name": "src/platform/PlaygamaService.ts", "desc": "Wrapper for @playgama/bridge (Ads, Save, Leaderboards)"},
+        {"name": "src/platform/PlaygamaService.ts", "desc": "Wrapper for @playgama/bridge — fork build from the studio release, not the npm registry (Ads, Save, Leaderboards)"},
         {"name": "src/input/InputManager.ts", "desc": "Keyboard + touch merged into one control snapshot"},
         {"name": "src/ui/UIManager.ts", "desc": "HUD overlay, touch controls layer, modal screens"},
     ]

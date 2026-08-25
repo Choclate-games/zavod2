@@ -12,6 +12,11 @@
 и ничего кроме; пока приёмка ядра красная, до контента дело не доходит.
 Проверяет фабрика (`app.acceptance`), а не агент о себе, и провал возвращается
 тому же агенту задачей на починку.
+
+Последняя фаза устроена наоборот: агенту на ней сперва нечего сказать. Игра уже
+собрана и принята, и вопрос остался один — как она поведёт себя на площадке.
+Поэтому фаза начинается с прогона настоящим тестером (`app.gametest`), а работой
+агента становится починка по его находкам.
 """
 
 from __future__ import annotations
@@ -41,6 +46,14 @@ class Phase:
     # них — не дефект, а порядок работ. Пустой список — обязательно всё.
     required: Sequence[str] = ()
     with_smoke: bool = True
+    # Прогон игры настоящим тестером на площадке. Дорогой — минуты, иногда
+    # десятки минут, — поэтому идёт не на каждой фазе, а там, где игра уже
+    # собрана целиком и её есть смысл открывать так, как её откроет игрок.
+    with_tester: bool = False
+    # Начинать ли фазу с задачи агенту. Фаза, вся работа которой — прогон и
+    # починка по его находкам, начинается с прогона: просить агента «сделай
+    # что-нибудь, потом проверим» значит сжечь вызов на выдуманную работу.
+    agent_first: bool = True
 
     def blocking(self, report: GateReport) -> List[GateCheck]:
         """Провалы, которые останавливают именно эту фазу."""
@@ -58,7 +71,7 @@ PHASES: List[Phase] = [
         title="Ядро: игра запускается и в неё играют",
         required=("S1", "S2", "S3", "S4", "S5"),
         task=(
-            "ФАЗА 1 из 4 — ИГРАБЕЛЬНОЕ ЯДРО.\n\n"
+            "ФАЗА 1 из 5 — ИГРАБЕЛЬНОЕ ЯДРО.\n\n"
             "Прочитай `PROJECT_DIRECTION.md` (рамка проекта и запреты), "
             "`CORE_LOOP.md` и раздел «CORE GAMEPLAY LOOP & MECHANICS» в "
             "`AI_DEVELOPER_PROMPT.md`. Подробности механик — в `MECHANICS.md`, "
@@ -84,7 +97,7 @@ PHASES: List[Phase] = [
         title="Содержание: ради чего в это играть",
         required=("S1", "S2", "S3", "S4", "S5", "S6", "S7"),
         task=(
-            "ФАЗА 2 из 4 — СОДЕРЖАНИЕ И ПРОГРЕССИЯ.\n\n"
+            "ФАЗА 2 из 5 — СОДЕРЖАНИЕ И ПРОГРЕССИЯ.\n\n"
             "Ядро уже запускается и проверено запуском. Читай `MECHANICS.md`, "
             "`PROGRESSION.md`, `LEVEL_DESIGN.md`, `DIFFICULTY_DESIGN.md` и "
             "`balance.yaml`.\n\n"
@@ -103,7 +116,7 @@ PHASES: List[Phase] = [
         title="Оболочка: экраны, площадка, сохранения",
         required=("S1", "S2", "S3", "S4", "S5", "S6", "S7"),
         task=(
-            "ФАЗА 3 из 4 — ОБОЛОЧКА И ПЛОЩАДКА.\n\n"
+            "ФАЗА 3 из 5 — ОБОЛОЧКА И ПЛОЩАДКА.\n\n"
             "Читай `UI_UX_SPECIFICATION.md`, `MOBILE_CONTROLS.md`, "
             "`PLAYGAMA_INTEGRATION.md`, `MONETIZATION.md` и раздел «ПРАВИЛА "
             "ПЛОЩАДКИ» мастер-промпта.\n\n"
@@ -124,7 +137,7 @@ PHASES: List[Phase] = [
         title="Доводка: игра проходит приёмку целиком",
         required=(),
         task=(
-            "ФАЗА 4 из 4 — ДОВОДКА ПОД ПРИЁМКУ.\n\n"
+            "ФАЗА 4 из 5 — ДОВОДКА ПОД ПРИЁМКУ.\n\n"
             "Открой `ACCEPTANCE.md` и пройди его по пунктам сверху вниз, включая "
             "раздел 0 — заказ пользователя. Отмечай сделанное `- [x]`, осознанный "
             "отказ — `- [~]` со строкой причины. Непроверенный пункт отмечать нельзя.\n\n"
@@ -135,6 +148,29 @@ PHASES: List[Phase] = [
             "- мёртвый код, заглушки и `TODO` — вычистить.\n\n"
             "Прогоняй `node scripts/check-spec.mjs` и `node scripts/smoke.mjs` сам, "
             "пока оба не станут зелёными. Их же запустит фабрика после тебя."
+        ),
+    ),
+    Phase(
+        key="platform",
+        title="Площадка: игру открывают так, как её откроет игрок",
+        required=(),
+        # Собирать заново нечего: игра уже прошла доводку, а тестер соберёт её
+        # сам, если dist/ пуст. Дымовой запуск здесь лишний — тестер открывает
+        # ту же игру, только на площадке и в полутора десятках разрешений.
+        with_smoke=False,
+        with_tester=True,
+        agent_first=False,
+        task=(
+            "ФАЗА 5 из 5 — ПЛОЩАДКА.\n\n"
+            "Игра собрана и прошла приёмку фабрики. Осталось то, чего ни чтение "
+            "исходников, ни дымовой запуск не видят: как игра ведёт себя на самой "
+            "площадке.\n\n"
+            "Фабрика прогонит её тестером — тем же, которым проверяют сборки перед "
+            "отправкой на модерацию. Он поднимает SDK Яндекса, открывает игру так, "
+            "как её открывает площадка, ходит по ней автопилотом в полутора десятках "
+            "разрешений, читает `bridge.storage` до и после перезагрузки, сверяет "
+            "локали, ловит консоль и сеть.\n\n"
+            "Ниже — то, что он нашёл. Правь причину, а не симптом."
         ),
     ),
 ]
@@ -239,7 +275,8 @@ def build_game(
 
         progress(base, f"Фаза {index}/{total}: {phase.title}")
         on_log(f"\n{'━' * 65}\n▶ ФАЗА {index}/{total}: {phase.title}\n{'━' * 65}\n")
-        step.agent_codes.append(call_agent(phase.task))
+        if phase.agent_first:
+            step.agent_codes.append(call_agent(phase.task))
 
         if stopped():
             outcome.stopped = True
@@ -249,7 +286,8 @@ def build_game(
             progress(base + span // 2, f"Фаза {index}/{total}: приёмка")
             on_log(f"\n── Приёмка фазы «{phase.title}»\n")
             report = run_gate(project_dir, on_log=on_log, stop_check=stop_check,
-                              phase=phase.key, with_smoke=phase.with_smoke)
+                              phase=phase.key, with_smoke=phase.with_smoke,
+                              with_tester=phase.with_tester)
             step.report = report
             write_gate_report(project_dir, report)
             stamp_generation(project_dir, report)
@@ -284,10 +322,18 @@ def build_game(
                 project=report.project, phase=report.phase, stages=report.stages,
                 spec=[c for c in report.spec if c in blocking],
                 smoke=[c for c in report.smoke if c in blocking],
+                tester=[c for c in report.tester if c in blocking],
+                tester_run=report.tester_run,
                 metrics=report.metrics, blockers=report.blockers,
                 log_tail=report.log_tail, seconds=report.seconds,
             )
-            step.agent_codes.append(call_agent(focused.repair_task(phase.title)))
+            task = focused.repair_task(phase.title)
+            # Фаза, начавшаяся с прогона, не объясняла агенту, что вообще
+            # произошло: он получал список провалов без единого слова о том,
+            # откуда они взялись. Объяснение фазы идёт первой починкой.
+            if not phase.agent_first and step.repairs == 1:
+                task = f"{phase.task}\n\n{task}"
+            step.agent_codes.append(call_agent(task))
 
         if outcome.stopped:
             break

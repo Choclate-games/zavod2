@@ -8,6 +8,26 @@ the codebase per platform; branch on `bridge.platform.id`.
 > snippets found online (`StorageType` arguments, `bridge.game.on(...)`,
 > `bridge.leaderboard`) are wrong for v2 — see "v1 traps" at the bottom.
 
+## 0. Установка: мост берётся из форка студии
+
+В реестре npm лежит апстримовский пакет. Игры студии собираются с форком
+(github.com/EdikN/bridge) — там настоящая авторизация VK через
+`VKWebAppGetAuthToken`, платежи `VKWebAppShowOrderBox` с внешним каталогом, OK
+поверх VK Bridge, GameMonetize, Android на Capacitor, экран загрузки студии и
+интервал межстраничной в 80 секунд вместо 60.
+
+Имя пакета у форка то же самое, поэтому **импорты в коде обычные** — меняется
+только строка в `dependencies`:
+
+```json
+"@playgama/bridge": "https://github.com/EdikN/bridge/releases/download/<тег>/playgama-bridge-<версия>.tgz"
+```
+
+Точный адрес диктует фабрика: он лежит в `config/playgama.yaml` и приезжает в
+мастер-промпт игры и в `.factory/bridge-source.json`. Диапазон версий (`^2.x`,
+`latest`) — это установка из реестра, то есть чужой мост; статическая приёмка
+ловит такое проверкой **C16**.
+
 ## 1. Initialization
 
 ```typescript

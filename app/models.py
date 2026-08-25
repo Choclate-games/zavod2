@@ -120,7 +120,7 @@ class MonetizationSpec(BaseSafeModel):
     fairness_rules: List[str] = Field(default_factory=list)
 
 class PlaygamaSpec(BaseSafeModel):
-    sdk_version: str = Field(default="@playgama/bridge 2.x")
+    sdk_version: str = Field(default="@playgama/bridge 2.x (форк студии, ставится тарболом релиза)")
     supported_platforms: List[str] = Field(default_factory=lambda: ["yandex", "vk", "ok", "crazy_games", "playgama"])
     initialization_flow: List[str] = Field(default_factory=list)
     cloud_save_keys: List[str] = Field(default_factory=list)

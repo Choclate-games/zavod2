@@ -451,6 +451,7 @@ def gate(
     game_id: str = typer.Argument(..., help="Слаг проекта в workspace/"),
     fix: bool = typer.Option(False, "--fix", help="Показать задачу на починку, а не только отчёт"),
     static_only: bool = typer.Option(False, "--static", help="Без запуска браузера — только чтение исходников"),
+    platform: bool = typer.Option(False, "--platform", help="Ещё и прогон на площадке Яндекса (минуты)"),
 ):
     """Та же приёмка, что идёт после каждой фазы сборки, но по требованию.
 
@@ -465,13 +466,15 @@ def gate(
         raise typer.Exit(code=2)
 
     report = acceptance.run_gate(project, on_log=lambda line: console.print(line, end=""),
-                                 with_smoke=not static_only)
+                                 with_smoke=not static_only, with_tester=platform)
     acceptance.write_gate_report(project, report)
     acceptance.stamp_generation(project, report)
 
     console.print()
-    for check in (*report.spec, *report.smoke):
+    for check in (*report.spec, *report.smoke, *report.tester):
         console.print(check.line())
+    if report.tester_run.get("report"):
+        console.print(f"[dim]Отчёт тестера: {report.tester_run['report']}[/dim]")
     console.print(f"\n[bold]{report.summary()}[/bold]")
     if report.metrics_line():
         console.print(f"[dim]{report.metrics_line()}[/dim]")
@@ -483,6 +486,77 @@ def gate(
         console.print("\n[bold cyan]Задача агенту:[/bold cyan]\n")
         console.print(report.repair_task())
     raise typer.Exit(code=1)
+
+
+@app.command(name="yandex-login", help="Войти в аккаунт Яндекса: откроется окно браузера.")
+def yandex_login(
+    wait: int = typer.Option(900, "--wait", help="Сколько секунд ждать входа"),
+):
+    """Вход нужен прогону на настоящей странице площадки.
+
+    Без него Яндекс отдаёт черновик гостю: игрок не авторизован, облачного
+    хранилища нет, покупки не начинаются. Автоматизировать сам вход нельзя —
+    там капча и двухфакторка, — поэтому окно открывается человеку.
+    """
+    from app import yandex_auth
+
+    result = yandex_auth.login(on_log=lambda line: console.print(line, end=""), wait_seconds=wait)
+    if result.get("ok"):
+        log_success(str(result.get("message")))
+        return
+    log_error(str(result.get("message")))
+    raise typer.Exit(code=1)
+
+
+@app.command(name="yandex-status", help="Есть ли сохранённая сессия Яндекса и до какого числа.")
+def yandex_status():
+    from app import yandex_auth
+
+    data = yandex_auth.session()
+    if not data.get("available"):
+        console.print(f"[yellow]{data.get('reason')}[/yellow]")
+        raise typer.Exit(code=1)
+    if data.get("signedIn"):
+        until = data.get("expiresAt") or "без срока"
+        log_success(f"Вход есть (профиль {data.get('profile')}, до {until})")
+        return
+    if data.get("expired"):
+        console.print("[yellow]Сессия просрочена — войдите заново: `yandex-login`[/yellow]")
+    else:
+        console.print("[yellow]Входа нет — `yandex-login`[/yellow]")
+    raise typer.Exit(code=1)
+
+
+@app.command(name="yandex-logout", help="Забыть сохранённую сессию Яндекса.")
+def yandex_logout():
+    from app import yandex_auth
+
+    result = yandex_auth.forget()
+    (log_success if result.get("ok") else log_error)(str(result.get("message")))
+
+
+@app.command(name="yandex-app-id", help="Привязать игру к черновику в консоли Яндекс Игр.")
+def yandex_app_id(
+    game_id: str = typer.Argument(..., help="Слаг проекта в workspace/"),
+    app_id: str = typer.Argument("", help="id черновика; пусто — только показать"),
+):
+    """С привязанным черновиком прогон идёт на настоящей странице площадки.
+
+    Без него остаётся режим dev: SDK отдаёт dev-адаптер, вход не нужен, а
+    вёрстка, сохранения, локали и консоль проверяются те же самые.
+    """
+    from app import gametest, sandbox
+
+    project = sandbox.project_dir(game_id)
+    if not project.exists():
+        log_error(f"Проект '{game_id}' не найден в {sandbox.workspace_root()}")
+        raise typer.Exit(code=2)
+    if app_id:
+        gametest.set_app_id(project, app_id)
+        log_success(f"Игра {game_id} привязана к черновику {app_id}")
+        return
+    current = gametest.app_id(project)
+    console.print(current or "[dim]черновик не привязан — прогон пойдёт в режиме dev[/dim]")
 
 
 @app.command(name="lessons", help="Пересобрать свод уроков фабрики из отчётов приёмки всех игр.")
