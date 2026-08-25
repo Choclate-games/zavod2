@@ -1,16 +1,25 @@
-"""Деплой отчитывается о себе, и job этот отчёт понимает.
+"""Договор между workflow и мини-ПК.
 
-Job в раннере умеет ровно одно — тронуть файл-триггер: пересобирает и
-перезапускает фабрику systemd на хосте, вне GitHub. Значит и падение
-происходит вне GitHub, а в Actions горит зелёная галочка. Живой случай — мерж
-уехал в main, галочка зелёная, а на экране фабрики полтора часа висела
-предыдущая версия.
+Деплой — единственная часть фабрики, которую нельзя проверить запуском:
+машина одна, и она же боевая. Поэтому здесь закреплено то, что ломалось
+по-настоящему и каждый раз выглядело одинаково — зелёная галочка при не
+обновившемся сайте.
 
-Связка держится на двух договорённостях, и обе разъезжаются незаметно: имена
-файлов, через которые скрипт и workflow разговаривают, и запись исхода на любом
-выходе. Разъехавшиеся имена не ломают ничего видимого — job просто ждёт отчёта,
-которого не будет.
+История отказов, из которой выросли эти проверки:
+
+* job трогал файл-триггер и на этом заканчивался — «зелёный» означал «файл
+  записан», а не «фабрика обновилась»;
+* `systemd .path` глух, пока запущен его сервис: пуш, пришедший во время
+  сборки, терялся молча;
+* хост отчитывался файлами, и стоило скрипту на машине отстать от main, как
+  job ждал отчёта, которого не будет;
+* коммит, снявший игры с учёта git, увёл бы папку игр с диска: merge проводит
+  это как удаление файлов.
+
+Теперь связь синхронная (ssh держит соединение до конца), а игры защищены
+описью до и после. Тесты стерегут обе договорённости.
 """
+import re
 from pathlib import Path
 
 import yaml
@@ -18,121 +27,171 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
 SCRIPT = ROOT / "docker" / "deploy.sh"
-UNIT = ROOT / "docker" / "systemd" / "zavod2-deploy.path"
+COMMAND = ROOT / "docker" / "deploy-command.sh"
+SETUP = ROOT / "docker" / "setup-deploy.sh"
 COMPOSE = ROOT / "compose.yml"
+RUNNER_DOCKERFILE = ROOT / "docker" / "runner" / "Dockerfile"
+
+SECRET = "DEPLOY_SSH_KEY"
 
 
-def test_the_job_waits_for_the_deploy():
-    """Без шага ожидания зелёная галочка означает «файл записан»."""
-    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["deploy"]["steps"]
-    assert any("Дождаться деплоя" in str(step.get("name", "")) for step in steps)
+def _workflow() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
-def test_silence_from_the_host_is_a_failure():
-    """Снисходительность здесь — та же дыра с другой стороны.
+def _steps() -> list:
+    return _workflow()["jobs"]["deploy"]["steps"]
 
-    Хост, который не отчитался, — это либо упавший деплой, либо deploy.sh
-    старее того, что в main. И то и другое надо чинить, а не переживать.
+
+def _step(name: str) -> dict:
+    for step in _steps():
+        if name in str(step.get("name", "")):
+            return step
+    raise AssertionError(f"в workflow нет шага «{name}»")
+
+
+def test_the_deploy_runs_over_ssh_and_the_job_waits_for_it():
+    """Зелёная галочка обязана означать «фабрика обновилась».
+
+    Раньше job только трогал файл-триггер: деплой шёл на хосте вне GitHub, и
+    его падение до Actions не доходило вообще.
     """
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "exit 1" in workflow
-    assert "поверю на слово" not in workflow, "верить на слово тут нечему"
+    run = _step("Деплой на мини-ПК")["run"]
+    assert "ssh " in run, "деплой должен идти по ssh, а не через файл-триггер"
+    assert "deploy $GITHUB_SHA" in run, "хосту надо сказать, какой коммит от него ждут"
+    assert "|| true" not in run, "провал ssh обязан валить job"
+    assert not _step("Деплой на мини-ПК").get("continue-on-error")
 
 
-def test_script_and_job_agree_on_the_report_files():
-    """Разъехавшиеся имена не ломают ничего видимого — job просто ждёт зря."""
+def test_the_host_is_probed_before_the_tests():
+    """Протухший ключ должен обнаруживаться за секунды, а не после тестов."""
+    names = [str(s.get("name", "")) for s in _steps()]
+    assert names.index("Связь с мини-ПК") < names.index("Тесты")
+    assert "ping" in _step("Связь с мини-ПК")["run"]
+
+
+def test_the_workflow_and_the_setup_script_agree_on_the_secret():
+    """Разъехавшиеся имена ничего не ломают видимо — деплой просто не пойдёт."""
+    assert SECRET in WORKFLOW.read_text(encoding="utf-8")
+    assert SECRET in SETUP.read_text(encoding="utf-8")
+
+
+def test_a_missing_secret_says_what_to_do():
+    run = _step("Ключ до мини-ПК")["run"]
+    assert "::error::" in run
+    assert "setup-deploy.sh" in run, "ошибка без инструкции — сообщение ни о чём"
+
+
+def test_the_key_never_stays_on_the_runner():
+    step = _step("Убрать ключ")
+    assert step.get("if") == "always()", "ключ должен убираться и после падения"
+
+
+def test_no_pull_request_trigger():
+    """Репозиторий публичный, раннер стоит дома.
+
+    `pull_request` означал бы выполнение кода с чужого форка на этой машине.
+    """
+    triggers = _workflow()[True]  # yaml разбирает `on:` как булево True
+    assert "pull_request" not in triggers
+    assert "push" in triggers
+
+
+def test_the_runner_still_has_no_docker_socket():
+    """Способ подать сигнал изменился, объём прав — нет.
+
+    Правило CI-инфраструктуры мини-ПК: код из workflow не управляет демоном
+    Docker хоста. Ключ деплоя ограничен одной командой ровно поэтому.
+    """
+    compose = COMPOSE.read_text(encoding="utf-8")
+    assert "docker.sock" not in compose
+    runner = yaml.safe_load(compose)["services"]["runner"]
+    assert "host.docker.internal:host-gateway" in runner["extra_hosts"], (
+        "без этого имени контейнер не видит хост и деплой встаёт на связи"
+    )
+
+
+def test_the_runner_image_can_speak_ssh():
+    assert "openssh-client" in RUNNER_DOCKERFILE.read_text(encoding="utf-8")
+
+
+def test_the_key_may_only_ask_for_a_deploy():
+    """Утёкший ключ должен уметь ровно то же, что умел файл-триггер."""
+    command = COMMAND.read_text(encoding="utf-8")
+    assert "SSH_ORIGINAL_COMMAND" in command
+    assert "exit 64" in command, "чужая команда обязана отвергаться"
+    setup = SETUP.read_text(encoding="utf-8")
+    assert 'command=' in setup and "restrict" in setup, (
+        "ключ без форсированной команды — это доступ к машине, а не кнопка"
+    )
+    assert "deploy-command.sh" in setup
+
+
+def test_the_deploy_script_never_wipes_the_working_tree():
+    """`reset --hard` и `git clean` сносят нетрекаемое молча и на успешном пути.
+
+    Игры на мини-ПК как раз нетрекаемые — это ровно тот случай.
+    """
+    for path in (SCRIPT, COMMAND, SETUP):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            bare = line.strip()
+            if bare.startswith("#"):
+                continue
+            assert not re.match(r"^git\s+reset\s+--hard", bare), f"{path.name}:{number}"
+            assert not re.match(r"^git\s+clean", bare), f"{path.name}:{number}"
+
+
+def test_the_games_are_counted_before_and_after():
+    """Пропавшая игра обязана валить деплой, а не обнаруживаться через неделю."""
     script = SCRIPT.read_text(encoding="utf-8")
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    assert 'STATUS="$STATE_DIR/status"' in script
-    assert 'LOG_FILE="$STATE_DIR/last.log"' in script
-    # Раннеру тот же каталог смонтирован как /deploy.
-    assert "./.deploy:/deploy" in COMPOSE.read_text(encoding="utf-8")
-    assert "/deploy/status" in workflow
-    assert "/deploy/last.log" in workflow
-
-    for field in ("sha=", "outcome=", "code=", "step=", "started="):
-        assert field in script, f"скрипт не пишет поле {field}"
+    assert "INVENTORY_BEFORE" in script
+    assert "comm -23" in script, "сравнивать надо имена, а не количество"
+    assert "С диска пропали игры" in script
 
 
-def test_the_outcome_is_written_on_every_exit():
-    """Запись только на успешном пути — это упавший деплой, неотличимый от
-    не начинавшегося: job ждал бы его до таймаута."""
+def test_the_games_survive_a_commit_that_untracks_them():
+    """Merge проводит снятие с учёта как удаление файлов — то есть с диска."""
     script = SCRIPT.read_text(encoding="utf-8")
-    assert 'trap \'code=$?; restore_games; write_status "$code"\' EXIT' in script
+    assert "merge_would_delete_games" in script
+    assert "stash_games" in script
+    assert "restore_games" in script
+    assert "trap on_exit EXIT" in script, "возврат обязан случиться и при падении"
 
 
-def test_the_trigger_file_is_the_one_systemd_watches():
-    """Юнит следит за одним файлом, а job трогает другой — деплой не начнётся."""
-    watched = next(line.split("=", 1)[1].strip()
-                   for line in UNIT.read_text(encoding="utf-8").splitlines()
-                   if line.startswith("PathModified="))
-    assert watched.endswith("/trigger"), watched
-    assert "/deploy/trigger" in WORKFLOW.read_text(encoding="utf-8")
-
-
-def test_the_deploy_never_deletes_games():
-    """Merge стирает из рабочего дерева всё, что удалено во входящих коммитах.
-
-    Проверено на симуляции сервера: при чистом дереве `git merge --ff-only`
-    уносит папку игр молча и с кодом 0. Игру удаляют кнопкой в фабрике, а не
-    пушем в main.
-    """
+def test_every_step_shows_up_in_the_actions_log():
+    """«Видно каждый шаг» — это маркеры групп из самого скрипта."""
     script = SCRIPT.read_text(encoding="utf-8")
-    for piece in ("merge_would_delete_games", "stash_games", "restore_games",
-                  'GAME_DIRS="workspace output"'):
-        assert piece in script, piece
+    assert "::group::" in script and "::endgroup::" in script
+    for phase in ("Очередь", "Игры на диске", "Обновление кода",
+                  "Сборка образа", "Перезапуск фабрики", "Проверка"):
+        assert f'step "{phase}"' in script, f"шаг «{phase}» потерялся"
 
 
-def test_games_are_out_of_git_but_the_registry_stays():
-    """Реестр витрины — данные пользователя, а не игра.
-
-    Без него после клона витрина теряет оценки и архив.
-    """
-    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-    assert "/workspace/*" in ignore
-    assert "/output/*" in ignore
-    assert "!/workspace/.factory/projects.json" in ignore
+def test_the_deploy_checks_that_the_factory_actually_came_up():
+    """Иначе «деплой прошёл» означает лишь «docker не выругался»."""
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert "/healthz" in script
+    assert "docker inspect" in script
+    assert "docker compose logs" in script, "упавший контейнер надо показать, а не описать"
 
 
-def test_the_job_recognises_its_deploy_by_the_commit_too():
-    """Только по времени старта — значит висеть до таймаута в обычном случае.
+def test_the_script_pins_itself_before_touching_git():
+    """bash дочитывает файл по ходу выполнения, а merge его переписывает."""
+    lines = SCRIPT.read_text(encoding="utf-8").splitlines()
+    pin = next(n for n, line in enumerate(lines) if "ZAVOD_DEPLOY_PINNED" in line)
+    merge = next(n for n, line in enumerate(lines) if line.strip().startswith("if ! git merge"))
+    assert pin < merge, "закрепиться надо ДО merge"
+    assert any("exec bash" in line for line in lines[:pin + 5])
 
-    Хост начинает сборку раньше, чем прилетает наш триггер (предыдущий деплой
-    ещё идёт), догоняющий цикл доводит её до нашего коммита — и по времени
-    старта такой деплой выглядит чужим. Живой случай: прогон прождал так
-    семнадцать минут и продолжал ждать.
-    """
+
+def test_the_old_trigger_is_gone_for_good():
+    """Файл-триггер был односторонним сигналом, о судьбе которого никто не знал."""
+    assert not (ROOT / "docker" / "systemd" / "zavod2-deploy.path").exists()
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert '[ "$sha" = "$GITHUB_SHA" ] && mine=1' in workflow
-    assert '"${started:-0}" -ge "${TRIGGERED_AT:-0}"' in workflow
-
-
-def test_the_wait_shows_the_deploy_while_it_runs():
-    """Молчать пять минут и вывалить простыню — это не «ожидание», это слепота."""
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "relay_log" in workflow, "лог хоста обязан идти в job по ходу дела"
-    assert "relay_step" in workflow, "шаг нужен там, где лог молчит"
-    assert "/deploy/step" in workflow
-    assert "step()" in SCRIPT.read_text(encoding="utf-8")
-
-
-def test_silence_is_diagnosed_not_endured():
-    """Пустой экран не отличается от повисшего прогона — и выглядел так же.
-
-    Новый deploy.sh создаёт лог первой же строкой, ещё до `git fetch`. Значит
-    отсутствие файла вовсе — это не «хост занят», а «на хосте скрипт старее
-    main», и ждать нечего ни минуту, ни час.
-    """
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "PROBE_SECONDS" in workflow
-    assert "не появилось даже /deploy/last.log" in workflow
-    assert "journalctl -u zavod2-deploy" in workflow, "сказано, куда смотреть"
-    assert "systemctl start zavod2-deploy" in workflow, "сказано, чем починить"
-
-
-def test_the_wait_reports_itself_periodically():
-    """Раз в полминуты — строка о том, что происходит, даже когда тихо."""
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "· ждём" in workflow
-    assert "waited - beat" in workflow
+    assert "/deploy/trigger" not in workflow
+    assert "/deploy/status" not in workflow
+    # Ручной запуск с самой машины остаётся — им разворачивают без GitHub.
+    assert (ROOT / "docker" / "systemd" / "zavod2-deploy.service").exists()
+    # Выключение осиротевшего юнита — часть настройки, иначе один пуш давал бы
+    # два деплоя.
+    assert "zavod2-deploy.path" in SETUP.read_text(encoding="utf-8")

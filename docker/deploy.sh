@@ -1,108 +1,105 @@
 #!/usr/bin/env bash
 # Разворачивает новую версию фабрики на мини-ПК.
 #
-# Запускается НЕ из workflow, а systemd-юнитом на хосте (docker/systemd/):
-# job в раннере только трогает файл-триггер. Благодаря этому раннеру не нужен
-# /var/run/docker.sock — то есть код из workflow не может управлять демоном
-# Docker хоста, на котором рядом крутятся раннеры организации.
+# Запускается по ssh из workflow (docker/deploy-command.sh — форсированная
+# команда ключа) и вручную с самой машины. Оба пути одинаковы: скрипт печатает
+# всё, что делает, в свой stdout, а ssh транслирует это прямо в лог Actions.
+#
+# Почему не как раньше. Раньше job трогал файл-триггер, systemd на хосте видел
+# запись и запускал этот скрипт где-то в стороне, а job опрашивал файлы со
+# статусом. Схема разъезжалась двумя способами сразу: пропущенный триггер
+# (`.path` с `PathModified` глух, пока сервис работает) — деплой не случался
+# вовсе; отчёт со старой версии скрипта — job ждал того, чего не будет. И то и
+# другое выглядело как зелёная галочка при не обновившемся сайте.
+#
+# Теперь связь синхронная: ssh держит соединение до конца, код возврата
+# скрипта — это код возврата шага. Терять сигнал больше негде.
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/opt/zavod2}"
-LOCK="/tmp/zavod2-deploy.lock"
-
-# Исход деплоя для того, кто его запросил.
+# ---------------------------------------------------------------------------
+# Скрипт закрепляет сам себя копией до того, как что-то делать.
 #
-# Job в раннере умеет только тронуть файл-триггер: всё остальное происходит
-# здесь, на хосте, вне GitHub. Значит и падение происходит вне GitHub — деплой
-# вставал на `git merge --ff-only`, а в Actions горела зелёная галочка. «CI
-# зелёный» переставало означать «обновилось», и узнать об этом можно было
-# только глазами на экране фабрики.
-#
-# Поэтому исход пишется обратно в тот же каталог, который видит раннер
-# (.deploy смонтирован ему как /deploy), а job его дожидается. Лог полного
-# прогона кладётся рядом: journalctl раннеру недоступен, а без хвоста лога
-# «деплой упал» — сообщение ни о чём.
-STATE_DIR="${STATE_DIR:-$REPO_DIR/.deploy}"
-STATUS="$STATE_DIR/status"
-STEP_FILE="$STATE_DIR/step"
-LOG_FILE="$STATE_DIR/last.log"
-STARTED_AT="$(date +%s)"
-STEP="старт"
-
-mkdir -p "$STATE_DIR"
-# Лог именно перезаписывается: job читает его как хвост своего прогона, и
-# приклеенный хвост предыдущего увёл бы разбор не туда.
-exec > >(tee "$LOG_FILE") 2>&1
-
-log() { echo "[deploy $(date '+%H:%M:%S')] $*"; }
-
-# Текущий шаг — отдельным файлом, а не только в итоговом статусе.
-#
-# Итог пишется на выходе, то есть через минуты. До него тот, кто ждёт деплой,
-# не знает даже, дошло ли дело до сборки образа: лог может молчать, пока docker
-# тянет слои. Один короткий файл превращает ожидание в наблюдение.
-step() {
-    STEP="$1"
-    printf '%s\t%s\n' "$STEP" "$(date +%s)" > "$STEP_FILE.tmp" 2>/dev/null || return 0
-    mv -f "$STEP_FILE.tmp" "$STEP_FILE" 2>/dev/null || true
-}
-
-# Исход пишется на ЛЮБОМ выходе, включая падение по `set -e` и по сигналу.
-# Запись только на успешном пути означала бы, что упавший деплой неотличим от
-# не начинавшегося, и job ждал бы его до таймаута.
-write_status() {
-    local code="$1"
-    local outcome="fail"
-    [ "$code" = "0" ] && outcome="ok"
-    local head="unknown"
-    head="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-    # Во временный файл и переименованием: job читает этот файл в цикле и не
-    # должен поймать его наполовину записанным.
-    cat > "$STATUS.tmp" <<EOF
-sha=$head
-outcome=$outcome
-code=$code
-step=$STEP
-started=$STARTED_AT
-finished=$(date +%s)
-EOF
-    mv -f "$STATUS.tmp" "$STATUS"
-    rm -f "$STEP_FILE" 2>/dev/null || true
-}
-
-# Два деплоя подряд (быстрые пуши) не должны пересечься на docker build.
-#
-# Ждём освобождения, а не выходим сразу. Выход означал бы потерянный деплой:
-# второй пуш пришёл, пока собирался первый, и его изменения не доехали бы до
-# следующего пуша вообще. Ожидание безопасно — цикл в конце всё равно
-# проверит, не сдвинулся ли origin/main за это время.
-exec 9>"$LOCK"
-step "ожидание предыдущего деплоя"
-if ! flock -w 1800 9; then
-    log "ОШИБКА: предыдущий деплой не закончился за полчаса — выхожу"
-    exit 1
+# bash читает файл скрипта по мере выполнения, а `git merge` ниже переписывает
+# этот же файл. Дочитанное со сдвинутого смещения — это исполнение мусора
+# посреди деплоя: класс отказов, который невозможно воспроизвести и незачем
+# терпеть. Копия в /tmp от merge не зависит.
+# ---------------------------------------------------------------------------
+if [ "${ZAVOD_DEPLOY_PINNED:-}" != "1" ]; then
+    pinned="$(mktemp /tmp/zavod2-deploy.XXXXXX)"
+    cat "$0" > "$pinned"
+    ZAVOD_DEPLOY_PINNED=1 ZAVOD_DEPLOY_PINNED_FILE="$pinned" exec bash "$pinned" "$@"
+fi
+# Удаляем сразу: bash продолжает читать уже открытый inode, а файл в /tmp не
+# переживёт даже падения по сигналу.
+if [ -n "${ZAVOD_DEPLOY_PINNED_FILE:-}" ]; then
+    rm -f "$ZAVOD_DEPLOY_PINNED_FILE"
 fi
 
-cd "$REPO_DIR"
+REPO_DIR="${REPO_DIR:-/opt/zavod2}"
+SITE_PORT="${SITE_PORT:-7860}"
+CONTAINER="${FACTORY_CONTAINER:-zavod2-factory}"
+LOCK="/tmp/zavod2-deploy.lock"
 
-# Игры на диске переживают любой деплой.
+# Лог на хосте — для разбора задним числом, когда лог прогона в Actions уже
+# ушёл по ротации. Основной канал теперь не он, а сам stdout.
+STATE_DIR="${STATE_DIR:-$REPO_DIR/.deploy}"
+LOG_FILE="$STATE_DIR/last.log"
+if mkdir -p "$STATE_DIR" 2>/dev/null && : > "$LOG_FILE" 2>/dev/null; then
+    exec > >(tee "$LOG_FILE") 2>&1
+else
+    exec 2>&1
+fi
+
+STEP="старт"
+GROUP_OPEN=0
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# Каждый шаг — свёрнутая группа в логе Actions. GitHub понимает эти маркеры от
+# любого шага, поэтому «видно каждый шаг» получается без единого лишнего шага
+# в самом workflow.
+step() {
+    close_group
+    STEP="$1"
+    echo "::group::$1"
+    GROUP_OPEN=1
+}
+
+close_group() {
+    if [ "$GROUP_OPEN" = "1" ]; then
+        echo "::endgroup::"
+        GROUP_OPEN=0
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Игры на диске переживают деплой. Это требование, а не пожелание.
 #
-# Раньше сгенерированные игры ехали в git вместе с кодом. Когда их оттуда
-# убирают, merge видит удаление файлов и стирает их из рабочего дерева — то
-# есть один пуш выносит всю папку игр на мини-ПК. Локальные правки (а фабрика
-# пишет в игры непрерывно) при этом ещё и не дают merge пройти: он встаёт с
-# «your local changes would be overwritten».
+# Защит три, и они разного рода.
 #
-# Поэтому перед таким merge папки игр уводятся в сторону обычным mv — это
-# переименование внутри той же файловой системы, мгновенное и для гигабайта.
-# git видит файлы отсутствующими, спокойно проводит удаление в индексе, после
-# чего папки возвращаются на место уже нетрекаемыми.
+# 1. Игры не в git (см. .gitignore) — значит git их и не трогает. Это главное:
+#    всё остальное здесь на случай, если кто-то это свойство сломает.
+# 2. Никаких `reset --hard` и `git clean`. Обе команды сносят нетрекаемое
+#    молча и на успешном пути, то есть ровно там, где никто не смотрит.
+# 3. Опись до и после. Пропавшая игра валит деплой с именами пропавших, а не
+#    обнаруживается через неделю.
 #
-# Условие намеренно общее, а не «одноразовая миграция»: деплою вообще незачем
-# уметь удалять игры. Игру удаляют кнопкой в фабрике, а не пушем в main.
+# Плюс разовый случай: коммит, снимающий игры с учёта git, merge проводит как
+# удаление файлов — и выносит папку с диска. Такие папки уводятся в сторону
+# обычным mv (переименование в пределах ФС, мгновенное и для гигабайта), а
+# после merge возвращаются уже нетрекаемыми.
+# ---------------------------------------------------------------------------
 GAME_DIRS="workspace output"
 STASHED_DIR=""
+INVENTORY_BEFORE="$(mktemp /tmp/zavod2-games.XXXXXX)"
+
+inventory() {
+    for dir in $GAME_DIRS; do
+        [ -d "$REPO_DIR/$dir" ] || continue
+        find "$REPO_DIR/$dir" -mindepth 1 -maxdepth 1 -type d -printf "$dir/%P\n" 2>/dev/null
+    done | grep -v '/\.factory$' | LC_ALL=C sort
+}
 
 restore_games() {
     [ -n "$STASHED_DIR" ] || return 0
@@ -116,14 +113,6 @@ restore_games() {
     STASHED_DIR=""
 }
 
-# Возврат обязан случиться и при падении посреди merge — иначе игры останутся
-# лежать во временном каталоге, а фабрика поднимется пустой.
-trap 'code=$?; restore_games; write_status "$code"' EXIT
-
-merge_would_delete_games() {
-    git diff --name-only --diff-filter=D HEAD origin/main -- $GAME_DIRS 2>/dev/null | grep -q .
-}
-
 stash_games() {
     STASHED_DIR="$(mktemp -d "$REPO_DIR/../.zavod2-games-XXXXXX")"
     for dir in $GAME_DIRS; do
@@ -132,77 +121,160 @@ stash_games() {
     log "игры уведены в $STASHED_DIR на время merge — с диска они не денутся"
 }
 
-deploy_once() {
-step "git fetch"
-log "забираю изменения"
+merge_would_delete_games() {
+    git diff --name-only --diff-filter=D HEAD origin/main -- $GAME_DIRS 2>/dev/null | grep -q .
+}
+
+# Возврат обязан случиться и при падении посреди merge, и по сигналу — иначе
+# игры останутся во временном каталоге, а фабрика поднимется пустой.
+on_exit() {
+    code=$?
+    restore_games
+    close_group
+    if [ "$code" != "0" ]; then
+        echo "::error::Деплой упал на шаге «$STEP» (код $code). Версия в $REPO_DIR: $(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    fi
+    rm -f "$INVENTORY_BEFORE" 2>/dev/null || true
+    exit "$code"
+}
+trap on_exit EXIT
+
+# ---------------------------------------------------------------------------
+# Какой коммит от нас ждут.
+#
+# Форсированная команда ключа не принимает аргументов, но исходную команду ssh
+# кладёт в SSH_ORIGINAL_COMMAND. Оттуда берётся sha — и в конце проверяется,
+# что он действительно в рабочей копии. Без этого «деплой прошёл» означает
+# лишь «что-то задеплоилось».
+#
+# Значение только читается и только как аргумент git, но проверка формата всё
+# равно жёсткая: строка приходит снаружи.
+# ---------------------------------------------------------------------------
+WANT_SHA=""
+case "${SSH_ORIGINAL_COMMAND:-}" in
+    "deploy "*)
+        candidate="${SSH_ORIGINAL_COMMAND#deploy }"
+        case "$candidate" in
+            *[!0-9a-f]* | "") ;;
+            *) WANT_SHA="$candidate" ;;
+        esac
+        ;;
+esac
+
+step "Очередь"
+# Два деплоя подряд не должны пересечься на docker build. Ждём, а не выходим:
+# выход означал бы потерянный деплой — его изменения не доехали бы до
+# следующего пуша вообще.
+exec 9>"$LOCK"
+if flock -n 9; then
+    log "свободно, начинаю"
+else
+    log "идёт предыдущий деплой — жду его окончания (потолок полчаса)"
+    if ! flock -w 1800 9; then
+        echo "::error::Предыдущий деплой не закончился за полчаса. Смотреть: journalctl -u zavod2-deploy, docker ps"
+        exit 1
+    fi
+    log "дождался"
+fi
+
+cd "$REPO_DIR"
+
+step "Игры на диске"
+inventory > "$INVENTORY_BEFORE"
+log "найдено игр: $(wc -l < "$INVENTORY_BEFORE")"
+sed 's/^/  · /' "$INVENTORY_BEFORE"
+
+step "Обновление кода"
+log "было: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 git fetch --prune origin
 
-step "перенос игр из git"
 if merge_would_delete_games; then
-    log "входящий коммит снимает игры с учёта git"
+    log "входящий коммит снимает игры с учёта git — увожу их из-под merge"
     stash_games
 fi
 
-# Именно --ff-only, а не reset --hard. В workspace/ лежат сгенерированные игры,
-# они трекаются git-ом (правило репозитория), и часть из них в момент деплоя
-# может быть ещё не закоммичена. reset --hard стёр бы их молча.
-step "git merge --ff-only"
+# Именно --ff-only. reset --hard стёр бы незакоммиченное молча, а нам нужно
+# наоборот: скорее встать с внятной ошибкой, чем что-то потерять.
 if ! git merge --ff-only origin/main; then
-    log "ОШИБКА: fast-forward не прошёл — в рабочей копии есть свои коммиты."
-    log "Разбери руками — насильно перезаписывать я не буду:"
-    log "  cd $REPO_DIR && git status && git log --oneline origin/main..HEAD"
+    echo "::error::Fast-forward не прошёл: в рабочей копии на мини-ПК есть свои коммиты. Насильно перезаписывать не буду."
+    echo "::error::Разобрать руками: cd $REPO_DIR && git status && git log --oneline origin/main..HEAD"
     exit 1
 fi
 
-# Вернуть до сборки образа: docker compose build читает рабочее дерево.
+# Вернуть до сборки: docker compose build читает рабочее дерево.
 restore_games
 
-log "версия: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
+# «Already up to date» при HEAD впереди origin/main — тоже успешный merge, и
+# именно так молча разъезжаются машина и репозиторий: на мини-ПК остаётся
+# правка, сделанная руками год назад, а деплой каждый раз зелёный.
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+    echo "::warning::В рабочей копии есть коммиты, которых нет в main:"
+    git log --oneline origin/main..HEAD | head -n 5 | sed 's/^/::warning::  · /'
+    echo "::warning::Фабрика поднимется вместе с ними. Убрать: cd $REPO_DIR && git reset --hard origin/main — игры не в git и не пострадают."
+fi
 
-# Пересобираем и перезапускаем ТОЛЬКО фабрику.
-#
-# runner трогать нельзя: деплой запущен джобом, который прямо сейчас в этом
-# раннере и выполняется. Перезапуск контейнера убил бы собственный job, и
-# GitHub показал бы упавшую сборку при удачном деплое. Раннер обновляется
+log "стало: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
+
+if [ -n "$WANT_SHA" ]; then
+    if git merge-base --is-ancestor "$WANT_SHA" HEAD 2>/dev/null; then
+        log "запрошенный коммит ${WANT_SHA:0:12} в рабочей копии"
+    else
+        echo "::error::После обновления запрошенного коммита $WANT_SHA в рабочей копии нет."
+        echo "::error::Так бывает после force-push в main. Проверить: cd $REPO_DIR && git log --oneline -5"
+        exit 1
+    fi
+fi
+
+step "Сборка образа"
+# Пересобираем ТОЛЬКО фабрику. Контейнер раннера трогать нельзя: в нём прямо
+# сейчас выполняется job, который этот деплой и запустил. Раннер обновляется
 # руками: docker compose up -d --build runner
-step "docker compose build"
-log "собираю образ"
-docker compose build factory
+docker compose build --progress plain factory
 
-step "docker compose up"
-log "перезапускаю фабрику"
+step "Перезапуск фабрики"
 docker compose up -d --no-deps factory
+docker compose ps factory
 
+step "Уборка"
 # Слои от прошлых сборок иначе копятся гигабайтами: на этой машине кэш сборки
 # уже разрастался до десятков ГБ.
-log "убираю висячие образы"
-docker image prune -f >/dev/null
+docker image prune -f
+df -h "$REPO_DIR" | tail -n 1
 
-log "готово"
-docker compose ps factory
-}
-
-# Догоняем, если во время сборки прилетел ещё один пуш.
-#
-# Причина не гипотетическая, это случилось. Триггер — systemd .path с
-# PathModified: пока сервис деплоя работает, юнит пути деактивирован, и запись
-# в файл-триггер, случившаяся в этот момент, до systemd не доходит. Пуш
-# считался задеплоенным, а на машине оставалась предыдущая версия — молча, с
-# зелёной галочкой в GitHub.
-#
-# Поэтому после сборки перепроверяем origin/main своими глазами. Три круга —
-# потолок: если пуши идут чаще, чем успевает собираться образ, догонять
-# бесполезно, следующий деплой всё равно возьмёт самое свежее.
-for attempt in 1 2 3; do
-    deploy_once
-    git fetch --prune --quiet origin
-    if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+step "Проверка"
+# Без этого «деплой прошёл» означало бы «docker не выругался». Контейнер,
+# упавший на старте (сломанный .env, занятый порт, битая миграция), — это
+# ровно та ситуация, ради которой шаг и нужен.
+ok=""
+for _ in $(seq 1 45); do
+    state="$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "нет")"
+    code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SITE_PORT/healthz" 2>/dev/null || true)"
+    if [ "$state" = "running" ] && [ "$code" = "200" ]; then
+        ok="1"
         break
     fi
-    log "пока собирал, прилетел ещё пуш — иду на круг $((attempt + 1))"
+    sleep 2
 done
 
-step "готово"
-# tee из `exec` — отдельный процесс, и без паузы последние строки лога могут
-# не успеть долететь до файла раньше, чем job его прочитает.
-sync || true
+if [ -z "$ok" ]; then
+    echo "::error::Фабрика не ответила на /healthz за 90 с. Состояние контейнера: ${state:-нет}, http: ${code:-нет ответа}"
+    docker compose logs --tail 60 factory || true
+    exit 1
+fi
+log "фабрика отвечает: http://127.0.0.1:$SITE_PORT/healthz → 200"
+
+# Опись после. Сравниваем именно имена, а не количество: обмен «одна пропала,
+# одна появилась» количество не меняет.
+after="$(mktemp /tmp/zavod2-games.XXXXXX)"
+inventory > "$after"
+lost="$(LC_ALL=C comm -23 "$INVENTORY_BEFORE" "$after" || true)"
+rm -f "$after"
+if [ -n "$lost" ]; then
+    echo "::error::С диска пропали игры за время деплоя:"
+    printf '%s\n' "$lost" | sed 's/^/::error::  · /'
+    exit 1
+fi
+log "игры на месте: $(wc -l < "$INVENTORY_BEFORE") шт."
+
+close_group
+echo "✅ Фабрика обновлена: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"

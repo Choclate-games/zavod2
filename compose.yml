@@ -9,10 +9,10 @@
 # разные тома.
 #
 # Сокет Docker не отдаётся никому. Раннер не умеет ни собирать образы, ни
-# перезапускать контейнеры — он только прогоняет тесты и трогает файл-триггер,
-# а разворачивает systemd на хосте (docker/systemd/). Это сохраняет правило,
-# записанное в README CI-инфраструктуры: код из workflow не управляет демоном
-# Docker хоста.
+# перезапускать контейнеры — он прогоняет тесты и просит хост развернуть новую
+# версию по ssh ключом, которому на той стороне разрешена ровно одна команда
+# (docker/deploy-command.sh). Это сохраняет правило, записанное в README
+# CI-инфраструктуры: код из workflow не управляет демоном Docker хоста.
 
 services:
   factory:
@@ -130,9 +130,8 @@ services:
       context: ./docker/runner
       args:
         RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
-        # Те же uid/gid, что у фабрики и у владельца .deploy на хосте: через
-        # этот каталог job отдаёт хосту сигнал на деплой, и при несовпадении
-        # запись падает с «Permission denied» уже после зелёных тестов.
+        # Те же uid/gid, что у фабрики: раннер пишет в свой том _work, и
+        # разъехавшийся владелец ловится только после зелёных тестов.
         APP_UID: ${APP_UID:-29999}
         APP_GID: ${APP_GID:-29999}
     image: zavod2-runner:${RUNNER_VERSION:-2.336.0}
@@ -156,11 +155,11 @@ services:
     #   RUNNER_NAME=minipc-zavod2
     #   RUNNER_LABELS=self-hosted,linux,x64,zavod2
     env_file: .env.deploy
-    volumes:
-      # Единственная связь раннера с внешним миром помимо сети. Job пишет сюда
-      # файл, systemd на хосте это видит и запускает деплой. Ни docker.sock,
-      # ни доступа к рабочей копии.
-      - ./.deploy:/deploy
+    # Так контейнер видит хост по имени host.docker.internal — по нему job
+    # и стучится на sshd мини-ПК. Без этой строки имя не резолвится, и деплой
+    # встаёт на шаге «Связь с мини-ПК».
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     mem_limit: ${ZAVOD_RUNNER_MEM_LIMIT:-2g}
     cpus: ${ZAVOD_RUNNER_CPUS:-2}
     logging:

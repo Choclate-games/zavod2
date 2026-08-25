@@ -5,18 +5,18 @@
 # job из любого из них выполнялся бы здесь. Этому раннеру доступен ровно один
 # репозиторий — тот, чей деплой он и обслуживает.
 #
-# Docker внутрь не пробрасывается. Job прогоняет тесты и трогает файл в
-# /deploy; разворачивает systemd на хосте.
+# Docker внутрь не пробрасывается. Job прогоняет тесты и просит хост
+# развернуть новую версию по ssh — ключом, которому на той стороне разрешена
+# ровно одна команда (docker/deploy-command.sh).
 
 FROM ubuntu:24.04
 
 ARG RUNNER_VERSION=2.336.0
 ARG DEBIAN_FRONTEND=noninteractive
 
-# uid/gid должны совпасть с владельцем каталога .deploy на хосте (пользователь
-# oem, uid 29999). Через него job передаёт хосту единственный сигнал — файл
-# триггера; с несовпадающим uid запись падает с «Permission denied», и деплой
-# не запускается при полностью зелёных тестах.
+# uid/gid те же, что у фабрики (пользователь oem, uid 29999): раннер пишет в
+# свой том _work, и разъехавшийся владелец ловится только после зелёных
+# тестов — в виде «Access to the path ... is denied».
 ARG APP_UID=29999
 ARG APP_GID=29999
 
@@ -24,6 +24,7 @@ ARG APP_GID=29999
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl jq git unzip zip tar gzip \
+      openssh-client \
       libicu74 liblttng-ust1 libkrb5-3 zlib1g libssl3 \
       python3 python3-venv python3-pip \
       tini \
@@ -53,8 +54,9 @@ RUN /home/runner/bin/installdependencies.sh
 # Каталоги обязаны существовать с правильным владельцем ДО монтирования тома:
 # отсутствующий каталог Docker создаёт от root, и раннер падает с
 # "Access to the path '/home/runner/_work/_tool' is denied".
-RUN mkdir -p /home/runner/_work /home/runner/.npm /deploy \
- && chown -R runner:runner /home/runner /deploy
+RUN mkdir -p /home/runner/_work /home/runner/.npm /home/runner/.ssh \
+ && chown -R runner:runner /home/runner \
+ && chmod 700 /home/runner/.ssh
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # Файлы приезжают с Windows — CRLF сломал бы shebang.

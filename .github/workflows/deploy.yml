@@ -6,15 +6,30 @@
 # `push` в main умеет делать только тот, у кого есть доступ на запись, и с
 # форков он не срабатывает — это единственный безопасный триггер для такой
 # схемы.
+#
+# Как устроен деплой. Job подключается по ssh к хосту ключом, которому на той
+# стороне разрешена ровно одна команда (docker/deploy-command.sh), и держит
+# соединение до конца: весь вывод деплоя идёт сюда живьём, код возврата
+# скрипта — это код возврата шага.
+#
+# Раньше было иначе: job трогал файл-триггер, systemd запускал деплой где-то в
+# стороне, а job опрашивал файлы со статусом. Схема теряла сигнал в обе
+# стороны — пропущенный триггер (`.path` глух, пока сервис работает) и отчёт
+# со старой версии скрипта. И то и другое выглядело одинаково: зелёная
+# галочка при не обновившемся сайте.
+#
+# Docker-сокет раннеру по-прежнему не даётся. Правило CI-инфраструктуры
+# мини-ПК (код из workflow не управляет демоном Docker хоста) в силе:
+# изменился способ подать сигнал, а не объём прав.
 name: Deploy
 
 on:
   push:
     branches: [main]
-    # Сгенерированные игры едут в git вместе с кодом (правило репозитория),
-    # то есть коммит очередной игры — это тоже push в main. Пересобирать и
-    # перезапускать контейнер посреди работы фабрики из-за этого не надо.
     paths-ignore:
+      # Игры фабрики в git не едут (см. .gitignore), но каталоги остаются в
+      # фильтре: коммит игры, сделанный руками, не повод пересобирать образ
+      # посреди работы фабрики.
       - 'workspace/**'
       - 'output/**'
       - 'zip_projects/**'
@@ -31,10 +46,48 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, zavod2]
-    timeout-minutes: 45
+    timeout-minutes: 60
+
+    env:
+      # Умолчания — под текущий мини-ПК. Переопределяются переменными
+      # репозитория (Settings → Variables), а не правкой файла.
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || 'host.docker.internal' }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER || 'oem' }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      KEY_FILE: /home/runner/.ssh/zavod2-deploy
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ключ до мини-ПК
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "${DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::Нет секрета DEPLOY_SSH_KEY — деплою нечем постучаться на мини-ПК."
+            echo "::error::Завести один раз: на мини-ПК выполнить cd /opt/zavod2 && bash docker/setup-deploy.sh"
+            echo "::error::Скрипт напечатает ключ; вставить его в Settings → Secrets → Actions → DEPLOY_SSH_KEY."
+            exit 1
+          fi
+          install -d -m 700 "$(dirname "$KEY_FILE")"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          echo "Ключ на месте: $(ssh-keygen -l -f "$KEY_FILE" | cut -d' ' -f1-2)"
+
+      - name: Связь с мини-ПК
+        # Отдельным шагом и до тестов: если ключ протух или хост недоступен,
+        # узнать об этом надо за три секунды, а не после пяти минут тестов.
+        run: |
+          ssh -i "$KEY_FILE" -T \
+              -o StrictHostKeyChecking=accept-new \
+              -o BatchMode=yes -o ConnectTimeout=15 \
+              -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" ping \
+          || {
+            echo "::error::Мини-ПК не отвечает по ssh ($DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PORT)."
+            echo "::error::Проверить на машине: sudo systemctl status ssh · docker exec zavod2-runner getent hosts host.docker.internal"
+            echo "::error::Перенастроить: cd /opt/zavod2 && bash docker/setup-deploy.sh"
+            exit 1
+          }
 
       - name: Тесты
         # AUTH_ENABLED=0 — тестам не нужен пароль; в контейнере фабрики он
@@ -75,156 +128,21 @@ jobs:
               raise SystemExit('ПРОВАЛ: пустой AUTH_PASSWORD_HASH прошёл проверку')
           PY
 
-      - name: Триггер деплоя
-        # Единственное, что job делает с хостом. Дальше systemd-юнит
-        # zavod2-deploy.path видит запись и запускает docker/deploy.sh уже вне
-        # раннера — поэтому /var/run/docker.sock раннеру не нужен.
-        id: trigger
-        run: |
-          mkdir -p /deploy
-          # Метку времени запоминаем ДО записи триггера: по ней следующий шаг
-          # отличает исход своего деплоя от исхода предыдущего, оставшегося в
-          # файле с прошлого пуша.
-          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-          printf '%s %s\n' "$GITHUB_SHA" "$(date -Is)" > /deploy/trigger
-          echo "Деплой запрошен для $GITHUB_SHA"
-
-      - name: Дождаться деплоя
-        # Без этого шага зелёная галочка означала бы «файл записан», а не
-        # «фабрика обновилась»: деплой идёт на хосте, вне GitHub, и его падение
-        # (например, на `git merge --ff-only`) до Actions не доходило вообще.
-        # Живой случай: мерж уехал в main, галочка зелёная, на экране фабрики
-        # полтора часа висела предыдущая версия.
+      - name: Деплой на мини-ПК
+        # Одна команда, и она же — весь деплой. Скрипт на хосте печатает свои
+        # шаги маркерами ::group::, поэтому здесь видно каждый: очередь, опись
+        # игр, обновление кода, сборку, перезапуск, проверку.
         #
-        # Молчание хоста считается провалом, а не «наверное, всё хорошо».
-        # Снисходительность здесь была бы той же самой дырой с другой стороны:
-        # зелёная галочка, за которой ничего не проверено. Хост, который не
-        # умеет отчитываться, — это тоже повод покраснеть: значит на нём лежит
-        # deploy.sh старее того, что в main, и починить это надо, а не пережить.
-        env:
-          TRIGGERED_AT: ${{ steps.trigger.outputs.at }}
-          # Сборка образа с нуля на четырёх ядрах — минуты; плюс деплой может
-          # ждать освобождения лока от предыдущего (там потолок в полчаса).
-          WAIT_SECONDS: '2700'
-          # Через сколько молчание считается диагнозом, а не занятостью.
-          PROBE_SECONDS: '150'
+        # ServerAlive — про долгую тихую сборку образа: без проб соединение
+        # успевало отвалиться там, где docker несколько минут тянет слои.
         run: |
-          field() { grep -m1 "^$1=" /deploy/status 2>/dev/null | cut -d= -f2- || true; }
+          ssh -i "$KEY_FILE" -T \
+              -o StrictHostKeyChecking=accept-new \
+              -o BatchMode=yes -o ConnectTimeout=15 \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+              -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "deploy $GITHUB_SHA"
 
-          # Лог уже шёл сюда строками по мере появления; этот блок нужен для
-          # случая, когда деплой упал раньше, чем успел что-то написать.
-          show_log() {
-            [ -s /deploy/last.log ] || { echo "(лога нет — деплой не начинался)"; return 0; }
-            echo "::group::Полный лог деплоя на хосте"
-            tail -n 300 /deploy/last.log
-            echo "::endgroup::"
-          }
-
-          # Лог деплоя пишется на хосте живьём и лежит в том же каталоге.
-          # Показывать его по факту завершения — значит молчать пять минут, а
-          # потом вывалить простыню; поэтому он транслируется по мере
-          # появления строк, как будто деплой идёт прямо здесь.
-          printed=0
-          relay_log() {
-            [ -f /deploy/last.log ] || return 0
-            total="$(wc -l < /deploy/last.log 2>/dev/null || echo 0)"
-            # Новый деплой обрезает лог: если строк стало меньше — начинаем сначала.
-            [ "$total" -lt "$printed" ] && printed=0
-            if [ "$total" -gt "$printed" ]; then
-              sed -n "$((printed + 1)),${total}p" /deploy/last.log
-              printed="$total"
-            fi
-          }
-
-          # Шаг, о котором хост объявил сам. Нужен там, где лог молчит: docker
-          # тянет слои минутами, не печатая ни строки, и ожидание выглядит
-          # зависшим.
-          last_step=""
-          relay_step() {
-            [ -f /deploy/step ] || return 0
-            current="$(cut -f1 /deploy/step 2>/dev/null)"
-            if [ -n "$current" ] && [ "$current" != "$last_step" ]; then
-              echo "· шаг: $current"
-              last_step="$current"
-            fi
-          }
-
-          began=$(date +%s)
-          beat=0
-          echo "Жду деплой на хосте. Всё, что он напишет, появится здесь по ходу дела."
-
-          deadline=$(( began + WAIT_SECONDS ))
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            relay_log
-            relay_step
-
-            now=$(date +%s)
-            waited=$(( now - began ))
-
-            # Молчание диагностируется сразу, а не выдерживается.
-            #
-            # Новый deploy.sh создаёт свой лог первой же строкой, ещё до
-            # git fetch. Значит отсутствие файла вовсе — это не «хост занят», а
-            # «на хосте deploy.sh старее main»: он приезжает самим деплоем, и
-            # первый прогон после его появления идёт по старому скрипту.
-            # Ждать в этом случае нечего — ни через минуту, ни через час.
-            if [ ! -f /deploy/last.log ] && [ "$waited" -ge "$PROBE_SECONDS" ]; then
-              echo "::error::Хост не отчитывается: за $waited с не появилось даже /deploy/last.log."
-              echo "::error::Скорее всего на мини-ПК лежит docker/deploy.sh старее main — он приезжает самим деплоем, и первый прогон после его появления идёт по старому скрипту."
-              echo "::error::Проверить: journalctl -u zavod2-deploy -n 80 · cd /opt/zavod2 && git log -1 --oneline"
-              echo "::error::Разово догнать: sudo systemctl start zavod2-deploy"
-              exit 1
-            fi
-
-            # Раз в полминуты — строка о том, что происходит. Пустой экран не
-            # отличается от повисшего прогона, и именно так это и выглядело.
-            if [ $(( waited - beat )) -ge 30 ]; then
-              beat=$waited
-              echo "· ждём ${waited} с · лог: $([ -f /deploy/last.log ] && echo есть || echo нет)" \
-                   "· шаг: $([ -f /deploy/step ] && cut -f1 /deploy/step || echo —)" \
-                   "· исход: $([ -f /deploy/status ] && field outcome || echo нет)"
-            fi
-
-            sha="$(field sha)"; outcome="$(field outcome)"
-            started="$(field started)"; step="$(field step)"; code="$(field code)"
-
-            # Свой деплой узнаём двумя способами, и нужны оба.
-            #
-            # Первый — задеплоен ровно наш коммит. Без него ожидание висело до
-            # таймаута в обычном случае: хост начинает сборку раньше, чем
-            # прилетает наш триггер, догоняющий цикл доводит его до нашего
-            # коммита, а по времени старта такой деплой «чужой».
-            #
-            # Второй — успешный деплой, стартовавший после нашего триггера: он
-            # делал `git fetch` уже после нашего пуша, значит наш коммит в него
-            # вошёл (в main только fast-forward). Так закрываются прогоны, чей
-            # коммит хост проскочил, задеплоив сразу более свежий.
-            mine=0
-            [ -n "$sha" ] && [ "$sha" = "$GITHUB_SHA" ] && mine=1
-            if [ -n "${started:-}" ] && [ "${started:-0}" -ge "${TRIGGERED_AT:-0}" ] 2>/dev/null; then
-              mine=1
-            fi
-
-            if [ "$mine" = "1" ]; then
-              if [ "$outcome" = "ok" ]; then
-                relay_log
-                echo "✅ Фабрика обновлена, версия $sha"
-                exit 0
-              fi
-              if [ "$outcome" = "fail" ]; then
-                relay_log
-                echo "::error::Деплой упал на шаге «$step» (код $code). Версия на машине: $sha"
-                show_log
-                exit 1
-              fi
-            fi
-            # Три секунды, а не десять: опрос — это чтение двух коротких
-            # файлов, зато лог хоста идёт сюда почти в реальном времени, а не
-            # копится и вываливается пачкой.
-            sleep 3
-          done
-
-          relay_log
-          echo "::error::Деплой не отчитался за $WAIT_SECONDS с. Триггер записан, но systemd на хосте его не отработал — проверьте: journalctl -u zavod2-deploy"
-          show_log
-          exit 1
+      - name: Убрать ключ
+        if: always()
+        run: rm -f "$KEY_FILE"
