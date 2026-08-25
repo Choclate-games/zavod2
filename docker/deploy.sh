@@ -127,14 +127,68 @@ restore_games() {
     done
     rmdir "$STASHED_DIR" 2>/dev/null || true
     STASHED_DIR=""
+
+    # Стенд базы знаний — единственное, что git держит среди игр: он код, а не
+    # игра, и на его вкладки ссылается десяток документов knowledge/.
+    # Вернувшаяся с диска копия старее индекса, и без этой строки рабочее
+    # дерево осталось бы грязным ровно там, где следующий merge об это и
+    # споткнётся.
+    #
+    # Реестр проектов (.factory/projects.json) намеренно не трогаем: это оценки
+    # и архив пользователя, версия с диска новее любой закоммиченной.
+    git -C "$REPO_DIR" checkout -q -- workspace/knowledge-showcase 2>/dev/null || true
+}
+
+# Куда увести игры на время merge.
+#
+# Каталог рядом с репозиторием («$REPO_DIR/..») не годится: на мини-ПК это
+# /opt, и деплой, работающий от обычного пользователя, получает там «Отказано
+# в доступе». Поймано на настоящей машине.
+#
+# Порядок перебора не случаен. Первым идёт каталог состояния деплоя: он внутри
+# репозитория, а значит заведомо на той же файловой системе — и перенос игр
+# остаётся переименованием, мгновенным даже для гигабайта. git его не видит
+# (.deploy в .gitignore). Дальше — домашний каталог и /tmp, оба могут
+# оказаться на другом устройстве, и тогда mv превратится в копирование:
+# медленно, но не страшно. Об этом предупреждаем вслух.
+stash_base() {
+    local base
+    for base in "$STATE_DIR" "$HOME" /tmp; do
+        [ -n "$base" ] && [ -d "$base" ] && [ -w "$base" ] || continue
+        echo "$base"
+        return 0
+    done
+    return 1
 }
 
 stash_games() {
-    STASHED_DIR="$(mktemp -d "$REPO_DIR/../.zavod2-games-XXXXXX")"
+    local base
+    if ! base="$(stash_base)"; then
+        echo "::error::Некуда увести игры на время merge: ни $STATE_DIR, ни \$HOME, ни /tmp не доступны на запись."
+        echo "::error::Без этого merge удалил бы игры с диска, поэтому останавливаюсь."
+        exit 1
+    fi
+    if [ "$(stat -c %d "$base" 2>/dev/null || echo 0)" != "$(stat -c %d "$REPO_DIR" 2>/dev/null || echo 1)" ]; then
+        echo "::warning::$base на другой файловой системе — перенос игр будет копированием, это может занять минуты."
+    fi
+    STASHED_DIR="$(mktemp -d "$base/.zavod2-games-XXXXXX")"
     for dir in $GAME_DIRS; do
         [ -d "$REPO_DIR/$dir" ] && mv "$REPO_DIR/$dir" "$STASHED_DIR/$dir"
     done
     log "игры уведены в $STASHED_DIR на время merge — с диска они не денутся"
+}
+
+# Игры, оставшиеся от деплоя, убитого сигналом.
+#
+# Намеренно только предупреждение, а не автоматический возврат: за время
+# простоя фабрика могла нарожать новых игр, и возврат «как было» затёр бы их.
+# Разобрать такое должен человек, зато знать о нём он должен сразу.
+warn_about_orphaned_games() {
+    local orphan
+    for orphan in "$STATE_DIR"/.zavod2-games-* "$HOME"/.zavod2-games-* /tmp/.zavod2-games-*; do
+        [ -d "$orphan" ] || continue
+        echo "::warning::В $orphan лежат игры от прерванного деплоя. Вернуть: cp -a $orphan/workspace/. $REPO_DIR/workspace/"
+    done
 }
 
 # Ответ забирается подстановкой, а не трубой в `grep -q`, и это не стиль.
@@ -216,6 +270,7 @@ fi
 cd "$REPO_DIR"
 
 step "Игры на диске"
+warn_about_orphaned_games
 inventory > "$INVENTORY_BEFORE"
 log "найдено игр: $(wc -l < "$INVENTORY_BEFORE")"
 sed 's/^/  · /' "$INVENTORY_BEFORE"

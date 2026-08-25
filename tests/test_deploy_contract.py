@@ -298,3 +298,29 @@ def test_no_pipe_into_a_consumer_that_quits_early():
             after = bare.split("|", 1)[1]
             assert "grep -q" not in after, f"{path.name}:{number} — труба в grep -q"
             assert not re.search(r"\bhead\s+-n?\s*\d", after), f"{path.name}:{number} — труба в head"
+
+
+def test_the_games_are_stashed_somewhere_writable():
+    """Каталог рядом с репозиторием — это /opt, куда деплой писать не может.
+
+    Поймано на мини-ПК: защита сработала и тут же встала с «Отказано в
+    доступе», не уведя ни одной игры.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert '"$REPO_DIR/../' not in script, "рядом с репозиторием писать нельзя"
+    assert "stash_base" in script
+    # Первым в очереди — каталог внутри репозитория: та же файловая система,
+    # значит перенос остаётся переименованием, а не копированием гигабайтов.
+    order = script[script.index("for base in"):]
+    assert order.startswith('for base in "$STATE_DIR" "$HOME" /tmp')
+
+
+def test_the_tracked_showcase_is_resynced_after_restore():
+    """Иначе дерево остаётся грязным ровно там, где споткнётся следующий merge.
+
+    Реестр проектов при этом не трогается: оценки и архив с диска новее любой
+    закоммиченной версии.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert "checkout -q -- workspace/knowledge-showcase" in script
+    assert "checkout -q -- workspace/.factory" not in script
