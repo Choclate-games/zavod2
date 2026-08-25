@@ -18,6 +18,27 @@ playgama:
   version: "2.x"
   knowledge_entrypoint: "knowledge/playgama/bridge_api_reference.md"
 
+  # --- Откуда ставится сам мост -------------------------------------------
+  # В реестре npm лежит апстримовский Playgama Bridge. Студия живёт на форке:
+  # там настоящая авторизация VK, платежи через VKWebAppShowOrderBox, OK поверх
+  # VK Bridge, GameMonetize, Android, свой экран загрузки и интервал
+  # межстраничной в 80 секунд. Пока игры ставили пакет из реестра, ни одна из
+  # этих правок до них не доезжала.
+  #
+  # Имя пакета то же самое: переименование означало бы переписанные импорты в
+  # каждой игре, в базе знаний и в скиллах. Форк собирается тем же именем и
+  # раздаётся тарболом из релиза, репозиторий публичный — токен не нужен.
+  #
+  # Читает это app/bridge_package.py, он же единственный источник адреса для
+  # компилятора промпта, приёмки и экрана настроек. Поднять версию можно и без
+  # правки файла — переменной BRIDGE_PACKAGE_SOURCE.
+  package:
+    name: "@playgama/bridge"
+    source: "https://github.com/EdikN/bridge/releases/download/v2.0.2-fork.1/playgama-bridge-2.0.2-fork.1.tgz"
+    repo: "EdikN/bridge"
+    tag: "v2.0.2-fork.1"
+    docs: "https://github.com/EdikN/bridge/blob/main/docs/npm-package.md"
+
   supported_platforms:
     - yandex
     - vk

@@ -210,6 +210,48 @@ if (!claimsBridge) {
     scan(codeFiles, /BridgeService|PlaygamaService/).slice(0, 4))
 }
 
+/* ── C16: мост ставится из форка студии, а не из реестра npm ────────────── */
+// В реестре npm лежит апстримовский Playgama Bridge. Игры студии обязаны
+// собираться с форком: там настоящая авторизация VK, платежи через
+// VKWebAppShowOrderBox, OK поверх VK Bridge, GameMonetize, Android, свой экран
+// загрузки и интервал межстраничной в 80 секунд. Имя пакета у форка то же
+// самое, поэтому C13 («мост объявлен») зелёный в обоих случаях и подмены не
+// видит — отличается только источник, и смотреть надо на него.
+//
+// Ожидаемый адрес приносит фабрика в `.factory/bridge-source.json`: держать его
+// внутри скрипта значило бы править скрипт на каждый релиз форка.
+{
+  let expected = null
+  try {
+    expected = JSON.parse(read(join(ROOT, '.factory', 'bridge-source.json')) || 'null')
+  } catch { expected = null }
+
+  if (!expected || !expected.name || !expected.source) {
+    skip('C16', 'Фабрика не сказала, откуда ставить мост — проверять нечего')
+  } else if (!Object.prototype.hasOwnProperty.call(deps, expected.name)) {
+    // Мост не объявлен вовсе: это провал C13, и дублировать его тут незачем.
+    skip('C16', `Пакет ${expected.name} в зависимостях не объявлен — см. C13`)
+  } else {
+    const actual = String(deps[expected.name] || '').trim()
+    const remote = /^(https?:|git\+|git:|github:|file:|link:)/.test(actual)
+    if (actual === expected.source) {
+      pass('C16', `Мост ставится из форка студии (${expected.tag || expected.repo || 'релиз'})`)
+    } else if (!remote) {
+      fail('C16',
+        `"${expected.name}": "${actual}" — это установка из реестра npm, то есть апстримовский ` +
+        'мост. Правки форка (авторизация и платежи VK, OK через VK Bridge, GameMonetize, ' +
+        'Android, свой экран загрузки) в игру не попадут. Строка обязана быть такой:\n' +
+        `      "${expected.name}": "${expected.source}"`,
+        [`package.json  "${expected.name}": "${actual}"`])
+    } else {
+      fail('C16',
+        `Мост ставится не из того источника. Ожидается ${expected.tag || 'релиз форка'}:\n` +
+        `      "${expected.name}": "${expected.source}"`,
+        [`package.json  "${expected.name}": "${actual}"`])
+    }
+  }
+}
+
 /* ── C14: имена событий берутся из EVENT_NAME, а не пишутся руками ──────── */
 // Живой случай: игра «Тайга: Экспедиция» подписывалась на паузу и звук так —
 // `platform.on('PAUSE_STATE_CHANGED', onPause)` — со строкой, набранной вручную

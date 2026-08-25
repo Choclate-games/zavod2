@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from app import pkgstore
+from app import bridge_package, pkgstore
 from app.sandbox import ensure_inside_workspace
 from generators.check_spec_script import CHECK_SPEC_MJS
 from generators.smoke_script import SMOKE_MJS
@@ -37,6 +37,8 @@ StopFn = Callable[[], bool]
 FACTORY_DIR = ".factory"
 SPEC_REPORT = "spec-report.json"
 SMOKE_REPORT = "smoke-report.json"
+# Откуда игра обязана ставить мост площадки — читает check-spec.mjs (проверка C16).
+BRIDGE_SOURCE = "bridge-source.json"
 
 # Дымовой запуск сам собирает игру и держит внутри себя ограничение в четыре
 # минуты на браузерную часть. Снаружи ему нужен запас на установку и сборку.
@@ -238,6 +240,32 @@ def install_scripts(project_dir: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     (scripts / "check-spec.mjs").write_text(CHECK_SPEC_MJS, encoding="utf-8")
     (scripts / "smoke.mjs").write_text(SMOKE_MJS, encoding="utf-8")
+    _write_bridge_source(project_dir)
+
+
+def _write_bridge_source(project_dir: Path) -> None:
+    """Сообщает приёмке, откуда игра обязана ставить мост площадки.
+
+    Адрес живёт в конфиге фабрики и меняется с каждым релизом форка, а
+    `check-spec.mjs` уезжает в игру дословно. Передавать через файл дешевле,
+    чем переписывать скрипт на каждый релиз, и заодно видно в проекте, какой
+    именно мост от него ждут.
+    """
+    target = project_dir / FACTORY_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "name": bridge_package.package_name(),
+        "source": bridge_package.package_source(),
+        "repo": bridge_package.repo(),
+        "tag": bridge_package.tag(),
+        "docs": bridge_package.docs_url(),
+    }
+    try:
+        (target / BRIDGE_SOURCE).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def _read_report(project_dir: Path, name: str) -> Optional[dict]:

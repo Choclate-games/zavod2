@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, Callable
 from app import fidelity
+from app import bridge_package
 from app.context import GenerationContext
 from app.logging import log_agent, log_success
 from agents.prompt_compiler import PromptCompilerAgent
@@ -1194,6 +1195,18 @@ A*, boids, character controllers or bloom chains are review defects, not optimis
 ## 1. SDK Overview
 - **SDK**: `{p.sdk_version}`
 - **Supported Portals**: {', '.join(p.supported_platforms)}
+
+### Откуда ставится мост
+Строка в `dependencies` пакета игры — ровно эта:
+
+```json
+{bridge_package.dependency_line()}
+```
+
+Это сборка форка студии. Диапазон версий (`^2.x`, `latest`) поставил бы
+апстримовский пакет из реестра npm: без настоящей авторизации VK, платежей через
+`VKWebAppShowOrderBox`, OK поверх VK Bridge, GameMonetize, Android и экрана
+загрузки студии. Имя пакета то же, импорты в коде не меняются. Проверяет **C16**.
 
 ## 2. Initialization Flow
 {init_md if init_md else "Standard bridge.initialize() bootstrap flow."}
