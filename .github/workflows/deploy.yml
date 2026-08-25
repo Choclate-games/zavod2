@@ -109,14 +109,49 @@ jobs:
         run: |
           field() { grep -m1 "^$1=" /deploy/status 2>/dev/null | cut -d= -f2- || true; }
 
+          # Лог уже шёл сюда строками по мере появления; этот блок нужен для
+          # случая, когда деплой упал раньше, чем успел что-то написать.
           show_log() {
-            echo "::group::Лог деплоя на хосте"
-            tail -n 200 /deploy/last.log 2>/dev/null || echo "(лога нет — деплой не начинался)"
+            [ -s /deploy/last.log ] || { echo "(лога нет — деплой не начинался)"; return 0; }
+            echo "::group::Полный лог деплоя на хосте"
+            tail -n 300 /deploy/last.log
             echo "::endgroup::"
+          }
+
+          # Лог деплоя пишется на хосте живьём и лежит в том же каталоге.
+          # Показывать его по факту завершения — значит молчать пять минут, а
+          # потом вывалить простыню; поэтому он транслируется по мере
+          # появления строк, как будто деплой идёт прямо здесь.
+          printed=0
+          relay_log() {
+            [ -f /deploy/last.log ] || return 0
+            total="$(wc -l < /deploy/last.log 2>/dev/null || echo 0)"
+            # Новый деплой обрезает лог: если строк стало меньше — начинаем сначала.
+            [ "$total" -lt "$printed" ] && printed=0
+            if [ "$total" -gt "$printed" ]; then
+              sed -n "$((printed + 1)),${total}p" /deploy/last.log
+              printed="$total"
+            fi
+          }
+
+          # Шаг, о котором хост объявил сам. Нужен там, где лог молчит: docker
+          # тянет слои минутами, не печатая ни строки, и ожидание выглядит
+          # зависшим.
+          last_step=""
+          relay_step() {
+            [ -f /deploy/step ] || return 0
+            current="$(cut -f1 /deploy/step 2>/dev/null)"
+            if [ -n "$current" ] && [ "$current" != "$last_step" ]; then
+              echo "· шаг: $current"
+              last_step="$current"
+            fi
           }
 
           deadline=$(( $(date +%s) + WAIT_SECONDS ))
           while [ "$(date +%s)" -lt "$deadline" ]; do
+            relay_log
+            relay_step
+
             sha="$(field sha)"; outcome="$(field outcome)"
             started="$(field started)"; step="$(field step)"; code="$(field code)"
 
@@ -128,18 +163,24 @@ jobs:
             # и один прогон закрывает сразу несколько.
             if [ -n "${started:-}" ] && [ "${started:-0}" -ge "${TRIGGERED_AT:-0}" ] 2>/dev/null; then
               if [ "$outcome" = "ok" ]; then
+                relay_log
                 echo "✅ Фабрика обновлена, версия $sha"
                 exit 0
               fi
               if [ "$outcome" = "fail" ]; then
+                relay_log
                 echo "::error::Деплой упал на шаге «$step» (код $code). Версия на машине: $sha"
                 show_log
                 exit 1
               fi
             fi
-            sleep 10
+            # Три секунды, а не десять: опрос — это чтение двух коротких
+            # файлов, зато лог хоста идёт сюда почти в реальном времени, а не
+            # копится и вываливается пачкой.
+            sleep 3
           done
 
+          relay_log
           echo "::error::Деплой не отчитался за $WAIT_SECONDS с. Триггер записан, но systemd на хосте его не отработал — проверьте: journalctl -u zavod2-deploy"
           show_log
           exit 1

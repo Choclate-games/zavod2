@@ -25,6 +25,7 @@ LOCK="/tmp/zavod2-deploy.lock"
 # «деплой упал» — сообщение ни о чём.
 STATE_DIR="${STATE_DIR:-$REPO_DIR/.deploy}"
 STATUS="$STATE_DIR/status"
+STEP_FILE="$STATE_DIR/step"
 LOG_FILE="$STATE_DIR/last.log"
 STARTED_AT="$(date +%s)"
 STEP="старт"
@@ -35,6 +36,17 @@ mkdir -p "$STATE_DIR"
 exec > >(tee "$LOG_FILE") 2>&1
 
 log() { echo "[deploy $(date '+%H:%M:%S')] $*"; }
+
+# Текущий шаг — отдельным файлом, а не только в итоговом статусе.
+#
+# Итог пишется на выходе, то есть через минуты. До него тот, кто ждёт деплой,
+# не знает даже, дошло ли дело до сборки образа: лог может молчать, пока docker
+# тянет слои. Один короткий файл превращает ожидание в наблюдение.
+step() {
+    STEP="$1"
+    printf '%s\t%s\n' "$STEP" "$(date +%s)" > "$STEP_FILE.tmp" 2>/dev/null || return 0
+    mv -f "$STEP_FILE.tmp" "$STEP_FILE" 2>/dev/null || true
+}
 
 # Исход пишется на ЛЮБОМ выходе, включая падение по `set -e` и по сигналу.
 # Запись только на успешном пути означала бы, что упавший деплой неотличим от
@@ -56,6 +68,7 @@ started=$STARTED_AT
 finished=$(date +%s)
 EOF
     mv -f "$STATUS.tmp" "$STATUS"
+    rm -f "$STEP_FILE" 2>/dev/null || true
 }
 
 # Два деплоя подряд (быстрые пуши) не должны пересечься на docker build.
@@ -65,7 +78,7 @@ EOF
 # следующего пуша вообще. Ожидание безопасно — цикл в конце всё равно
 # проверит, не сдвинулся ли origin/main за это время.
 exec 9>"$LOCK"
-STEP="ожидание предыдущего деплоя"
+step "ожидание предыдущего деплоя"
 if ! flock -w 1800 9; then
     log "ОШИБКА: предыдущий деплой не закончился за полчаса — выхожу"
     exit 1
@@ -120,11 +133,11 @@ stash_games() {
 }
 
 deploy_once() {
-STEP="git fetch"
+step "git fetch"
 log "забираю изменения"
 git fetch --prune origin
 
-STEP="перенос игр из git"
+step "перенос игр из git"
 if merge_would_delete_games; then
     log "входящий коммит снимает игры с учёта git"
     stash_games
@@ -133,7 +146,7 @@ fi
 # Именно --ff-only, а не reset --hard. В workspace/ лежат сгенерированные игры,
 # они трекаются git-ом (правило репозитория), и часть из них в момент деплоя
 # может быть ещё не закоммичена. reset --hard стёр бы их молча.
-STEP="git merge --ff-only"
+step "git merge --ff-only"
 if ! git merge --ff-only origin/main; then
     log "ОШИБКА: fast-forward не прошёл — в рабочей копии есть свои коммиты."
     log "Разбери руками — насильно перезаписывать я не буду:"
@@ -152,11 +165,11 @@ log "версия: $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 # раннере и выполняется. Перезапуск контейнера убил бы собственный job, и
 # GitHub показал бы упавшую сборку при удачном деплое. Раннер обновляется
 # руками: docker compose up -d --build runner
-STEP="docker compose build"
+step "docker compose build"
 log "собираю образ"
 docker compose build factory
 
-STEP="docker compose up"
+step "docker compose up"
 log "перезапускаю фабрику"
 docker compose up -d --no-deps factory
 
@@ -189,7 +202,7 @@ for attempt in 1 2 3; do
     log "пока собирал, прилетел ещё пуш — иду на круг $((attempt + 1))"
 done
 
-STEP="готово"
+step "готово"
 # tee из `exec` — отдельный процесс, и без паузы последние строки лога могут
 # не успеть долететь до файла раньше, чем job его прочитает.
 sync || true
