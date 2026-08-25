@@ -79,7 +79,61 @@ jobs:
         # Единственное, что job делает с хостом. Дальше systemd-юнит
         # zavod2-deploy.path видит запись и запускает docker/deploy.sh уже вне
         # раннера — поэтому /var/run/docker.sock раннеру не нужен.
+        id: trigger
         run: |
           mkdir -p /deploy
+          # Метку времени запоминаем ДО записи триггера: по ней следующий шаг
+          # отличает исход своего деплоя от исхода предыдущего, оставшегося в
+          # файле с прошлого пуша.
+          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
           printf '%s %s\n' "$GITHUB_SHA" "$(date -Is)" > /deploy/trigger
           echo "Деплой запрошен для $GITHUB_SHA"
+
+      - name: Дождаться деплоя
+        # Без этого шага зелёная галочка означала бы «файл записан», а не
+        # «фабрика обновилась»: деплой идёт на хосте, вне GitHub, и его падение
+        # (например, на `git merge --ff-only`) до Actions не доходило вообще.
+        # Живой случай: мерж уехал в main, галочка зелёная, на экране фабрики
+        # полтора часа висела предыдущая версия.
+        env:
+          TRIGGERED_AT: ${{ steps.trigger.outputs.at }}
+          # Сборка образа с нуля на четырёх ядрах — минуты; плюс деплой может
+          # ждать освобождения лока от предыдущего (там потолок в полчаса).
+          WAIT_SECONDS: '2700'
+        run: |
+          field() { grep -m1 "^$1=" /deploy/status 2>/dev/null | cut -d= -f2- || true; }
+
+          show_log() {
+            echo "::group::Лог деплоя на хосте"
+            tail -n 200 /deploy/last.log 2>/dev/null || echo "(лога нет — деплой не начинался)"
+            echo "::endgroup::"
+          }
+
+          deadline=$(( $(date +%s) + WAIT_SECONDS ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            sha="$(field sha)"; outcome="$(field outcome)"
+            started="$(field started)"; step="$(field step)"; code="$(field code)"
+
+            # Свой деплой узнаём двумя способами. Первый — он задеплоил ровно
+            # наш коммит. Второй — успешный деплой, стартовавший после нашего
+            # триггера: он делал `git fetch` уже после нашего пуша, значит наш
+            # коммит в него вошёл (в main только fast-forward). Второй случай
+            # реальный: deploy.sh догоняет пуши, прилетевшие во время сборки,
+            # и один прогон закрывает сразу несколько.
+            if [ -n "${started:-}" ] && [ "${started:-0}" -ge "${TRIGGERED_AT:-0}" ] 2>/dev/null; then
+              if [ "$outcome" = "ok" ]; then
+                echo "✅ Фабрика обновлена, версия $sha"
+                exit 0
+              fi
+              if [ "$outcome" = "fail" ]; then
+                echo "::error::Деплой упал на шаге «$step» (код $code). Версия на машине: $sha"
+                show_log
+                exit 1
+              fi
+            fi
+            sleep 10
+          done
+
+          echo "::error::Деплой не отчитался за $WAIT_SECONDS с. Триггер записан, но systemd на хосте его не отработал — проверьте: journalctl -u zavod2-deploy"
+          show_log
+          exit 1
