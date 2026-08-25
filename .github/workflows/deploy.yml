@@ -106,6 +106,8 @@ jobs:
           # Сборка образа с нуля на четырёх ядрах — минуты; плюс деплой может
           # ждать освобождения лока от предыдущего (там потолок в полчаса).
           WAIT_SECONDS: '2700'
+          # Через сколько молчание считается диагнозом, а не занятостью.
+          PROBE_SECONDS: '150'
         run: |
           field() { grep -m1 "^$1=" /deploy/status 2>/dev/null | cut -d= -f2- || true; }
 
@@ -147,10 +149,41 @@ jobs:
             fi
           }
 
-          deadline=$(( $(date +%s) + WAIT_SECONDS ))
+          began=$(date +%s)
+          beat=0
+          echo "Жду деплой на хосте. Всё, что он напишет, появится здесь по ходу дела."
+
+          deadline=$(( began + WAIT_SECONDS ))
           while [ "$(date +%s)" -lt "$deadline" ]; do
             relay_log
             relay_step
+
+            now=$(date +%s)
+            waited=$(( now - began ))
+
+            # Молчание диагностируется сразу, а не выдерживается.
+            #
+            # Новый deploy.sh создаёт свой лог первой же строкой, ещё до
+            # git fetch. Значит отсутствие файла вовсе — это не «хост занят», а
+            # «на хосте deploy.sh старее main»: он приезжает самим деплоем, и
+            # первый прогон после его появления идёт по старому скрипту.
+            # Ждать в этом случае нечего — ни через минуту, ни через час.
+            if [ ! -f /deploy/last.log ] && [ "$waited" -ge "$PROBE_SECONDS" ]; then
+              echo "::error::Хост не отчитывается: за $waited с не появилось даже /deploy/last.log."
+              echo "::error::Скорее всего на мини-ПК лежит docker/deploy.sh старее main — он приезжает самим деплоем, и первый прогон после его появления идёт по старому скрипту."
+              echo "::error::Проверить: journalctl -u zavod2-deploy -n 80 · cd /opt/zavod2 && git log -1 --oneline"
+              echo "::error::Разово догнать: sudo systemctl start zavod2-deploy"
+              exit 1
+            fi
+
+            # Раз в полминуты — строка о том, что происходит. Пустой экран не
+            # отличается от повисшего прогона, и именно так это и выглядело.
+            if [ $(( waited - beat )) -ge 30 ]; then
+              beat=$waited
+              echo "· ждём ${waited} с · лог: $([ -f /deploy/last.log ] && echo есть || echo нет)" \
+                   "· шаг: $([ -f /deploy/step ] && cut -f1 /deploy/step || echo —)" \
+                   "· исход: $([ -f /deploy/status ] && field outcome || echo нет)"
+            fi
 
             sha="$(field sha)"; outcome="$(field outcome)"
             started="$(field started)"; step="$(field step)"; code="$(field code)"

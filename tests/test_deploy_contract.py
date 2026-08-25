@@ -115,3 +115,24 @@ def test_the_wait_shows_the_deploy_while_it_runs():
     assert "relay_step" in workflow, "шаг нужен там, где лог молчит"
     assert "/deploy/step" in workflow
     assert "step()" in SCRIPT.read_text(encoding="utf-8")
+
+
+def test_silence_is_diagnosed_not_endured():
+    """Пустой экран не отличается от повисшего прогона — и выглядел так же.
+
+    Новый deploy.sh создаёт лог первой же строкой, ещё до `git fetch`. Значит
+    отсутствие файла вовсе — это не «хост занят», а «на хосте скрипт старее
+    main», и ждать нечего ни минуту, ни час.
+    """
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "PROBE_SECONDS" in workflow
+    assert "не появилось даже /deploy/last.log" in workflow
+    assert "journalctl -u zavod2-deploy" in workflow, "сказано, куда смотреть"
+    assert "systemctl start zavod2-deploy" in workflow, "сказано, чем починить"
+
+
+def test_the_wait_reports_itself_periodically():
+    """Раз в полминуты — строка о том, что происходит, даже когда тихо."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "· ждём" in workflow
+    assert "waited - beat" in workflow
