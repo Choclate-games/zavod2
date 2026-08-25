@@ -22,6 +22,12 @@ DEVLOG_NAME = "DEVLOG.md"
 CHANGELOG_NAME = "CHANGELOG.md"
 AGENTS_NAME = "AGENTS.md"
 
+# Демо-стенд лежит в workspace рядом с играми, но игрой не является: в витрине
+# и в любых списках «последних проектов» его не показывают. Имя вынесено сюда,
+# потому что отличать стенд от игры приходится и витрине (`web/service.py`), и
+# сводке последнего (`app/recent.py`), и каталогу готового кода (`library.py`).
+DEMO_SLUG = "knowledge-showcase"
+
 
 class SandboxViolation(RuntimeError):
     """Путь выходит за пределы рабочего пространства."""
@@ -144,10 +150,10 @@ def list_projects() -> list[Path]:
             if (p.is_dir() and not p.name.startswith(".")
                     and p.name not in known and (p / "GAME_DATA.yaml").exists()):
                 projects.append(p)
-    return sorted(projects, key=_sort_mtime, reverse=True)
+    return sorted(projects, key=touched_at, reverse=True)
 
 
-def _sort_mtime(path: Path) -> float:
+def touched_at(path: Path) -> float:
     """mtime каталога, а для упакованного проекта — mtime его архива."""
     try:
         return path.stat().st_mtime

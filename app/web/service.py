@@ -34,7 +34,7 @@ import yaml
 # libyaml на C, на порядок быстрее; используем его, если он доступен.
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
-from app import acceptance, chat_store, library, notify, project_meta, sandbox, snapshots, uploads
+from app import acceptance, chat_store, library, notify, project_meta, recent, sandbox, snapshots, uploads
 from app import archive, builds, db, gate_stats, pkgstore, sysinfo
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
@@ -85,7 +85,9 @@ EFFORT_AUTO = "auto (не передавать)"
 # кодовый агент до него не дотянется), но в списке проектов его быть не должно:
 # карточка «knowledge-showcase» неотличима от выпущенной игры, её путали с
 # проектом и открывали как «ещё одну игру». У стенда своя кнопка в навигации.
-DEMO_SLUG = "knowledge-showcase"
+# Само имя живёт в sandbox: отличать стенд от игры приходится и здесь, и в
+# сводке последнего (`app/recent.py`).
+DEMO_SLUG = sandbox.DEMO_SLUG
 
 AGENT_LABELS: Dict[str, str] = {
     "agy": "⚡ agy (Antigravity CLI)",
@@ -1177,6 +1179,23 @@ class FactoryService:
             })
         projects.sort(key=lambda p: (p["created_at"], p["updated_ts"]), reverse=True)
         return projects
+
+    def recent(self, projects: int = recent.DEFAULT_LIMIT,
+               chats: int = recent.DEFAULT_LIMIT, slug: str = "",
+               order: str = recent.ORDER_CREATED) -> Dict[str, Any]:
+        """
+        Сводка последнего: свежие игры и свежие беседы одним ответом.
+
+        Считает её `app/recent.py` по песочнице; веб добавляет к беседам
+        единственное, чего на диске нет, — работает ли агент в этом чате прямо
+        сейчас. Витрину (`list_projects`) это не заменяет: там приёмка, расход
+        токенов и превью, здесь — ответ на вопрос «над чем работали».
+        """
+        data = recent.snapshot(projects=projects, chats=chats,
+                               slug=slug or None, order=order)
+        for row in data["chats"]:
+            row["running"] = self.chat_jobs.is_running(row["id"])
+        return data
 
     @staticmethod
     def _gate_card(slug: str) -> Dict[str, Any]:
