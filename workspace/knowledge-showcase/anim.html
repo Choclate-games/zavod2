@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Витрина анимаций бойца</title>
+    <style>
+      body { margin: 0; background: #11131a; color: #dfe4ee; font: 13px/1.4 ui-monospace, monospace; }
+      #wrap { position: relative; display: inline-block; }
+      #labels { position: absolute; inset: 0; pointer-events: none; }
+      .label { position: absolute; left: 8px; color: #ffcf5c; text-shadow: 0 1px 3px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap"><canvas id="sheet"></canvas><div id="labels"></div></div>
+    <script type="module" src="/src/animViewer.ts"></script>
+  </body>
+</html>
