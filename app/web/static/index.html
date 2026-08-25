@@ -453,6 +453,95 @@
         </div>
 
         <div class="settings-card" style="margin-top:14px">
+          <h3>🎮 Прогон на площадке Яндекса</h3>
+          <div class="dim">
+            Последняя фаза сборки: игру открывают так, как её откроет игрок — с SDK Яндекса,
+            в полутора десятках разрешений, с чтением <code>bridge.storage</code> до и после
+            перезагрузки. Находки возвращаются кодовому агенту задачей на починку.
+            Тестер фабрика ставит себе сама в <code id="gt-dir" class="mono"></code> при первом прогоне.
+          </div>
+
+          <label class="check"><input type="checkbox" id="gt-enabled" /> Гонять прогон на площадке</label>
+
+          <div class="row">
+            <label class="field">Режим Яндекса<select id="gt-mode"></select></label>
+            <label class="field">Разрешения<select id="gt-viewports">
+              <option value="smoke">smoke — четыре ключевых</option>
+              <option value="default">default — вся матрица (дольше)</option>
+            </select></label>
+            <label class="field">Ориентации<select id="gt-orientation">
+              <option value="both">обе</option>
+              <option value="landscape">только альбомная</option>
+              <option value="portrait">только портретная</option>
+            </select></label>
+          </div>
+          <div class="dim">
+            <b>auto</b> — <code>draft</code>, когда у игры привязан черновик и есть вход в аккаунт,
+            иначе <code>dev</code>: SDK отдаёт dev-адаптер, вход не нужен, а вёрстка, сохранения,
+            локали и консоль проверяются те же самые.
+          </div>
+
+          <div class="row">
+            <label class="field">Валить приёмку начиная с<select id="gt-block-on"></select></label>
+            <label class="field">Разрешений одновременно<input type="number" id="gt-jobs" min="1" max="16" /></label>
+            <label class="field">Играть перед проверкой сейвов, мс<input type="number" id="gt-play-ms" min="0" step="5000" /></label>
+            <label class="field">Потолок прогона, с<input type="number" id="gt-timeout" min="300" step="300" /></label>
+          </div>
+
+          <div class="small muted" style="margin-top:8px">Что проверять</div>
+          <div class="row" id="gt-checks"></div>
+
+          <div class="small muted" style="margin-top:10px">Вердикт выносит модель</div>
+          <label class="check"><input type="checkbox" id="gt-llm-enabled" /> Разбирать находки моделью</label>
+          <div class="row">
+            <label class="field">Провайдер<select id="gt-llm-provider"></select></label>
+            <label class="field">Модель<input type="text" id="gt-llm-model" placeholder="пусто — по умолчанию для провайдера" /></label>
+          </div>
+          <div class="row">
+            <label class="field">Переменная с ключом<input type="text" id="gt-llm-key-env" placeholder="LLM_API_KEY" /></label>
+            <label class="field">Ключ<input type="password" id="gt-llm-key" placeholder="ключ модели" /></label>
+            <label class="field">Свой адрес API<input type="text" id="gt-llm-base-url" placeholder="пусто — адрес провайдера" /></label>
+          </div>
+
+          <div class="small muted" style="margin-top:10px">Откуда берётся сам тестер</div>
+          <div class="row">
+            <label class="field">Репозиторий<input type="text" id="gt-repo" placeholder="Choclate-games/AI_Tester" /></label>
+            <label class="field">Ветка<input type="text" id="gt-ref" placeholder="main" /></label>
+            <label class="field">Токен GitHub<input type="password" id="gt-token" placeholder="пусто — берётся ZAVOD_KNOWLEDGE_TOKEN" /></label>
+          </div>
+          <label class="check"><input type="checkbox" id="gt-update" /> Обновлять тестер перед каждым прогоном</label>
+          <label class="check"><input type="checkbox" id="gt-install-browsers" /> Ставить Chromium для тестера</label>
+
+          <div class="small muted" style="margin-top:10px">Вход в аккаунт Яндекса</div>
+          <div class="dim">
+            Нужен режиму <code>draft</code>: без входа Яндекс отдаёт черновик гостю — игрок не
+            авторизован, облачного хранилища нет, покупки не начинаются. Окно браузера
+            откроется <b>на той машине, где работает фабрика</b>: автоматизировать вход нельзя,
+            там капча и двухфакторка.
+          </div>
+          <div class="row">
+            <button class="btn small" id="btn-yandex-login">🔐 Войти в Яндекс</button>
+            <button class="btn small" id="btn-yandex-logout">Забыть сессию</button>
+            <span class="small" id="yandex-msg"></span>
+          </div>
+          <div class="small" id="yandex-session"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🌉 Мост площадки в играх</h3>
+          <div class="dim">
+            В реестре npm лежит апстримовский Playgama Bridge. Игры студии собираются с форком:
+            настоящая авторизация VK, платежи через <code>VKWebAppShowOrderBox</code>, OK поверх
+            VK Bridge, GameMonetize, Android, свой экран загрузки. Имя пакета то же самое —
+            меняется только адрес установки, импорты в играх не меняются.
+          </div>
+          <label class="field">Адрес тарбола релиза
+            <input type="text" id="set-bridge-source" placeholder="https://github.com/EdikN/bridge/releases/download/..." />
+          </label>
+          <div class="small" id="bridge-hint"></div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
           <h3>📚 База знаний в готовой игре</h3>
           <div class="dim">
             Пакет игры носит манифест и <code>scripts/fetch-knowledge.mjs</code>, а не копии документов:

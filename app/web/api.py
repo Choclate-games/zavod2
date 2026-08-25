@@ -887,6 +887,28 @@ async def save_settings(request: Request) -> Dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+# -- Вход в аккаунт Яндекса --------------------------------------------------
+#
+# Окно браузера открывается на машине, где крутится фабрика: автоматизировать
+# вход нельзя (капча, СМС, двухфакторка), а показать его через веб-интерфейс
+# на другом устройстве — тем более. Поэтому запрос только запускает вход и
+# сразу возвращается, а ход дела читается опросом состояния.
+
+@app.get("/api/yandex/status")
+def yandex_status() -> Dict[str, Any]:
+    return service.yandex_state()
+
+
+@app.post("/api/yandex/login")
+def yandex_login() -> Dict[str, Any]:
+    return service.yandex_login()
+
+
+@app.post("/api/yandex/logout")
+def yandex_logout() -> Dict[str, Any]:
+    return service.yandex_logout()
+
+
 @app.post("/api/settings/notifications")
 async def set_notifications(request: Request) -> Dict[str, Any]:
     payload = await _body(request)

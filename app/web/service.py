@@ -35,7 +35,7 @@ import yaml
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 from app import acceptance, chat_store, library, notify, project_meta, recent, sandbox, snapshots, uploads
-from app import archive, builds, db, gate_stats, pkgstore, sysinfo
+from app import archive, bridge_package, builds, db, gametest, gate_stats, pkgstore, sysinfo, yandex_auth
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
@@ -3295,6 +3295,52 @@ class FactoryService:
                 "ref": config.knowledge_ref or "main",
                 "token": config.knowledge_token or "",
             },
+            "gametest": self._gametest_payload(),
+            # Откуда игры ставят мост площадки. В реестре npm лежит апстримовский
+            # пакет; студия живёт на форке, и адрес его релиза виден здесь, а не
+            # только в yaml.
+            "bridge": {
+                "name": bridge_package.package_name(),
+                "source": bridge_package.package_source(),
+                "repo": bridge_package.repo(),
+                "tag": bridge_package.tag(),
+                "docs": bridge_package.docs_url(),
+            },
+        }
+
+    def _gametest_payload(self) -> Dict[str, Any]:
+        """Настройки прогона на площадке и состояние входа в аккаунт."""
+        cfg = gametest.settings()
+        return {
+            "enabled": cfg.enabled,
+            "mode": cfg.mode,
+            "modes": ["auto", "dev", "draft"],
+            "viewports": cfg.viewports,
+            "orientation": cfg.orientation,
+            "block_on": cfg.block_on,
+            "severities": ["blocker", "major", "minor"],
+            "jobs": cfg.jobs,
+            "play_ms": cfg.play_ms,
+            "timeout": cfg.timeout,
+            "profile": cfg.profile,
+            "update": cfg.update,
+            "install_browsers": cfg.install_browsers,
+            "repo": cfg.repo,
+            "ref": cfg.ref,
+            "dir": str(cfg.tool_dir),
+            "token": os.getenv("GAMETEST_TOKEN", ""),
+            "checks": dict(cfg.checks),
+            "llm": {
+                "enabled": cfg.llm_enabled,
+                "provider": cfg.llm_provider,
+                "providers": ["opencode", "anthropic", "openai", "ollama"],
+                "model": cfg.llm_model,
+                "key_env": cfg.llm_key_env,
+                "key": os.getenv(cfg.llm_key_env, ""),
+                "base_url": cfg.llm_base_url,
+            },
+            "session": yandex_auth.session(cfg),
+            "login": yandex_auth.state(),
         }
 
     def save_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -3381,6 +3427,15 @@ class FactoryService:
             config.knowledge_token = token
             env_lines["ZAVOD_KNOWLEDGE_TOKEN"] = token
 
+        self._save_gametest(payload.get("gametest") or {}, env_lines)
+
+        bridge_cfg = payload.get("bridge") or {}
+        if "source" in bridge_cfg:
+            source = (bridge_cfg.get("source") or "").strip()
+            env_lines["BRIDGE_PACKAGE_SOURCE"] = source
+            os.environ["BRIDGE_PACKAGE_SOURCE"] = source
+            bridge_package.reset_cache()
+
         for key, value in env_lines.items():
             os.environ[key] = value
 
@@ -3390,6 +3445,93 @@ class FactoryService:
 
         bus.publish("settings.changed")
         return {"status": "success", "message": "✅ Настройки сохранены в .env!"}
+
+    def _save_gametest(self, block: Dict[str, Any], env_lines: Dict[str, str]) -> None:
+        """Настройки прогона на площадке — в `.env`.
+
+        Отдельным методом, а не строчками в общем сохранении: полей полтора
+        десятка, и в общем списке они тонут.
+        """
+        if not block:
+            return
+
+        def flag(name: str, key: str) -> None:
+            if name in block:
+                env_lines[key] = "1" if block.get(name) else "0"
+
+        def text(name: str, key: str, allowed: Optional[List[str]] = None,
+                 default: str = "") -> None:
+            if name not in block:
+                return
+            value = str(block.get(name) or "").strip()
+            if allowed and value not in allowed:
+                value = default
+            env_lines[key] = value
+
+        def number(name: str, key: str, low: int, high: int) -> None:
+            if name not in block:
+                return
+            try:
+                value = int(block.get(name))
+            except (TypeError, ValueError):
+                return
+            env_lines[key] = str(max(low, min(high, value)))
+
+        flag("enabled", "GAMETEST_ENABLED")
+        flag("update", "GAMETEST_UPDATE")
+        flag("install_browsers", "GAMETEST_INSTALL_BROWSERS")
+        text("mode", "GAMETEST_YANDEX_MODE", ["auto", "dev", "draft"], "auto")
+        text("viewports", "GAMETEST_VIEWPORTS", ["smoke", "default"], "smoke")
+        text("orientation", "GAMETEST_ORIENTATION", ["both", "landscape", "portrait"], "both")
+        text("block_on", "GAMETEST_BLOCK_ON", ["blocker", "major", "minor"], "major")
+        text("profile", "GAMETEST_PROFILE")
+        text("repo", "GAMETEST_REPO")
+        text("ref", "GAMETEST_REF")
+        text("dir", "GAMETEST_DIR")
+        text("token", "GAMETEST_TOKEN")
+        number("jobs", "GAMETEST_JOBS", 1, 16)
+        # Ноль здесь осмыслен: «не играть перед проверкой сохранений».
+        number("play_ms", "GAMETEST_PLAY_MS", 0, 600_000)
+        number("timeout", "GAMETEST_TIMEOUT", 300, 21_600)
+
+        checks = block.get("checks")
+        if isinstance(checks, dict):
+            enabled = sorted(name for name, on in checks.items() if on)
+            # Пустая строка означала бы «набор по умолчанию», а человек снял все
+            # галочки осознанно. Поэтому выключенный набор пишется явным словом.
+            env_lines["GAMETEST_CHECKS"] = ",".join(enabled) if enabled else "none"
+
+        llm = block.get("llm") or {}
+        if "enabled" in llm:
+            env_lines["GAMETEST_LLM_ENABLED"] = "1" if llm.get("enabled") else "0"
+        if "provider" in llm:
+            provider = str(llm.get("provider") or "").strip()
+            env_lines["GAMETEST_LLM_PROVIDER"] = provider if provider in (
+                "opencode", "anthropic", "openai", "ollama") else "opencode"
+        if "model" in llm:
+            env_lines["GAMETEST_LLM_MODEL"] = str(llm.get("model") or "").strip()
+        if "base_url" in llm:
+            env_lines["GAMETEST_LLM_BASE_URL"] = str(llm.get("base_url") or "").strip()
+        key_env = str(llm.get("key_env") or "").strip() or "LLM_API_KEY"
+        env_lines["GAMETEST_LLM_KEY_ENV"] = key_env
+        if "key" in llm:
+            env_lines[key_env] = str(llm.get("key") or "").strip()
+
+    # ------------------------------------------------------------- вход в Яндекс
+
+    def yandex_state(self) -> Dict[str, Any]:
+        cfg = gametest.settings()
+        return {"session": yandex_auth.session(cfg), "login": yandex_auth.state()}
+
+    def yandex_login(self) -> Dict[str, Any]:
+        result = yandex_auth.start_login()
+        result["session"] = yandex_auth.session()
+        return result
+
+    def yandex_logout(self) -> Dict[str, Any]:
+        result = yandex_auth.forget()
+        result["session"] = yandex_auth.session()
+        return result
 
     def persist_env_value(self, key: str, value: str) -> None:
         """Точечно дописывает один ключ в .env, не трогая остальные настройки."""
