@@ -326,7 +326,50 @@ def ensure_tool(cfg: Settings, on_log: LogFn = lambda _line: None,
             except OSError:
                 pass
 
+    lacking = missing_features(target)
+    if lacking:
+        return None, (
+            "установленный тестер слишком старый — в нём нет: "
+            + "; ".join(lacking)
+            + f". Обновите его (GAMETEST_UPDATE=1) или укажите ветку GAMETEST_REF "
+              f"(сейчас {cfg.ref}); каталог тестера — {target}"
+        )
+
     return target, ""
+
+
+def _cli(tool_dir: Path, args: List[str], timeout: int = 120) -> tuple[int, str]:
+    """Разовый вызов CLI тестера с коротким ответом."""
+    try:
+        proc = subprocess.run(
+            [_npx(), "tsx", "src/cli.ts", *args],
+            cwd=str(tool_dir), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return -1, ""
+    return proc.returncode, f"{proc.stdout or ''}{proc.stderr or ''}"
+
+
+def missing_features(tool_dir: Path) -> List[str]:
+    """Чего не хватает установленному тестеру, чтобы им управляла фабрика.
+
+    Тестер живёт своим репозиторием и обновляется отдельно. Запуск без человека
+    у терминала и машинный итог прогона появились в нём не сразу, и старая
+    версия отвечает на них не отказом, а «unknown command» — прогон при этом
+    выглядит сорвавшимся без объяснимой причины. Проверить дешевле, чем потом
+    разбираться по хвосту лога.
+    """
+    missing: List[str] = []
+    _code, root = _cli(tool_dir, ["--help"])
+    if "auth-status" not in root:
+        missing.append("команда `auth-status` (состояние входа в аккаунт)")
+    _code, run_help = _cli(tool_dir, ["run", "--help"])
+    if "--run-json" not in run_help:
+        missing.append("флаг `run --run-json` (машинный итог прогона)")
+    if "--no-prompt" not in _cli(tool_dir, ["auth", "--help"])[1]:
+        missing.append("флаг `auth --no-prompt` (вход без терминала)")
+    return missing
 
 
 def session_status(cfg: Settings, tool_dir: Path,

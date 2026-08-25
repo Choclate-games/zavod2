@@ -12,6 +12,7 @@
 недоступный тестер не красит игру в красный.
 """
 import json
+from pathlib import Path
 
 from app import gametest
 from app.acceptance import GateCheck, GateReport, checks_from_findings, run_gate
@@ -125,6 +126,170 @@ def test_run_config_points_at_the_built_game(tmp_path):
     assert config["llm"]["provider"] == cfg.llm_provider
     # Отчёты прогона лежат рядом с игрой: иначе их не найти, когда игра уедет в архив.
     assert str(tmp_path) in str(config["output"]["dir"])
+
+
+# --------------------------------------------------------------- вызов тестера
+
+def _fake_tester(project, *, findings, counts=None, checks=None):
+    """Подменяет запуск тестера: он «отработал» и оставил отчёт."""
+    def fake_run(cmd, cwd, on_log, stop_check, timeout, env=None):
+        run_json = Path(cmd[cmd.index("--run-json") + 1])
+        run_dir = run_json.parent / "run-1"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        findings_path = run_dir / "findings.json"
+        findings_path.write_text(json.dumps({
+            "summary": {"counts": counts or {"blocker": 0, "major": 1, "minor": 0, "info": 0},
+                        "checks": checks or []},
+            "findings": findings,
+        }, ensure_ascii=False), encoding="utf-8")
+        run_json.write_text(json.dumps({
+            "runDir": str(run_dir),
+            "findings": str(findings_path),
+            "reportHtml": str(run_dir / "report.html"),
+            "targets": ["yandex"],
+            "counts": counts or {"blocker": 0, "major": 1, "minor": 0, "info": 0},
+        }), encoding="utf-8")
+        return 1, ""      # единица — это найденный блокер, а не сорванный прогон
+    return fake_run
+
+
+def test_the_run_is_read_from_the_report_not_from_the_exit_code(monkeypatch, tmp_path):
+    """Код возврата единица у тестера означает найденный блокер.
+
+    Считать его сорвавшимся прогоном значило бы терять весь отчёт ровно тогда,
+    когда он важнее всего. Отличает их наличие итогового файла.
+    """
+    from app.config import config
+    project = config.workspace_dir / "reads-report"
+    (project / "dist").mkdir(parents=True)
+    (project / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(gametest, "session_status", lambda *a, **k: None)
+    monkeypatch.setattr(gametest, "_run", _fake_tester(project, findings=[{
+        "id": "f1", "severity": "major", "category": "ui",
+        "title": "Элемент шире экрана", "description": "скролл 40 px",
+        "target": "yandex", "viewport": "extreme-320x568",
+    }]))
+
+    run = gametest.run(project, cfg=cfg)
+    assert run.ran is True
+    assert run.blockers == []
+    assert run.mode == "dev", "без черновика и входа остаётся dev"
+    assert len(run.findings) == 1
+    assert run.findings[0].where == "yandex · extreme-320x568"
+    assert run.report_html.endswith("report.html")
+
+
+def test_the_run_command_carries_the_config_and_the_target(monkeypatch, tmp_path):
+    """Конфиг прогона лежит рядом с игрой: видно, чем её проверяли."""
+    from app.config import config
+    project = config.workspace_dir / "command"
+    (project / "dist").mkdir(parents=True)
+    (project / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    seen = {}
+    inner = _fake_tester(project, findings=[])
+
+    def spy(cmd, cwd, on_log, stop_check, timeout, env=None):
+        seen["cmd"] = cmd
+        seen["cwd"] = cwd
+        return inner(cmd, cwd, on_log, stop_check, timeout, env)
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(gametest, "session_status", lambda *a, **k: None)
+    monkeypatch.setattr(gametest, "_run", spy)
+
+    gametest.run(project, cfg=cfg)
+
+    assert seen["cwd"] == tmp_path, "тестер запускается из своего каталога"
+    assert "-t" in seen["cmd"] and "yandex" in seen["cmd"]
+    assert "--run-json" in seen["cmd"]
+    saved = json.loads((project / ".factory" / "gametest.config.json").read_text(encoding="utf-8"))
+    assert saved["game"]["dir"] == str((project / "dist").resolve())
+
+
+def test_a_tester_that_left_no_report_is_a_blocker(monkeypatch, tmp_path):
+    """Сорванный прогон не должен выглядеть как «дефектов не нашли»."""
+    from app.config import config
+    project = config.workspace_dir / "no-report"
+    (project / "dist").mkdir(parents=True)
+    (project / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(gametest, "session_status", lambda *a, **k: None)
+    monkeypatch.setattr(gametest, "_run", lambda *a, **k: (1, "упал"))
+
+    run = gametest.run(project, cfg=cfg)
+    assert run.ran is False
+    assert run.blockers, "молчаливого зелёного тут быть не может"
+
+
+def test_a_draft_run_without_a_login_stops_before_the_browser(monkeypatch, tmp_path):
+    """Черновик, открытый гостем, проверяет вёрстку и ничего больше."""
+    from app.config import config
+    project = config.workspace_dir / "draft-no-login"
+    (project / "dist").mkdir(parents=True)
+    (project / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    cfg.mode = "draft"
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(gametest, "session_status", lambda *a, **k: {"signedIn": False})
+    monkeypatch.setattr(gametest, "_run", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("браузер запускать не за чем")))
+
+    run = gametest.run(project, cfg=cfg)
+    assert run.ran is False
+    assert any("draft" in b for b in run.blockers)
+
+
+# --------------------------------------------------------------- версия тестера
+
+def test_an_outdated_tester_says_what_is_missing(monkeypatch, tmp_path):
+    """Тестер живёт своим репозиторием и обновляется отдельно.
+
+    Старая версия отвечает на новые команды не отказом, а «unknown command», и
+    прогон выглядит сорвавшимся без объяснимой причины.
+    """
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "cli.ts").write_text("", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    monkeypatch.setattr(gametest, "_cli", lambda *a, **k: (0, "run auth report"))
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    cfg.install_browsers = False
+    tool, reason = gametest.ensure_tool(cfg)
+    assert tool is None
+    assert "auth-status" in reason
+    assert "--run-json" in reason
+    assert "GAMETEST_REF" in reason, "человеку сказано, что с этим делать"
+
+
+def test_a_current_tester_passes_the_check(monkeypatch, tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "cli.ts").write_text("", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    monkeypatch.setattr(gametest, "_cli", lambda *a, **k: (0, "auth-status --run-json --no-prompt"))
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    cfg.install_browsers = False
+    tool, reason = gametest.ensure_tool(cfg)
+    assert tool == tmp_path
+    assert reason == ""
 
 
 # --------------------------------------------------------------- встраивание в приёмку
