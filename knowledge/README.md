@@ -19,6 +19,7 @@ and the tasks each one owns instead of hand-written code, are in `stack/README.m
 | File | What it covers |
 |---|---|
 | **`CRITICAL_RULES.md`** | The non-negotiable rules. Injected into every master prompt |
+| **`../.claude/skills/playgama-bridge-integration/`** | Скилл: контракт Bridge v2, эталонная обёртка и две исполняемые проверки — статический аудит исходников и runtime-прогон в Chromium с чекером модерации. Знание из файлов ниже не помогает, если его не проверить: скилл закрывает именно это |
 | `playgama/bridge_api_reference.md` | Bridge v2 API surface + the v1 snippets that are wrong for v2 |
 | `playgama/game_ready_and_loading.md` | Boot order, `game_ready`, loading progress, watchdog |
 | `playgama/auth_and_player.md` | Guest detection, silent VK/OK auth, placeholder names |

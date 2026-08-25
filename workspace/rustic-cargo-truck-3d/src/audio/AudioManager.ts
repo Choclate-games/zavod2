@@ -11,6 +11,20 @@ export class AudioManager {
     if (this.master && this.context) this.master.gain.setTargetAtTime(muted || this.muted ? 0.0001 : .14, this.context.currentTime, .12);
   }
 
+  /**
+   * Полная остановка звука на время рекламы и паузы площадки. Требование
+   * Яндекса 4.7: гейна в ноль недостаточно — контекст должен встать, иначе
+   * осциллятор двигателя продолжает считаться под роликом.
+   */
+  setPlatformPaused(paused: boolean): void {
+    if (!this.context) return;
+    if (paused) {
+      if (this.context.state === 'running') void this.context.suspend();
+      return;
+    }
+    if (this.context.state === 'suspended') void this.context.resume();
+  }
+
   setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.master && this.context) {

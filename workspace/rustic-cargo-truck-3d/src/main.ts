@@ -1,9 +1,9 @@
 import './styles.css';
 import { Game } from './core/Game';
-import { PlaygamaService } from './platform/PlaygamaService';
+import { bridgeService } from './platform/BridgeService';
 
 declare global {
-  interface Window { __game?: Game; }
+  interface Window { __game?: Game }
 }
 
 function installPageGuards(): void {
@@ -17,28 +17,29 @@ async function boot(): Promise<void> {
   installPageGuards();
   const root = document.getElementById('game-root');
   if (!root) throw new Error('Game root is missing');
-  const platform = new PlaygamaService();
-  platform.setProgress(5);
-  const save = await platform.initialize();
-  platform.setProgress(28);
+
+  // Один сервис на всю игру: второй экземпляр — это второй флаг «ready
+  // отправлен» и дублирующийся сигнал площадке.
+  const save = await bridgeService.initialize();
   const game = new Game(root, save);
+  bridgeService.setProgressTarget(60);
   await game.initialize();
-  platform.setProgress(82);
+  bridgeService.setProgressTarget(90);
   game.start();
-  platform.setProgress(100);
-  platform.sendReady();
   window.__game = game;
+
+  // Меню нарисовано и по нему можно кликать — только теперь готовность.
+  await bridgeService.signalReady();
 }
 
-const watchdog = window.setTimeout(() => {
-  const fallback = new PlaygamaService();
-  fallback.setProgress(100);
-  fallback.sendReady();
-}, 15000);
+// Сторож дёргает тот же синглтон: собственный экземпляр отправил бы game_ready
+// второй раз в обход флага.
+const watchdog = window.setTimeout(() => { void bridgeService.signalReady(); }, 20_000);
 
-void boot().catch((error: unknown) => {
-  console.error('Game boot failed', error);
-  const fallback = new PlaygamaService();
-  fallback.setProgress(100);
-  fallback.sendReady();
-}).finally(() => window.clearTimeout(watchdog));
+void boot()
+  .catch((error: unknown) => {
+    console.error('Game boot failed', error);
+    // Сплэш площадки нельзя оставлять висеть даже на упавшей загрузке.
+    return bridgeService.signalReady();
+  })
+  .finally(() => window.clearTimeout(watchdog));

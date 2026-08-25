@@ -70,6 +70,15 @@ export class CargoManager {
     }
   }
 
+  /**
+   * Магнит груза: возвращает всё выпавшее обратно в кузов посреди заезда.
+   * Отличается от reset() только тем, что вызывается не на старте рейса —
+   * тела так же переиспользуются, а не создаются заново.
+   */
+  restoreAll(): void {
+    this.reset();
+  }
+
   fixedUpdate(events: EventBus): void {
     for (const item of this.items) {
       if (!item.active) continue;

@@ -1,0 +1,34 @@
+{
+  "debug": false,
+  "sendAnalyticsEvents": true,
+  "game": {
+    "adaptToSafeArea": true
+  },
+  "device": {
+    "useBuiltInOrientationPopup": true,
+    "supportedOrientations": ["landscape", "portrait"]
+  },
+  "advertisement": {
+    "interstitial": {
+      "minimumDelay": 90
+    }
+  },
+  "leaderboards": [
+    {
+      "id": "totalCargoDelivered",
+      "isMain": true
+    },
+    {
+      "id": "fastestTimberRun"
+    }
+  ],
+  "payments": [
+    { "id": "remove_ads_forever" },
+    { "id": "coin_pack_large" }
+  ],
+  "platforms": {
+    "yandex": {
+      "disableLoadingLogo": true
+    }
+  }
+}

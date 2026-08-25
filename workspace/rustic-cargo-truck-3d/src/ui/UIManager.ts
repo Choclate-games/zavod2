@@ -5,6 +5,7 @@ import type { RunResult, SaveData, TruckId, TruckUpgrades } from '../core/types'
 import type { LevelConfig } from '../world/levels';
 import { LEVELS, getLevelConfig } from '../world/levels';
 import { TRUCKS, getCargoPackage, getTruckConfig } from '../vehicle/truckSpec';
+import { bridgeService, REWARDED_PLACEMENT, PRODUCT } from '../platform/BridgeService';
 
 interface HudState {
   speed: number;
@@ -196,6 +197,12 @@ export class UIManager {
       </div>
     `;
     panel.querySelector<HTMLButtonElement>('.garage-back')?.addEventListener('click', () => this.showMenu(save));
+
+    // Тест-драйв супер-подвески — плейсмент free_super_tuning.
+    const tuningBtn = this.rewardedButton('📺 Тест-драйв супер-подвески на рейс', REWARDED_PLACEMENT.FREE_SUPER_TUNING);
+    if (tuningBtn) panel.append(tuningBtn);
+    const shopBtn = this.shopButton(save);
+    if (shopBtn) panel.append(shopBtn);
 
     const garageMain = document.createElement('div');
     garageMain.className = 'garage-main';
@@ -787,10 +794,14 @@ export class UIManager {
     panel.append(stats);
 
     // Quick tuning banner
+    // Удвоение награды за рейс — плейсмент double_reward из MONETIZATION.md.
+    const doubleBtn = this.rewardedButton(`📺 Удвоить награду (+${result.coins} 🪙)`, REWARDED_PLACEMENT.DOUBLE_REWARD);
+    if (doubleBtn) panel.append(doubleBtn);
+
     const garageBanner = document.createElement('div');
     garageBanner.className = 'result-garage-banner';
     garageBanner.innerHTML = `
-      <div><strong>🏢 Гараж: ${truckCfg.name}</strong><br><span style="font-size:12px; color:var(--muted)">Баланс: 🪙 ${save.coins} монет</span></div>
+      <div><strong>🏢 Гараж: ${truckCfg.name}</strong><br><span class="result-balance" style="font-size:12px; color:var(--muted)">Баланс: 🪙 ${save.coins} монет</span></div>
     `;
     const toGarageBtn = this.button('🏢 В Гараж & Тюнинг', false);
     toGarageBtn.addEventListener('click', () => this.showGarage(save));
@@ -842,7 +853,156 @@ export class UIManager {
     const button = document.createElement('button');
     button.className = primary ? 'primary-btn' : 'ghost-btn';
     button.textContent = text;
+    // Требование Яндекса 1.19: модератор прокликивает загрузку и не должен
+    // попасть в неготовую игру. Кнопка оживает, когда ушёл game_ready.
+    if (!bridgeService.isReady) {
+      button.disabled = true;
+      void bridgeService.whenReady().then(() => { button.disabled = false; });
+    }
     return button;
+  }
+
+  /**
+   * Кнопка «посмотреть рекламу за награду». Рисуется только там, где площадка
+   * действительно умеет rewarded: иначе игрок видит сломанную кнопку.
+   */
+  private rewardedButton(label: string, placement: string, onGranted?: () => void): HTMLButtonElement | null {
+    if (!bridgeService.capabilities.rewarded) return null;
+    const button = this.button(label, false);
+    button.className = 'ghost-btn rewarded-btn';
+    button.addEventListener('click', () => {
+      button.disabled = true;
+      button.textContent = 'Загрузка рекламы…';
+      void bridgeService.showRewarded(placement).then((granted) => {
+        button.disabled = false;
+        button.textContent = label;
+        if (!granted) {
+          this.toast('Награда не начислена: ролик не досмотрен', 'warn');
+          return;
+        }
+        // Единственный путь к награде — подтверждённое площадкой состояние.
+        this.events.emit('ads:rewarded', { placement });
+        onGranted?.();
+      });
+    });
+    return button;
+  }
+
+  /** Модальное предложение посмотреть ролик. Используется магнитом груза. */
+  showRewardedOffer(options: { title: string; text: string; placement: string; onDismiss?: () => void }): void {
+    if (!bridgeService.capabilities.rewarded) { options.onDismiss?.(); return; }
+    const screen = this.createScreen();
+    screen.className = 'screen offer-screen';
+    const panel = document.createElement('div');
+    panel.className = 'panel offer-panel';
+    panel.innerHTML = `<h1>${options.title}</h1><p class="subtitle">${options.text}</p>`;
+
+    const close = (): void => { screen.remove(); };
+    const watch = this.button('📺 Смотреть рекламу', true);
+    watch.disabled = false;
+    watch.addEventListener('click', () => {
+      watch.disabled = true;
+      watch.textContent = 'Загрузка рекламы…';
+      void bridgeService.showRewarded(options.placement).then((granted) => {
+        close();
+        if (granted) this.events.emit('ads:rewarded', { placement: options.placement });
+        else { this.toast('Награда не начислена: ролик не досмотрен', 'warn'); options.onDismiss?.(); }
+      });
+    });
+
+    const skip = this.button('Продолжить без магнита', false);
+    skip.disabled = false;
+    skip.addEventListener('click', () => { close(); options.onDismiss?.(); });
+
+    const row = document.createElement('div');
+    row.className = 'action-row';
+    row.append(watch, skip);
+    panel.append(row);
+    screen.append(panel);
+    this.layer.append(screen);
+  }
+
+
+  /**
+   * Кнопка магазина. Рисуется только там, где площадка умеет покупки —
+   * на остальных её нет вовсе, а не «нажал и ничего не произошло».
+   */
+  private shopButton(save: SaveData): HTMLButtonElement | null {
+    if (!bridgeService.capabilities.payments) return null;
+    const button = this.button('🛒 Магазин', false);
+    button.className = 'ghost-btn menu-grid-btn';
+    button.addEventListener('click', () => { void this.showShop(save); });
+    return button;
+  }
+
+  /**
+   * Витрина. Цены берутся из каталога площадки, а не из констант в коде:
+   * требование Яндекса 1.13.2 — валюта и сумма приходят из SDK.
+   */
+  async showShop(save: SaveData): Promise<void> {
+    this.currentSave = save;
+    this.clearScreen();
+    const screen = this.createScreen();
+    const panel = document.createElement('div');
+    panel.className = 'panel shop-panel';
+    panel.innerHTML = `
+      <div class="eyebrow">Магазин</div>
+      <h1>Снаряжение экспедиции</h1>
+      <p class="subtitle">Загрузка витрины…</p>
+    `;
+    screen.append(panel);
+    this.layer.append(screen);
+
+    const catalog = await bridgeService.getCatalog();
+    panel.querySelector('.subtitle')?.remove();
+
+    const offered = catalog.filter((product) => product.id === PRODUCT.REMOVE_ADS || product.id === PRODUCT.COIN_PACK_LARGE);
+    if (offered.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'subtitle';
+      empty.textContent = 'Витрина площадки пуста.';
+      panel.append(empty);
+    }
+
+    for (const product of offered) {
+      const owned = product.id === PRODUCT.REMOVE_ADS && save.settings.adsRemoved;
+      const row = document.createElement('div');
+      row.className = 'shop-row';
+      const title = typeof product.title === 'string' ? product.title : product.id;
+      const description = typeof product.description === 'string' ? product.description : '';
+      row.innerHTML = `<div><strong>${title}</strong><br>
+        <span style="font-size:12px; color:var(--muted)">${description}</span></div>`;
+      // Цена и валюта — как их отдала площадка, без хардкода «₽»: требование 1.13.2.
+      const price = product.price !== undefined
+        ? String(product.price)
+        : `${product.priceValue ?? ''} ${product.priceCurrencyCode ?? ''}`.trim();
+      const buy = this.button(owned ? 'Куплено' : price || 'Купить', true);
+      buy.disabled = owned;
+      buy.addEventListener('click', () => {
+        buy.disabled = true;
+        void bridgeService.purchase(product.id).then((ok) => {
+          buy.disabled = false;
+          if (!ok) { this.toast('Покупка не завершена', 'warn'); return; }
+          this.events.emit('shop:purchased', { productId: product.id });
+          void this.showShop(save);
+        });
+      });
+      row.append(buy);
+      panel.append(row);
+    }
+
+    const back = this.button('← Назад', false);
+    back.disabled = false;
+    back.addEventListener('click', () => this.showGarage(save));
+    panel.append(back);
+  }
+
+  /** Перерисовывает баланс на экране результата после удвоения награды. */
+  refreshResultAfterReward(save: SaveData): void {
+    this.currentSave = save;
+    const balance = this.layer.querySelector<HTMLElement>('.result-balance');
+    if (balance) balance.textContent = `Баланс: 🪙 ${save.coins} монет`;
+    this.layer.querySelector<HTMLButtonElement>('.rewarded-btn')?.remove();
   }
 
   private clearScreen(): void {

@@ -13,20 +13,26 @@
 ## 3. Cloud Storage Keys
 One key holding one JSON object — progression, purchase ownership and settings together. `storage.get(key)` / `set(key, value)` take **no `storageType` argument** on Bridge v2.
 
-- `player_coins`
-- `selected_truck_id`
-- `truck_upgrades_data`
-- `unlocked_trucks`
-- `high_score_cargo`
-- `settings_sound_volume`
+Ключ ровно один: **`player_coins`** — исторически так названный, он хранит
+весь объект сохранения целиком (монеты, уровни, звёзды, парк грузовиков,
+прокачку, настройки и признак покупки «без рекламы»). Отдельных ключей под
+`selected_truck_id`, `unlocked_trucks` и прочее нет и быть не должно:
+несколько ключей на площадке рассинхронизируются между собой.
 
 Write policy: debounce 1.5 s, and flush immediately on `pagehide` / `visibilitychange`. `localStorage` is a mirror only — inside the platform iframe it is partitioned third-party storage, so settings (mute, volume, language) live in the save object.
 
 ## 4. Leaderboards
 IDs use letters and digits only (Yandex rejects underscores) and must be registered in the platform console before publishing — the bridge fails silently otherwise.
 
-- `leaderboard_total_cargo_delivered`
-- `leaderboard_fastest_timber_run`
+- `totalCargoDelivered` — накопительно доставленный груз (основная доска)
+- `fastestTimberRun` — быстрейший рейс; доска сортирует по убыванию, поэтому
+  в неё уходит остаток от порогового времени (`600 - секунды`), а не само время
+
+Прежние идентификаторы `leaderboard_total_cargo_delivered` и
+`leaderboard_fastest_timber_run` не годятся: подчёркивания Яндекс не
+принимает — правило записано двумя строками выше и само себе противоречило.
+Обе доски объявлены в `public/playgama-bridge-config.json` и должны быть
+заведены в консоли площадки под этими же именами.
 
 ## 5. Lifecycle & Auto-Pause
 - Subscribe to `bridge.platform.on(bridge.EVENT_NAME.PAUSE_STATE_CHANGED)` and `AUDIO_STATE_CHANGED`. Do **not** rely on `visibilitychange` alone — it never reports an interstitial opening.
