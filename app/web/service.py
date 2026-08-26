@@ -286,6 +286,11 @@ class FactoryService:
         # меняется между запусками агента. Без кеша разбор шёл заново на
         # каждый показ — slug → (метка версии файла, разобранный словарь).
         self._project_data_cache: Dict[str, tuple] = {}
+        # Задача на починку по последнему прогону тестера — по одной на чат.
+        # Живёт в памяти намеренно: она нужна ровно до нажатия «🔧 Отдать
+        # агенту», а после перезапуска фабрики игру гоняют заново, а не чинят
+        # по позавчерашним находкам.
+        self._tester_tasks: Dict[str, str] = {}
 
         # ── Студия ──
         # Прогонов может идти сколько угодно сразу: у каждого свой журнал,
@@ -1603,6 +1608,8 @@ class FactoryService:
             "model": session.model,
             "resumable": bool(session.conversation_id),
             "running": self.chat_jobs.is_running(session.id),
+            # Чат может быть занят не агентом, а прогоном тестера площадки.
+            "running_kind": job.kind if (job and job.status == "running") else "",
             "duration": job.duration_str if job else "",
             "can_undo": undo_index is not None and not self.chat_jobs.is_running(session.id),
             "undo_prompt": session.messages[undo_index].text if undo_index is not None else "",
@@ -1700,6 +1707,7 @@ class FactoryService:
             "events": events,
             "live_events": live_events,
             "running": running,
+            "running_kind": job.kind if running else "",
             "duration": job.duration_str if job else "",
         }
 
@@ -1971,6 +1979,161 @@ class FactoryService:
             notify.send(f"{status_icon} {status_text}",
                         f"{job.slug} · {job.title} · {job.duration_str}")
 
+    # ── Прогон тестера площадки прямо в чате ──────────────────────────
+    #
+    # Тестер (репозиторий AI_Tester) фабрика зовёт сама в конце сборки, и его
+    # находки уходят агенту списком. Руками позвать его было нечем: игру можно
+    # было запустить, посмотреть глазами и пересказать агенту словами — а
+    # инструмент, который уже умеет открыть её так, как откроет площадка, и
+    # назвать поломки по пунктам, оставался заперт внутри пайплайна.
+    #
+    # Кнопка зовёт его тем же способом, каким чат зовёт агента: та же очередь
+    # (один занятый чат — одна работа), тот же «⏹ Стоп», тот же живой лог в
+    # ленте. Отчёт остаётся в переписке сообщением, а список починок уходит
+    # агенту отдельной кнопкой: прогон не должен сам тратить лимит агента —
+    # часто он показывает, что чинить нечего.
+
+    def run_tester_chat(self, slug: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """Гонит игру тестером площадки, показывая ход дела в чате проекта."""
+        try:
+            proj_dir = self.live_dir(slug)
+        except (sandbox.SandboxViolation, archive.ArchiveError) as exc:
+            return {"status": "error", "message": str(exc)}
+        if not proj_dir.exists():
+            return {"status": "error", "message": f"Проект {slug} не найден в workspace/."}
+
+        session = self.ensure_chat(slug, session_id)
+        if self.chat_jobs.is_running(session.id):
+            return {"status": "error",
+                    "message": "В этом чате уже идёт работа. Создайте новый чат — "
+                               "несколько чатов спокойно идут параллельно."}
+
+        cfg = gametest.settings()
+        if not cfg.enabled:
+            return {"status": "error",
+                    "message": "Прогон тестера выключен настройкой GAMETEST_ENABLED."}
+
+        title = self.project_title(slug)
+        prompt = "🧪 Прогнать игру тестером площадки"
+        # Запрос ложится в переписку: через неделю по ленте видно, откуда взялся
+        # отчёт, а следующий агент читает выжимку беседы и знает, что игру гоняли.
+        chat_store.append_message(slug, session, "user", prompt)
+        sid = session.id
+
+        checks = ", ".join(name for name, on in cfg.checks.items() if on) or "нет ни одной"
+        head = {"kind": "system", "icon": "🧪",
+                "text": f"Тестер площадки · игра {slug} · режим {cfg.mode}"
+                        f" · разрешения {cfg.viewports} · проверки: {checks}."
+                        " Первый прогон дольше остальных: тестер сначала ставится."}
+        # Прогон стартует в своём потоке и начинает писать лог немедленно —
+        # первая же его строка обгоняла заголовок задачи, и лента открывалась с
+        # середины. Работа ждёт, пока начало ленты будет записано.
+        ready = threading.Event()
+
+        def work(job):
+            ready.wait(10)
+            def on_log(line: str) -> None:
+                text = str(line).rstrip()
+                if not text:
+                    return
+                # Лог тестера — сотни строк за прогон, и ни одна из них не ответ
+                # агенту. Отдельный вид события: в ленте это одна растущая
+                # простыня, а не сотня пузырей.
+                event = {"kind": "log", "source": "🧪 тестер площадки", "text": text}
+                job.record(event)
+                bus.publish("chat.event", slug=slug, session_id=sid, event=event)
+
+            run = gametest.run(proj_dir, on_log=on_log, stop_check=job.should_stop,
+                               cfg=cfg, name=title)
+            hard = gametest.blocking(run)
+            self._tester_tasks[sid] = gametest.repair_task(run, title) if hard else ""
+            # Ноль — «прогон состоялся», а не «находок нет»: найденное чинят,
+            # а красным красят то, что не дало проверить игру вовсе.
+            return (0 if run.ran else 1), gametest.report_markdown(run, title)
+
+        job = self.chat_jobs.start(
+            session_id=sid, slug=slug, title=session.title, prompt=prompt,
+            model=None, work=work, on_finished=self._on_tester_job_finished,
+            kind="tester",
+        )
+        if job is None:
+            return {"status": "error", "message": "Чат уже занят."}
+
+        # Запрос в буфер задачи не кладём: он уже лежит в переписке, а лента при
+        # открытии чата рисуется из обоих — и пузырь «Прогнать игру тестером»
+        # выходил дважды. Живьём его всё равно показываем: тем, кто в этот момент
+        # смотрит в чат, он приходит только отсюда.
+        bus.publish("chat.event", slug=slug, session_id=sid, event={
+            "kind": "user", "text": prompt,
+            "index": len(session.messages) - 1, "undoable": False})
+        job.record(head)
+        bus.publish("chat.event", slug=slug, session_id=sid, event=head)
+        ready.set()
+
+        bus.publish("chat.started", slug=slug, session_id=sid)
+        bus.publish("chats.changed", slug=slug)
+        return {"status": "started", "session": self._session_summary(session)}
+
+    def _on_tester_job_finished(self, job) -> None:
+        """Прогон закончился: отчёт — в переписку, находки — под кнопку."""
+        stored = chat_store.load_session(job.slug, job.session_id)
+        report = job.answer.strip() or "🧪 Тестер площадки не оставил отчёта."
+        if stored:
+            chat_store.append_message(job.slug, stored, "assistant", report)
+
+        def say(event: Dict[str, Any]) -> None:
+            job.record(event)
+            bus.publish("chat.event", slug=job.slug, session_id=job.session_id, event=event)
+
+        say({"kind": "assistant_final", "text": report, "replaces_stream": False})
+
+        task = self._tester_tasks.get(job.session_id) or ""
+        if task and job.status != "stopped":
+            say({
+                "kind": "tester",
+                "icon": "🔧",
+                "text": "Найденное можно отдать агенту прямо отсюда: он получит "
+                        "список находок и отчёт, а переписка останется этой же.",
+                "prompt": task,
+                "label": "🔧 Отдать агенту на починку",
+            })
+
+        status_icon = {"done": "✅", "stopped": "⏹", "failed": "⚠️"}.get(job.status, "ℹ️")
+        status_text = {
+            "done": "Прогон закончен",
+            "stopped": "Прогон остановлен",
+            "failed": "Прогон не состоялся",
+        }.get(job.status, "Прогон завершён")
+        say({"kind": "system", "icon": status_icon,
+             "text": f"{status_text} · {job.duration_str}"})
+
+        bus.publish(
+            "chat.finished",
+            slug=job.slug, session_id=job.session_id, status=job.status,
+            icon=status_icon, text=status_text, duration=job.duration_str,
+            title=job.title, playable=self.project_is_playable(job.slug), limit_hit=False,
+        )
+        bus.publish("chats.changed", slug=job.slug)
+        if notify.notifications_enabled():
+            notify.send(f"{status_icon} {status_text}",
+                        f"{job.slug} · тестер площадки · {job.duration_str}")
+
+    def send_tester_findings(self, slug: str, session_id: str, *, agent_key: str,
+                             model: Optional[str] = None, yolo: bool = True) -> Dict[str, Any]:
+        """Отдаёт находки последнего прогона агенту — в тот же чат."""
+        task = (self._tester_tasks.get(session_id) or "").strip()
+        if not task:
+            return {"status": "error",
+                    "message": "Находок этого прогона больше нет под рукой — "
+                               "прогоните игру ещё раз."}
+        result = self.send_chat_task(slug, session_id, task, agent_key=agent_key,
+                                     model=model, yolo=yolo, continue_dialog=True)
+        if result.get("status") == "started":
+            # Задача ушла — второй раз её отправлять незачем: агент уже чинит,
+            # а находки после починки будут другие.
+            self._tester_tasks.pop(session_id, None)
+        return result
+
     # ── Передача чата другому CLI ─────────────────────────────────────
 
     @staticmethod
@@ -2120,12 +2283,13 @@ class FactoryService:
         # агента), поэтому подтверждаем её прямо в ленте — иначе кажется, что
         # кнопка не сработала. Повторное нажатие освобождает чат принудительно.
         if job:
+            who = "тестера" if job.kind == "tester" else "агента"
             event = {"kind": "system", "icon": "⏹️",
                      "text": ("Чат освобождён принудительно: задача отвязана, "
-                              "можно писать новую. Если процесс агента всё ещё жив, "
+                              f"можно писать новую. Если процесс {who} всё ещё жив, "
                               "закройте его в диспетчере задач.")
                              if forced else
-                             "Остановка запрошена — снимаю процесс агента…"}
+                             f"Остановка запрошена — снимаю процесс {who}…"}
             job.record(event)
             bus.publish("chat.event", slug=job.slug, session_id=session_id, event=event)
 
@@ -2179,6 +2343,7 @@ class FactoryService:
                 "finished_at": job.finished_at.strftime("%H:%M") if job.finished_at else "",
                 "started_at": job.started_at.isoformat(timespec="seconds"),
                 "playable": self.project_is_playable(job.slug),
+                "kind": job.kind,
             })
 
         # Работающие сверху (самые свежие первыми), затем недавно завершённые.

@@ -25,6 +25,10 @@ class ChatJob:
     title: str
     prompt: str
     model: Optional[str] = None
+    # Кто занял чат: агент или прогон тестера площадки. Очередь для них одна —
+    # два процесса в одной беседе перемешали бы контекст, — а слова разные:
+    # «агент работает» над прогоном тестера читается как неправда.
+    kind: str = "agent"               # agent | tester
     status: str = "running"           # running | done | failed | stopped
     exit_code: Optional[int] = None
     started_at: datetime = field(default_factory=datetime.now)
@@ -117,6 +121,7 @@ class ChatJobManager:
         model: Optional[str],
         work: Callable[[ChatJob], Tuple[int, str]],
         on_finished: Callable[[ChatJob], None],
+        kind: str = "agent",
     ) -> Optional[ChatJob]:
         """
         Запускает задачу чата в отдельном потоке.
@@ -127,7 +132,8 @@ class ChatJobManager:
         with self._lock:
             if self.is_running(session_id):
                 return None
-            job = ChatJob(session_id=session_id, slug=slug, title=title, prompt=prompt, model=model)
+            job = ChatJob(session_id=session_id, slug=slug, title=title, prompt=prompt,
+                          model=model, kind=kind)
             self._jobs[session_id] = job
 
         def runner() -> None:
@@ -142,7 +148,8 @@ class ChatJobManager:
             except Exception as exc:  # поток не должен падать молча
                 job.status = "failed"
                 job.exit_code = -1
-                job.answer = f"Ошибка запуска агента: {exc}"
+                job.answer = (f"Ошибка запуска "
+                              f"{'тестера' if job.kind == 'tester' else 'агента'}: {exc}")
             finally:
                 job.finished_at = datetime.now()
                 on_finished(job)

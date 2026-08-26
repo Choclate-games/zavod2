@@ -716,7 +716,16 @@ def run(
     if not result_path.exists():
         # Код возврата единица — это найденный блокер, а не сорванный прогон.
         # Отличает их именно наличие итогового файла.
-        result.blockers.append(f"тестер не оставил итога прогона (код {code})")
+        #
+        # Не запустившийся Chromium доходил сюда как «код 1» — то есть как
+        # обычный сорванный прогон, хотя чинится он в одно действие. Спрашиваем
+        # прямо, прежде чем сказать общее.
+        blocked = browser_blocker(tail)
+        if blocked:
+            forget_browsers(tool_dir)
+            result.blockers.append(blocked)
+        else:
+            result.blockers.append(f"тестер не оставил итога прогона (код {code})")
         result.seconds = int(time.time() - started)
         result.checks = [{"tail": tail[-2000:]}] if tail else []
         return result
@@ -740,3 +749,126 @@ def run(
     result.ran = True
     result.seconds = int(time.time() - started)
     return result
+
+
+# ------------------------------------------------------------------ в словах
+#
+# Один и тот же прогон читают двое, и читают по-разному. Человеку в ленте чата
+# нужен итог: что проверяли, чем кончилось, что из найденного важно. Кодовому
+# агенту нужен список того, что чинить, — без похвалы, без «прогон занял 7
+# минут» и без находок, помеченных спорными. Поэтому текста два, а прогон один.
+
+SEVERITY_LABELS = {"blocker": "блокер", "major": "серьёзное",
+                   "minor": "мелочь", "info": "заметка"}
+
+
+def blocking(run: TesterRun) -> List[Finding]:
+    """Находки, из-за которых игру вернут с модерации.
+
+    Спорные — те, что модель, посмотрев на кадр, сама признала не дефектом, —
+    сюда не попадают: отдавать их агенту значит просить починить то, чего нет.
+    Из отчёта человеку они при этом не исчезают.
+    """
+    limit = SEVERITY_ORDER.get(run.threshold_name, 1)
+    return [f for f in run.findings if f.rank <= limit and not f.disputed]
+
+
+def verdict(run: TesterRun) -> str:
+    """Итог прогона одной строкой."""
+    if run.skipped_reason:
+        return f"прогон не состоялся — {run.skipped_reason}"
+    if run.blockers:
+        return "прогон не состоялся — " + "; ".join(run.blockers)
+    if not run.ran:
+        return "прогон не дошёл до конца"
+    hard = blocking(run)
+    if hard:
+        return f"нашлось то, из-за чего игру вернут с модерации: {len(hard)}"
+    if run.findings:
+        return f"ничего серьёзного, но есть замечания: {len(run.findings)}"
+    return "чисто — тестер не нашёл ничего"
+
+
+def _finding_line(item: Finding) -> str:
+    mark = SEVERITY_LABELS.get(item.severity, item.severity)
+    where = f" — {item.where}" if item.where else ""
+    body = f"\n  {item.description}" if item.description else ""
+    return f"- **[{mark}]** {item.title}{where}{body}"
+
+
+def report_markdown(run: TesterRun, title: str = "") -> str:
+    """Итог прогона для человека — тем же Markdown, что и ответы агента."""
+    lines: List[str] = [f"### 🧪 Тестер площадки{f' · {title}' if title else ''}",
+                        "", verdict(run), ""]
+
+    if run.skipped_reason or run.blockers:
+        lines += ["Игру при этом не проверяли ни разу — чинить по этому прогону "
+                  "нечего, сначала нужно, чтобы он состоялся.", ""]
+        return "\n".join(lines)
+
+    where = ", ".join(run.targets) or "yandex"
+    minutes, seconds = divmod(max(0, run.seconds), 60)
+    lines += [f"Где: {where} · режим {run.mode or '—'} · "
+              f"{f'{minutes} мин {seconds:02d} с' if minutes else f'{seconds} с'}", ""]
+
+    hard = blocking(run)
+    disputed = [f for f in run.findings if f.disputed]
+    grouped = run.by_category()
+    for category, header in CATEGORY_TITLES.items():
+        found = grouped.get(category)
+        if not found:
+            continue
+        lines += [f"**{header}**", *(_finding_line(item) for item in found), ""]
+
+    quiet = [str(entry.get("check") or "") for entry in run.checks
+             if isinstance(entry, dict) and entry.get("status") == "ok"]
+    if quiet:
+        lines += ["Прошло без замечаний: "
+                  + ", ".join(CATEGORY_TITLES.get(name, name).lower() for name in quiet), ""]
+
+    if disputed:
+        lines += [f"Из них спорных — {len(disputed)}: модель посмотрела на кадр и "
+                  "сказала, что дефекта там нет. В починку они не пойдут.", ""]
+
+    if run.report_html:
+        lines += [f"Кадры и подробности: `{run.report_html}`", ""]
+
+    if hard:
+        lines += [f"Из этого чинить нужно {len(hard)} — кнопка «🔧 Отдать агенту» "
+                  "передаёт список ему в этот же чат.", ""]
+
+    return "\n".join(lines)
+
+
+def repair_task(run: TesterRun, title: str = "") -> str:
+    """Задача кодовому агенту по находкам прогона.
+
+    Отдельно от `acceptance.GateReport.repair_task`: там речь про приёмку целиком
+    и список собирается по трём источникам, здесь источник один, и агенту важно
+    знать, что игру открывали по-настоящему — на площадке, а не в чистом
+    Chromium, — иначе находка «кнопка уехала за экран» читается как придирка.
+    """
+    lines: List[str] = [
+        f"Игру{f' «{title}»' if title else ''} прогнали настоящим тестером "
+        "площадки: её открывали так, как её откроет игрок — с SDK Яндекса, его "
+        "CSP и в полутора десятках разрешений. Ниже то, что тестер увидел сам. "
+        "Это не мнение и не пожелание: тот же прогон повторят.",
+        "",
+    ]
+    grouped: Dict[str, List[Finding]] = {}
+    for item in blocking(run):
+        grouped.setdefault(item.category, []).append(item)
+    for category, header in CATEGORY_TITLES.items():
+        found = grouped.get(category)
+        if not found:
+            continue
+        found.sort(key=lambda f: f.rank)
+        lines += [f"## {header}", *(_finding_line(item) for item in found), ""]
+
+    if run.report_html:
+        lines += [f"Кадры и подробности: `{run.report_html}`. Это отчёт тестера, "
+                  "а не файл проекта — правь игру, а не отчёт.", ""]
+    lines += [
+        "Правь причину, а не симптом. Закончив, коротко запиши сделанное в `DEVLOG.md`.",
+    ]
+    return "\n".join(lines)

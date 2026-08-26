@@ -181,6 +181,33 @@ def test_a_broken_browser_is_reported_instead_of_a_timeout(monkeypatch, tmp_path
     assert "900" not in result["message"]
 
 
+def test_a_broken_browser_is_reported_instead_of_a_bare_exit_code(monkeypatch, tmp_path):
+    """У прогона игры отказ выглядел ещё безобиднее, чем у входа.
+
+    Тестер, чей Chromium не стартовал, не оставляет итогового файла — и это
+    неотличимо от «прогон сорвался, код 1». Человеку, который нажал кнопку и
+    ждал минуты установки, приходило именно это число.
+    """
+    from app.config import config
+
+    project = config.workspace_dir / "broken-browser"
+    (project / "dist").mkdir(parents=True, exist_ok=True)
+    (project / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+    (project / "package.json").write_text('{"name":"g"}', encoding="utf-8")
+
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(gametest, "session_status", lambda *a, **k: None)
+    monkeypatch.setattr(gametest, "_run", lambda *a, **k: (1, LINUX_FAILURE))
+
+    cfg = gametest.settings()
+    cfg.tool_dir = tmp_path
+    run = gametest.run(project, cfg=cfg)
+
+    assert run.ran is False
+    assert any("libglib-2.0.so.0" in blocker for blocker in run.blockers)
+    assert not any("код 1" in blocker for blocker in run.blockers)
+
+
 def test_the_browser_stamp_is_dropped_so_a_retry_reinstalls(tmp_path):
     """Отметка «браузеры поставлены» не даёт переустановке случиться никогда —
     а починка здесь именно переустановка, уже с зависимостями."""

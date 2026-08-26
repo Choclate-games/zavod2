@@ -764,8 +764,10 @@ async function loadGallery() {
     gate.disabled = !p.playable;
     gate.onclick = (e) => { e.stopPropagation(); runGate(p.slug); };
     const platform = el("button", "btn small icon-only", "🎮");
-    platform.title = "Прогон на площадке Яндекса: вёрстка во всех разрешениях, "
-      + "сохранения, локали, правила площадки (минуты)";
+    platform.title = "Приёмка на площадке Яндекса заданием студии: вёрстка во всех "
+      + "разрешениях, сохранения, локали, правила площадки. Ход дела — в журнале "
+      + "студии, итог — пометкой на карточке. Чтобы отчёт пришёл в чат и находки "
+      + "можно было отдать агенту, откройте проект и нажмите «🧪 Тест площадки»";
     platform.disabled = !p.playable;
     platform.onclick = (e) => { e.stopPropagation(); runPlatform(p.slug); };
     const rename = el("button", "btn small icon-only", "✏️");
@@ -858,6 +860,12 @@ function renderProjectBanner() {
   $("btn-archive-project").textContent = card.archived ? "↩️ Из архива" : "📦 В архив";
   $("btn-favorite-project").textContent = card.favorite ? "☆ Из избранного" : "⭐ В избранное";
   $("btn-play-project").disabled = !detail.playable;
+  // Тестер открывает игру по-настоящему: без кода ему нечего открывать, и
+  // прогон закончился бы отказом через несколько минут установки.
+  $("btn-test-project").disabled = !detail.playable;
+  $("btn-test-project").title = detail.playable
+    ? "Прогнать игру тестером площадки — ход дела и отчёт придут в чат разработки"
+    : "Гонять нечего: у проекта ещё нет игры";
 }
 
 async function selectProject(slug) {
@@ -1208,7 +1216,9 @@ async function loadChats() {
     sessions.forEach((s) => {
       const row = el("div", `chat-row ${s.id === state.session ? "active" : ""} ${s.running ? "running" : ""}`);
       const when = (s.updated_at || "").slice(5, 16).replace("T", " ");
-      const info = s.running ? `⏳ работает ${s.duration}` : `сообщений: ${s.messages}`;
+      const info = s.running
+        ? `${s.running_kind === "tester" ? "🧪 прогон" : "⏳ работает"} ${s.duration}`
+        : `сообщений: ${s.messages}`;
       const mark = s.kind === "run" ? "🏭 " : "";
       const open = el("button", "chat-open",
         `<strong>${mark}${esc(s.title)}</strong><br /><span class="dim">${s.resumable ? "🔗" : "•"} ${esc(when)} · ${esc(info)}${s.model ? " · " + esc(s.model) : ""}</span>`);
@@ -1247,7 +1257,10 @@ async function newChat() {
   if (res.session) openChat(res.session.id);
 }
 
-async function openChat(sessionId) {
+/* `justStarted` — чат открывают следом за запуском, а не возвращаются в него:
+   строка «работает уже 0с — показываю ход дела» объясняла бы то, что человек
+   только что сделал сам. */
+async function openChat(sessionId, justStarted = false) {
   if (!state.project) return;
   showView("chats");
   const res = await api(`/api/chats/${encodeURIComponent(state.project)}/${sessionId}`);
@@ -1266,11 +1279,15 @@ async function openChat(sessionId) {
     text: `Чат «${session.title}» · проект ${state.project} · агент ${agentLabel(session.agent)}${session.resumable ? " · беседа будет продолжена" : ""}` });
   res.events.forEach(pushChatEvent);
   if (res.running) {
-    pushChatEvent({ kind: "system", icon: "⏳",
-      text: `Агент работает в этом чате уже ${res.duration} — показываю ход задачи.` });
+    const tester = res.running_kind === "tester";
+    if (!justStarted) {
+      pushChatEvent({ kind: "system", icon: "⏳",
+        text: `${tester ? "Тестер площадки гоняет игру" : "Агент работает"} в этом чате `
+              + `уже ${res.duration} — показываю ход дела.` });
+    }
     res.live_events.forEach(pushChatEvent);
-    showTyping(true);
-    setChatStatus("● Выполнение...", "var(--accent)");
+    showTyping(true, tester ? TESTER_TYPING : "");
+    setChatStatus(tester ? "● Прогон..." : "● Выполнение...", "var(--accent)");
   } else {
     showTyping(false);
     setChatStatus("● Готов", "var(--ok)");
@@ -1296,14 +1313,15 @@ function clearFeed() {
   state.streamBubbles = [];
 }
 
-function showTyping(visible) {
+function showTyping(visible, label) {
   const feed = $("chat-feed");
   let node = feed.querySelector(".typing");
+  const text = label || "⚡ агент работает…";
   if (visible) {
     if (!node) {
-      node = el("div", "typing", "⚡ агент работает…");
+      node = el("div", "typing", text);
       feed.appendChild(node);
-    } else feed.appendChild(node);
+    } else { node.textContent = text; feed.appendChild(node); }
     scrollFeed();
   } else if (node) node.remove();
 }
@@ -1496,8 +1514,90 @@ function addHandoffBubble(event) {
   return bubble;
 }
 
+/* Лог тестера — сотни строк за прогон. Пузырь на строку превратил бы ленту в
+   бесполезную простыню, поэтому строки копятся в одном блоке: он растёт на
+   месте, сворачивается кликом по шапке и держит хвост в поле зрения. */
+const LOG_TAIL_LINES = 400;
+
+function addLogLine(event) {
+  const feed = $("chat-feed");
+  let bubble = [...feed.querySelectorAll(".bubble.log")].pop();
+  const fresh = !bubble || bubble.dataset.closed === "1";
+  if (fresh) {
+    bubble = addBubble("log", "");
+    bubble.dataset.source = event.source || "лог";
+    const head = el("button", "log-head");
+    head.appendChild(el("span", "chev", "▾"));
+    head.appendChild(el("span", "log-title", esc(event.source || "лог")));
+    head.appendChild(el("span", "log-sub", ""));
+    head.onclick = () => {
+      bubble.classList.toggle("collapsed");
+      head.querySelector(".chev").textContent =
+        bubble.classList.contains("collapsed") ? "▸" : "▾";
+      scrollFeed();
+    };
+    bubble.appendChild(head);
+    bubble.appendChild(el("pre", "log-body", ""));
+  }
+  const body = bubble.querySelector(".log-body");
+  const lines = (body.textContent ? body.textContent.split("\n") : []).concat(event.text || "");
+  body.textContent = lines.slice(-LOG_TAIL_LINES).join("\n");
+  const sub = bubble.querySelector(".log-sub");
+  if (sub) sub.textContent = firstLine(event.text, 70);
+  body.scrollTop = body.scrollHeight;
+  scrollFeed();
+  return bubble;
+}
+
+/* Прогон кончился — следующий лог начнёт свой блок, а не дольёт в этот. */
+function closeLogBubble() {
+  const bubble = [...$("chat-feed").querySelectorAll(".bubble.log")].pop();
+  if (bubble) bubble.dataset.closed = "1";
+}
+
+/* Находки прогона — кнопкой прямо в ленте: агент получит их списком в этот же
+   чат, а формулировать «поправь то, что нашёл тестер» руками не нужно. */
+function addTesterBubble(event) {
+  const bubble = addBubble("system",
+    `${esc(event.icon || "🔧")} ${esc(event.text)} <span class="stamp">${now()}</span>`);
+  const row = el("div", "row");
+  row.style.marginTop = "8px";
+  const btn = el("button", "btn small primary", esc(event.label || "🔧 Отдать агенту"));
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const model = $("chat-model").value;
+    const res = await api(
+      `/api/chats/${encodeURIComponent(state.project)}/${state.session}/tester-fix`,
+      { body: {
+        agent: $("chat-agent").value,
+        model: model === state.boot.model_default ? "" : model,
+        yolo: $("chk-yolo") ? $("chk-yolo").checked : true,
+      } });
+    if (res.status === "started") {
+      state.sessionRunning = true;
+      updateChatButtons();
+      showTyping(true);
+      setChatStatus("● Выполнение...", "var(--accent)");
+      row.remove();
+      loadChats();
+    } else {
+      btn.disabled = false;
+      toast("Тестер", res.message || "Не удалось передать находки", "err");
+    }
+  };
+  row.appendChild(btn);
+  bubble.appendChild(row);
+  scrollFeed();
+  return bubble;
+}
+
 function pushChatEvent(event) {
   const kind = event.kind || "raw";
+
+  if (kind === "log") {
+    addLogLine(event);
+    return;
+  }
 
   if (kind === "assistant") {
     if (!state.streamBubble) {
@@ -1513,6 +1613,9 @@ function pushChatEvent(event) {
   flushStream();
   state.streamBubble = null;
   state.streamRaw = "";
+  // Любое другое событие означает, что лог кончился: следующая порция строк
+  // (новый прогон) начнёт свой блок, а не дольёт в отчитавшийся.
+  closeLogBubble();
 
   if (kind === "user") {
     addUserBubble(event);
@@ -1550,6 +1653,8 @@ function pushChatEvent(event) {
     if (node) attachClamp(bubble, node);
   } else if (kind === "handoff") {
     addHandoffBubble(event);
+  } else if (kind === "tester") {
+    addTesterBubble(event);
   } else if (kind === "error") {
     addBubble("error", `❌ ${esc(event.text)}`);
   } else if (kind === "meta") {
@@ -1569,8 +1674,10 @@ function applyToolVisibility() {
    иначе сворачиваем обратно. */
 function toggleAllBlocks() {
   const feed = $("chat-feed");
-  const expand = !!(feed.querySelector(".bubble.tool.collapsed") || feed.querySelector(".bubble.clamped"));
-  feed.querySelectorAll(".bubble.tool").forEach((node) => {
+  const expand = !!(feed.querySelector(".bubble.tool.collapsed")
+                    || feed.querySelector(".bubble.log.collapsed")
+                    || feed.querySelector(".bubble.clamped"));
+  feed.querySelectorAll(".bubble.tool, .bubble.log").forEach((node) => {
     node.classList.toggle("collapsed", !expand);
     const chev = node.querySelector(".chev");
     if (chev) chev.textContent = expand ? "▾" : "▸";
@@ -1767,6 +1874,42 @@ async function sendChatTask() {
   loadChats();
 }
 
+/* Прогон тестером площадки. Кнопка живёт в шапке проекта, а работа идёт в
+   чате разработки: там уже есть очередь задач, «⏹ Стоп» и лента, куда лечь
+   отчёту. Отдельного окна для этого заводить незачем — чинить находки всё
+   равно тем же агентом и в той же переписке. */
+const TESTER_TYPING = "🧪 тестер площадки гоняет игру…";
+
+async function startTesterRun(slug) {
+  if (!slug) { toast("Тестер", "Сначала выберите проект.", "warn"); return; }
+  state.project = slug;
+  fillChatProjects();
+  $("chat-project").value = slug;
+
+  const res = await api(`/api/chats/${encodeURIComponent(slug)}/tester`,
+                        { body: { session_id: state.session } });
+  if (res.status !== "started") {
+    toast("Тестер", res.message || "Не удалось запустить прогон.", "err");
+    return;
+  }
+  // Если лента уже показывает этот чат, перечитывать её нельзя: начало прогона
+  // приходит и живым событием, и в буфере задачи, который openChat проигрывает
+  // заново, — запрос, заголовок и лог выходили по второму разу. Полосу
+  // состояния и «тестер работает» в обоих случаях ставит openChat: она видит,
+  // кто занял чат, а дописывать их после её await значило бы вернуть их на
+  // экран уже после того, как прогон кончился и убрал их.
+  if (state.session === res.session.id) {
+    showView("chats");
+    state.sessionRunning = true;
+    updateChatButtons();
+    showTyping(true, TESTER_TYPING);
+    setChatStatus("● Прогон...", "var(--accent)");
+    loadChats();
+    return;
+  }
+  await openChat(res.session.id, true);
+}
+
 function updateChatButtons() {
   const project = (state.projects || []).find((p) => p.slug === state.project);
   $("btn-chat-play").disabled = !(project && project.playable);
@@ -1809,8 +1952,11 @@ function renderActivity() {
     node.title = `${item.title}\n${projectName(item.slug)} (${item.slug})`;
 
     const title = el("div", "act-title");
+    // Прогон тестера занимает чат наравне с агентом, но работает другое: без
+    // пометки в панели это выглядит как задача, которую агент не может домучить.
+    const mark = item.kind === "tester" ? "🧪 " : "";
     title.appendChild(el("span", "act-name",
-      `${ACT_ICONS[item.status] || "•"} ${esc(item.title)}`));
+      `${ACT_ICONS[item.status] || "•"} ${mark}${esc(item.title)}`));
     // Крестик убирает тему из панели. Сама беседа остаётся в чатах проекта —
     // уходит только строка активности.
     const close = el("button", "act-close", "✕");
@@ -3416,6 +3562,7 @@ function bindProjects() {
     btn.disabled = false; btn.textContent = "✅ Валидация";
     toast("Валидация", res.message || "", res.valid ? "ok" : "warn");
   };
+  $("btn-test-project").onclick = () => startTesterRun(state.project);
   $("btn-doc-raw").onclick = () => { state.docRaw = !state.docRaw; renderDoc(); };
   $("btn-doc-copy").onclick = async () => {
     await navigator.clipboard.writeText(state.docContent);

@@ -581,6 +581,28 @@ async def chats_send(slug: str, request: Request) -> Dict[str, Any]:
     )
 
 
+@app.post("/api/chats/{slug}/tester")
+async def chats_tester(slug: str, request: Request) -> Dict[str, Any]:
+    """Прогнать игру тестером площадки, показывая ход дела в чате."""
+    payload = await _body(request)
+    return service.run_tester_chat(_slug(slug), payload.get("session_id"))
+
+
+@app.post("/api/chats/{slug}/{session_id}/tester-fix")
+async def chats_tester_fix(slug: str, session_id: str, request: Request) -> Dict[str, Any]:
+    """Отдать находки последнего прогона агенту — в тот же чат."""
+    payload = await _body(request)
+    agent = payload.get("agent") or service.default_agent()
+    if agent not in AGENT_KEYS:
+        return {"status": "error", "message": f"Неизвестный агент: {agent}"}
+    return service.send_tester_findings(
+        _slug(slug), session_id,
+        agent_key=agent,
+        model=(payload.get("model") or "").strip() or None,
+        yolo=bool(payload.get("yolo", True)),
+    )
+
+
 @app.post("/api/chats/{slug}/{session_id}/stop")
 def chats_stop(slug: str, session_id: str) -> Dict[str, Any]:
     return service.stop_chat(session_id)

@@ -1551,6 +1551,55 @@ textarea {
   word-break: break-word;
 }
 
+/* Живой лог в ленте: прогон тестера площадки пишет сотни строк, и все они
+   ложатся в один растущий блок. Хвост виден всегда, целиком — прокруткой,
+   целиком свернуть — кликом по шапке. */
+.bubble.log {
+  align-self: flex-start;
+  width: 94%;
+  max-width: 94%;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-subtle);
+  padding: 4px 6px;
+  white-space: normal;
+}
+.bubble.log .log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.bubble.log .log-head:hover { background: var(--bg-card-hover); }
+.bubble.log .chev { color: var(--text-dim); font-size: 10px; flex: 0 0 12px; }
+.bubble.log .log-title { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.bubble.log .log-sub {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bubble.log .log-body {
+  margin: 0;
+  padding: 6px 8px 8px;
+  max-height: 260px;
+  overflow: auto;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bubble.log.collapsed .log-body { display: none; }
+
 /* Финальный ответ агента */
 .bubble.answer {
   width: 94%;
