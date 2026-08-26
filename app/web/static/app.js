@@ -42,18 +42,38 @@ async function api(path, options = {}) {
 // значения раскладки поддерживаем как алиасы, чтобы не сломать закладку в localStorage.
 const LEGACY_VIEW_TO_SETTINGS_TAB = { quota: "quota", storage: "storage" };
 
+/* ── Адрес страницы = состояние интерфейса ────────────────────────────────
+ *
+ * Интерфейс — одна страница, и раньше он весь жил в localStorage. Из-за этого
+ * новая вкладка открывалась «с нуля»: экран по умолчанию, проект тот, что
+ * лежал в localStorage, а открытый чат терялся совсем — со стороны выглядело
+ * так, будто фабрика потеряла и чаты, и проекты. Теперь то же состояние
+ * лежит в query-строке (?view=chats&project=…&chat=…), поэтому любую вкладку
+ * можно продублировать, положить в закладки и открыть средней кнопкой мыши.
+ * localStorage остался запаской для адреса без параметров.
+ */
+const VIEWS = ["studio", "projects", "favorites", "chats", "play", "demo", "settings"];
+const ROUTE = new URLSearchParams(location.search);
+const routeGet = (key) => ROUTE.get(key) || null;
+
+function initialView() {
+  const wanted = routeGet("view");
+  if (wanted && VIEWS.includes(wanted)) return wanted;
+  const saved = localStorage.getItem("view") || "studio";
+  const resolved = LEGACY_VIEW_TO_SETTINGS_TAB[saved] ? "settings" : saved;
+  return VIEWS.includes(resolved) ? resolved : "studio";
+}
+
 const state = {
   boot: null,
-  view: (() => {
-    const saved = localStorage.getItem("view") || "studio";
-    return LEGACY_VIEW_TO_SETTINGS_TAB[saved] ? "settings" : saved;
-  })(),
-  settingsTab: LEGACY_VIEW_TO_SETTINGS_TAB[localStorage.getItem("view")] ||
+  view: initialView(),
+  settingsTab: routeGet("tab") ||
+    LEGACY_VIEW_TO_SETTINGS_TAB[localStorage.getItem("view")] ||
     localStorage.getItem("settingsTab") || "config",
-  project: localStorage.getItem("project") || null,
+  project: routeGet("project") || localStorage.getItem("project") || null,
   session: null,
   sessionRunning: false,
-  doc: "AI_DEVELOPER_PROMPT.md",
+  doc: routeGet("doc") || "AI_DEVELOPER_PROMPT.md",
   docRaw: false,
   docContent: "",
   attachments: [],    // вложения, готовые уйти со следующим сообщением агенту
@@ -84,6 +104,36 @@ const state = {
   theme: localStorage.getItem("theme") || "dark",
 };
 
+/* Адрес экрана. `over` перекрывает отдельные поля — так строятся ссылки для
+   соседних вкладок («открыть вон тот чат», «открыть вон тот проект»), не
+   трогая то, что открыто здесь. */
+function routeUrl(over = {}) {
+  const pick = (key, fallback) => (over[key] !== undefined ? over[key] : fallback);
+  const view = pick("view", state.view);
+  const query = new URLSearchParams();
+  query.set("view", view);
+
+  const tab = pick("tab", view === "settings" ? state.settingsTab : null);
+  if (view === "settings" && tab) query.set("tab", tab);
+
+  const project = pick("project", state.project);
+  if (project) query.set("project", project);
+
+  const chat = pick("chat", view === "chats" ? state.session : null);
+  if (view === "chats" && chat) query.set("chat", chat);
+
+  const doc = pick("doc", view === "projects" ? state.doc : null);
+  if (view === "projects" && doc) query.set("doc", doc);
+
+  return `${location.pathname}?${query.toString()}`;
+}
+
+/** Переписать адрес текущей вкладки под текущее состояние — без записи в историю. */
+function syncRoute() {
+  const url = routeUrl();
+  if (url !== location.pathname + location.search) history.replaceState(null, "", url);
+}
+
 /* ── Тосты ────────────────────────────────────────────────────────────── */
 
 function toast(title, text, kind = "", actions = []) {
@@ -109,6 +159,7 @@ function toast(title, text, kind = "", actions = []) {
 function showView(name) {
   state.view = name;
   localStorage.setItem("view", name);
+  syncRoute();
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   $(`view-${name}`).classList.add("active");
   document.querySelectorAll(".nav-btn").forEach((b) =>
@@ -127,6 +178,7 @@ function showView(name) {
 function showSettingsTab(name) {
   state.settingsTab = name;
   localStorage.setItem("settingsTab", name);
+  syncRoute();
   document.querySelectorAll(".settings-tab-panel").forEach((p) =>
     p.classList.toggle("hidden", p.id !== `settings-panel-${name}`));
   document.querySelectorAll("#settings-tabs .tab").forEach((b) =>
@@ -650,6 +702,7 @@ async function deleteProject(project) {
     state.session = null;
     state.detail = null;
     localStorage.removeItem("project");
+    syncRoute();
     clearFeed();
     $("project-title").textContent = "Выберите проект из списка слева";
     $("project-meta").textContent = "";
@@ -711,6 +764,8 @@ function renderFavorites() {
     actions.append(play, open, off);
     card.appendChild(actions);
 
+    card.dataset.tabUrl = routeUrl({ view: "projects", project: p.slug });
+    play.dataset.tabUrl = routeUrl({ view: "play", project: p.slug });
     card.onclick = () => { showView("projects"); selectProject(p.slug); };
     box.appendChild(card);
   });
@@ -782,6 +837,8 @@ async function loadGallery() {
     actions.append(play, open, gate, platform, rename, archive, remove);
     card.appendChild(actions);
 
+    card.dataset.tabUrl = routeUrl({ view: "projects", project: p.slug });
+    play.dataset.tabUrl = routeUrl({ view: "play", project: p.slug });
     card.onclick = () => selectProject(p.slug);
     box.appendChild(card);
   });
@@ -835,6 +892,7 @@ async function loadProjects() {
     line.appendChild(el("span", "dim", p.created_label ? esc(p.created_label) : ""));
     info.appendChild(line);
     item.appendChild(info);
+    item.dataset.tabUrl = routeUrl({ view: "projects", project: p.slug });
     item.onclick = () => selectProject(p.slug);
     box.appendChild(item);
   });
@@ -866,6 +924,9 @@ function renderProjectBanner() {
   $("btn-test-project").title = detail.playable
     ? "Прогнать игру тестером площадки — ход дела и отчёт придут в чат разработки"
     : "Гонять нечего: у проекта ещё нет игры";
+  // Куда эти кнопки ведут, если нажать их колесиком мыши.
+  $("btn-play-project").dataset.tabUrl = routeUrl({ view: "play", project: detail.slug });
+  $("btn-continue-agent").dataset.tabUrl = routeUrl({ view: "chats", project: detail.slug, chat: null });
 }
 
 async function selectProject(slug) {
@@ -874,6 +935,7 @@ async function selectProject(slug) {
   localStorage.setItem("project", slug);
   state.session = null;
   showView("projects");
+  syncRoute();
   const detail = await api(`/api/projects/${encodeURIComponent(slug)}`);
   state.detail = detail;
   renderProjectBanner();
@@ -896,6 +958,7 @@ function docTabButtons() {
   ];
   tabs.forEach((tab) => {
     const btn = el("button", `tab ${tab.key === state.doc ? "active" : ""}`, esc(tab.label));
+    btn.dataset.tabUrl = routeUrl({ view: "projects", project: state.project, doc: tab.key });
     btn.onclick = () => openDoc(tab.key);
     box.appendChild(btn);
   });
@@ -903,6 +966,7 @@ function docTabButtons() {
 
 async function openDoc(key) {
   state.doc = key;
+  syncRoute();
   docTabButtons();
   const view = $("doc-view");
   if (!state.project) { view.innerHTML = '<div class="muted">Выберите проект.</div>'; return; }
@@ -1191,7 +1255,11 @@ function fillChatProjects() {
   select.innerHTML = "";
   projects.forEach((p) => select.appendChild(new Option(p.title || p.slug, p.slug)));
   if (!state.project) {
-    if (projects.length) { state.project = select.value; localStorage.setItem("project", state.project); }
+    if (projects.length) {
+      state.project = select.value;
+      localStorage.setItem("project", state.project);
+      syncRoute();
+    }
     return;
   }
   if (!projects.some((p) => p.slug === state.project)) {
@@ -1235,6 +1303,7 @@ async function loadChats() {
         }
         loadChats();
       };
+      row.dataset.tabUrl = routeUrl({ view: "chats", project: state.project, chat: s.id });
       row.append(open, del);
       box.appendChild(row);
     });
@@ -1268,6 +1337,7 @@ async function openChat(sessionId, justStarted = false) {
 
   state.session = sessionId;
   state.sessionRunning = res.running;
+  syncRoute();
   const session = res.session;
   renderRunBar(res.run);
   $("chat-session-name").textContent = `💬 ${session.title}${session.resumable ? " 🔗" : ""}`;
@@ -1912,8 +1982,20 @@ async function startTesterRun(slug) {
 
 function updateChatButtons() {
   const project = (state.projects || []).find((p) => p.slug === state.project);
-  $("btn-chat-play").disabled = !(project && project.playable);
-  $("btn-chat-play").textContent = project && project.playable ? "▶ Играть" : "▶ Нет кода";
+  const playable = !!(project && project.playable);
+  $("btn-chat-play").disabled = !playable;
+  $("btn-chat-play").textContent = playable ? "▶ Играть" : "▶ Нет кода";
+  if (playable) $("btn-chat-play").dataset.tabUrl = routeUrl({ view: "play", project: state.project });
+  else delete $("btn-chat-play").dataset.tabUrl;
+  // Тестер площадки прямо из чата: чинить его находки всё равно этим же
+  // агентом и в этой же переписке, ходить за кнопкой в шапку проекта незачем.
+  const test = $("btn-chat-test");
+  test.disabled = !playable || state.sessionRunning;
+  test.title = !playable
+    ? "Гонять нечего: у проекта ещё нет игры"
+    : (state.sessionRunning
+      ? "Чат занят: дождитесь конца работы или нажмите «⏹ Стоп»"
+      : "Прогнать игру тестером площадки — ход дела и отчёт придут прямо в этот чат");
   $("btn-chat-stop").disabled = !state.sessionRunning;
   // Откат живёт в самой ленте — кнопка ↩ у каждого запроса пользователя.
 }
@@ -1992,6 +2074,7 @@ function renderActivity() {
     }
     if (foot.children.length) node.appendChild(foot);
 
+    node.dataset.tabUrl = routeUrl({ view: "chats", project: item.slug, chat: item.session_id });
     node.onclick = () => {
       state.project = item.slug;
       localStorage.setItem("project", item.slug);
@@ -3575,6 +3658,7 @@ function bindChats() {
     state.project = $("chat-project").value;
     localStorage.setItem("project", state.project);
     state.session = null;
+    syncRoute();
     clearFeed();
     renderRunBar(null);
     // Вложения лежат в папке прежней игры — в новый проект они не переезжают.
@@ -3644,6 +3728,7 @@ function bindChats() {
     toast("Чат", "Лента скопирована", "ok");
   };
   $("btn-chat-play").onclick = () => state.project && openPlay(state.project);
+  $("btn-chat-test").onclick = () => startTesterRun(state.project);
   $("btn-chat-terminal").onclick = async () => {
     const res = await api(`/api/agents/${$("chat-agent").value}/terminal`, {
       body: { slug: state.project, prompt: $("chat-input").value.trim(), yolo: $("chk-yolo").checked },
@@ -3739,6 +3824,55 @@ function toggleTheme() {
   applyTheme(state.theme === "light" ? "dark" : "light");
 }
 
+/* ── Колесо мыши по кнопке = «открыть в новой вкладке» ─────────────────────
+ *
+ * Интерфейс собран на <button>, а не на ссылках, поэтому браузер сам ничего
+ * в новую вкладку не открывает. Делаем это руками:
+ *   • у всего, что куда-то ведёт (проект, чат, вкладка документа, раздел
+ *     навигации), при отрисовке проставлен data-tab-url — открываем его;
+ *   • остальные кнопки открывают копию текущего экрана — нажать их там
+ *     человек сможет сам.
+ * Само действие кнопки при этом не выполняется: средняя кнопка даёт
+ * `auxclick`, а не `click`, поэтому обработчики onclick молчат — «🗑 Удалить»
+ * колесиком ничего не удалит.
+ */
+function tabUrlFor(target) {
+  if (!target || !target.closest) return null;
+  // Настоящие ссылки и поля ввода браузер обрабатывает сам: ссылка и так
+  // откроется новой вкладкой, а в поле средняя кнопка вставляет выделение.
+  if (target.closest("a[href], input, textarea, select")) return null;
+
+  const explicit = target.closest("[data-tab-url]");
+  if (explicit) return explicit.dataset.tabUrl;
+
+  const nav = target.closest(".nav-btn[data-view]");
+  if (nav && VIEWS.includes(nav.dataset.view)) return routeUrl({ view: nav.dataset.view });
+
+  const settingsTab = target.closest("[data-settings-tab]");
+  if (settingsTab) return routeUrl({ view: "settings", tab: settingsTab.dataset.settingsTab });
+
+  // Всё остальное кликабельное — дубль текущего экрана.
+  return target.closest("button, .tab, .list-item, .game-card, .act-item, .chat-row")
+    ? routeUrl()
+    : null;
+}
+
+function bindMiddleClick() {
+  // Chrome по средней кнопке включает автопрокрутку и вешает «компас» поверх
+  // интерфейса — гасим её ещё на mousedown, иначе он останется висеть.
+  document.addEventListener("mousedown", (e) => {
+    if (e.button === 1 && tabUrlFor(e.target)) e.preventDefault();
+  });
+  document.addEventListener("auxclick", (e) => {
+    if (e.button !== 1) return;
+    const url = tabUrlFor(e.target);
+    if (!url) return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(url, "_blank", "noopener");
+  }, true);
+}
+
 function bindCommon() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.onclick = () => showView(btn.dataset.view);
@@ -3818,6 +3952,7 @@ async function boot() {
   $("chat-sandbox").textContent = `🔒 Песочница: ${state.boot.settings.sandbox_root}`;
 
   bindCommon();
+  bindMiddleClick();
   bindSettingsExtras();
   bindStudio();
   bindProjects();
@@ -3852,6 +3987,15 @@ async function boot() {
     if (!exists) { state.project = null; localStorage.removeItem("project"); }
   }
   if (state.project && state.view === "projects") selectProject(state.project);
+
+  // Ссылка вида ?view=chats&project=…&chat=… должна открыть именно этот чат,
+  // а не просто список чатов проекта: иначе новая вкладка выглядит пустой.
+  const wantedChat = routeGet("chat");
+  if (state.project && state.view === "chats" && wantedChat) {
+    fillChatProjects();
+    await openChat(wantedChat);
+  }
+  syncRoute();
 }
 
 /* ── Доступ: пароль и база данных ─────────────────────────────────────── */

@@ -133,6 +133,23 @@ def test_the_settings_screen_writes_through_the_safe_writer(tmp_path, monkeypatc
     assert "DEFAULT_AGENT=agy" in after
 
 
+def test_the_suite_cannot_reach_the_env_the_factory_actually_runs_on():
+    """Сторож: `.env` на время прогона уведён во временный каталог.
+
+    Тест выше подменяет `BASE_DIR` сам, и так делает не всякий: тест слияния
+    механик просто звал сохранение настроек — и после каждого `pytest` в
+    рабочем `.env` пользователя оседала строка `ALLOW_TEMPLATE_MIXING=0`.
+    Разница между «дописал строку» и «стёр токен» здесь ровно в одном поле
+    payload, а восстанавливать токены неоткуда. Подмена живёт в conftest;
+    отсюда проверяется, что она на месте.
+    """
+    from app.config import BASE_DIR
+    from app.web import service as web_service
+
+    assert web_service.BASE_DIR != BASE_DIR
+    assert not (web_service.BASE_DIR / "app").exists(), "это не корень фабрики"
+
+
 # ------------------------------------------------------------------ браузер
 
 LINUX_FAILURE = """\
