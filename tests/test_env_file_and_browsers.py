@@ -209,3 +209,48 @@ def test_system_dependencies_are_only_attempted_as_root(monkeypatch):
 
     monkeypatch.setattr(gametest.os, "name", "nt")
     assert "--with-deps" not in gametest._browser_install_cmd()
+
+
+# ------------------------------------------------------------ токен и окружение
+
+def test_a_missing_token_blames_the_save_button_not_the_variable_name():
+    """Зелёная проверка доступа и незаполненное окружение — разные вещи.
+
+    «Проверить доступ» спрашивает GitHub про значения из формы и на верном
+    токене отвечает зелёным по всем трём адресам. Читается это как
+    «настроено», хотя в окружении фабрики токена всё ещё нет — и следующий шаг
+    упирается в «токена нет». Сообщение обязано называть недостающее действие,
+    а не имя переменной.
+    """
+    from app.config import BASE_DIR
+
+    cfg = gametest.settings()
+    cfg.tool_dir = BASE_DIR / "tests" / "нет-такого-каталога"
+    cfg.repo = "Choclate-games/AI_Tester"
+
+    saved = {name: __import__("os").environ.pop(name, None)
+             for name in ("GAMETEST_TOKEN", "ZAVOD_KNOWLEDGE_TOKEN", "GITHUB_TOKEN")}
+    try:
+        _dir, reason = gametest.ensure_tool(cfg)
+    finally:
+        for name, value in saved.items():
+            if value is not None:
+                __import__("os").environ[name] = value
+
+    assert "Сохранить" in reason, "не сказано главное — что настройку надо сохранить"
+    assert "Общий токен" in reason, "названо не то поле, которое человек и заполняет"
+
+
+def test_a_token_with_stray_characters_says_so_plainly():
+    """Заголовок HTTP не бывает не-ASCII, и токен GitHub тоже.
+
+    Без проверки такой токен доходил до отправки и валился внутри http.client
+    сообщением «'latin-1' codec can't encode characters in position 11-23» —
+    оно читается как отказ сети, а означает опечатку в поле ввода.
+    """
+    from app import github_access
+
+    result = github_access.identity("ghp_кириллица")
+    assert result["ok"] is False
+    assert "codec" not in result["message"]
+    assert "скопируйте его заново" in result["message"]

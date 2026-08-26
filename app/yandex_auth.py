@@ -251,10 +251,6 @@ def login(
     on_log("Если его там ещё нет — это клонирование, npm install и Chromium: несколько минут.\n")
     tool_dir, reason = gametest.ensure_tool(cfg, on_log, stop_check)
     if not tool_dir:
-        # Про токен говорим адресом настройки, а не именем переменной: теперь
-        # у неё есть своё поле, и отсылать человека править .env руками незачем.
-        if "токена нет" in reason:
-            reason += ". Задать его: Настройки → 🐙 GitHub → «Тестер площадки»"
         on_log(f"❌ {reason}\n")
         return {"ok": False, "message": reason}
 

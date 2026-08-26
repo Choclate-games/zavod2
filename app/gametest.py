@@ -343,8 +343,15 @@ def ensure_tool(cfg: Settings, on_log: LogFn = lambda _line: None,
             return None, f"каталог {target} есть, но это не тестер (нет src/cli.ts)"
         secret = token()
         if not secret:
-            return None, ("репозиторий тестера приватный, а токена нет — задайте "
-                          "GAMETEST_TOKEN (или ZAVOD_KNOWLEDGE_TOKEN / GITHUB_TOKEN)")
+            # Про кнопку «Сохранить» — не из вежливости. Рядом на вкладке стоит
+            # «Проверить доступ», она спрашивает GitHub про значения из формы и
+            # на верном токене отвечает зелёным. Выглядит это как «настроено»,
+            # хотя в окружении фабрики токена всё ещё нет, и следующий шаг
+            # упирается сюда.
+            return None, ("репозиторий тестера приватный, а токена в окружении фабрики нет. "
+                          "Настройки → 🐙 GitHub: впишите «Общий токен» (или свой у «Тестера "
+                          "площадки») и нажмите «💾 Сохранить в .env» — одной проверки доступа "
+                          "недостаточно")
         url = f"https://x-access-token:{secret}@github.com/{cfg.repo}.git"
         target.parent.mkdir(parents=True, exist_ok=True)
         on_log(f"📥 Клонирую тестер {cfg.repo}@{cfg.ref} в {target}\n")

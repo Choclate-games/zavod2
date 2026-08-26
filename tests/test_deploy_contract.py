@@ -412,3 +412,32 @@ def test_the_pinned_playwright_matches_the_tester():
         f"ожидалась точная версия, а не «{pinned.group(1)}»: `latest` здесь означает "
         "молчаливое расхождение с тестером в первый же день"
     )
+
+
+# ── Настройки, сохранённые из веба ─────────────────────────────────────────
+#
+# `env_file: .env` читает файл С ХОСТА один раз, при создании контейнера, и
+# раздаёт его содержимое переменными окружения. Сам файл внутрь не попадает:
+# он исключён из образа (.dockerignore).
+#
+# А экран настроек пишет `.env` — токены GitHub, ключи агентов, адрес моста.
+# Без бинд-монта он создавал внутри контейнера новый файл-сироту: его не
+# читает ни compose, ни следующий запуск, с хоста его не видно, и первый же
+# деплой уносил его вместе с контейнером. Выглядело это как «настройка не
+# сохраняется», а на деле не сохранялась ни одна.
+
+def _factory_volumes() -> list:
+    return yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["factory"]["volumes"]
+
+
+def test_the_factory_edits_the_same_env_that_compose_reads():
+    """Иначе всё, сохранённое из веба, живёт до перезапуска."""
+    assert any(str(v).startswith("./.env:") for v in _factory_volumes()), (
+        "`.env` не смонтирован в контейнер — экран настроек пишет в никуда"
+    )
+
+
+def test_the_env_is_still_kept_out_of_the_image():
+    """Монт — не повод класть секреты в слой образа."""
+    ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert ".env" in [line.strip() for line in ignore]

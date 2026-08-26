@@ -37,6 +37,13 @@ TIMEOUT = 20
 
 def _get(path: str, token: str) -> tuple[int, dict]:
     """Запрос к API. Возвращает код ответа и тело (пустое — если не JSON)."""
+    # Заголовок HTTP не бывает не-ASCII, и токен GitHub тоже. Без этой проверки
+    # такой токен доходил до отправки и валился внутри http.client сообщением
+    # «'latin-1' codec can't encode characters in position 11-23», которое
+    # выглядит как отказ сети, а означает опечатку в поле ввода.
+    if token and not token.isascii():
+        return 0, {"message": "в токене есть символы, которых в нём быть не может "
+                              "(кириллица, кавычки, перенос строки) — скопируйте его заново"}
     request = urllib.request.Request(f"{API}{path}")
     request.add_header("Accept", "application/vnd.github+json")
     request.add_header("X-GitHub-Api-Version", "2022-11-28")

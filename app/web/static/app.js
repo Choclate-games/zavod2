@@ -2869,15 +2869,50 @@ function collectGithub() {
   };
 }
 
+/**
+ * Отличается ли то, что в форме, от того, что уже лежит в `.env`.
+ *
+ * Нужно ровно одному месту — отчёту проверки. Проверка спрашивает GitHub про
+ * значения из формы, и зелёные галочки на несохранённом токене читаются как
+ * «всё настроено»: следующим действием человек жмёт «Войти», а фабрика
+ * отвечает «токена нет», потому что в окружении его и правда нет.
+ */
+function githubDiffersFromSaved() {
+  const saved = (state.boot.settings && state.boot.settings.github) || {};
+  const now = collectGithub();
+  const same = (a, b) => (a || "") === (b || "");
+  return !(
+    same(now.token, saved.token) &&
+    same(now.knowledge.repo, (saved.knowledge || {}).repo) &&
+    same(now.knowledge.ref, (saved.knowledge || {}).ref) &&
+    same(now.knowledge.token, (saved.knowledge || {}).token) &&
+    same(now.tester.dir, (saved.tester || {}).dir) &&
+    same(now.tester.repo, (saved.tester || {}).repo) &&
+    same(now.tester.ref, (saved.tester || {}).ref) &&
+    same(now.tester.token, (saved.tester || {}).token) &&
+    same(now.bridge.source, (saved.bridge || {}).source)
+  );
+}
+
 async function checkGithub() {
   const button = $("btn-github-check");
   const report = $("gh-report");
   button.disabled = true;
   button.textContent = "⏳ Спрашиваю GitHub…";
   report.innerHTML = "";
+  const unsaved = githubDiffersFromSaved();
   const res = await api("/api/github/check", { body: collectGithub() });
   button.disabled = false;
   button.textContent = "🔌 Проверить доступ";
+
+  if (unsaved) {
+    const warn = el("div", "github-row bad");
+    warn.appendChild(el("b", "", "⚠️ Проверено то, что в форме — но в .env этого ещё нет"));
+    warn.appendChild(el("span", "small",
+      "Фабрика берёт токен из своего окружения, а не из этих полей. "
+      + "Нажмите «💾 Сохранить в .env», иначе вход и прогон по-прежнему его не увидят."));
+    report.appendChild(warn);
+  }
 
   const who = res.identity || {};
   const head = el("div", "small");
