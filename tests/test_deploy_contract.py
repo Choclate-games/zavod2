@@ -20,14 +20,50 @@
 описью до и после. Тесты стерегут обе договорённости.
 """
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def posix_bash() -> str:
+    """Настоящий bash, а не первый одноимённый файл в PATH.
+
+    На Windows `bash` из PATH — это `C:\\Windows\\System32\\bash.exe`, пусковик
+    WSL. Без установленного дистрибутива он не выполняет ничего, а печатает
+    предложение поставить Linux — и печатает его в stdout с кодом возврата 1.
+    Тест, сравнивающий stdout с ожидаемым словом, честно краснел, и выглядело
+    это как сломанная защита игр, хотя проверяемый скрипт при этом ни разу не
+    запускался.
+
+    Поэтому кандидаты проверяются делом: тот, кто ответил на `echo`, и есть
+    bash. Если такого нет — проверять нечем, и тест пропускается, а не врёт.
+    """
+    candidates = [shutil.which("bash")]
+    if shutil.which("git"):
+        # Рядом с git на Windows всегда лежит его собственный bash.
+        git_root = Path(shutil.which("git")).resolve().parent.parent
+        candidates += [str(git_root / "bin" / "bash.exe"),
+                       str(git_root / "usr" / "bin" / "bash.exe")]
+    for candidate in candidates:
+        if not candidate or not Path(candidate).exists():
+            continue
+        try:
+            probe = subprocess.run([candidate, "-c", "echo ok"],
+                                   capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return candidate
+    pytest.skip("на этой машине нет работающего bash — скрипт деплоя проверить нечем")
 WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
 SCRIPT = ROOT / "docker" / "deploy.sh"
 COMMAND = ROOT / "docker" / "deploy-command.sh"
+DOCKERFILE = ROOT / "Dockerfile"
 SETUP = ROOT / "docker" / "setup-deploy.sh"
 BOOTSTRAP = ROOT / "docker" / "bootstrap.sh"
 COMPOSE = ROOT / "compose.yml"
@@ -239,7 +275,7 @@ def test_the_games_guard_survives_a_real_repository(tmp_path):
     Поэтому тест поднимает репозиторий, где удалений заведомо больше буфера
     трубы, и гоняет ровно ту функцию, что лежит в скрипте.
     """
-    import subprocess
+    bash = posix_bash()
 
     repo = tmp_path / "repo"
     (repo / "workspace" / "game" / "src" / "deep" / "nested" / "dir").mkdir(parents=True)
@@ -272,12 +308,17 @@ def test_the_games_guard_survives_a_real_repository(tmp_path):
     body = source[start:source.index("\n}", start) + 2]
 
     probe = subprocess.run(
-        ["bash", "-c", f'set -euo pipefail\nGAME_DIRS="workspace output"\n{body}\n'
-                       'if merge_would_delete_games; then echo ДА; else echo НЕТ; fi'],
-        cwd=repo, capture_output=True, text=True,
+        [bash, "-c", f'set -euo pipefail\nGAME_DIRS="workspace output"\n{body}\n'
+                     'if merge_would_delete_games; then echo ДА; else echo НЕТ; fi'],
+        cwd=repo, capture_output=True,
+        # Кодировка явная: `text=True` разбирает вывод кодовой страницей системы
+        # (на русской Windows — cp1251), а bash пишет UTF-8. «ДА» приезжало как
+        # «Р”РЂ», сравнение не сходилось, и выглядело это как сломанная защита.
+        encoding="utf-8", errors="replace",
     )
     assert probe.stdout.strip() == "ДА", (
         "защита не увидела удалений — игры на мини-ПК уехали бы вместе с merge"
+        f"\nstdout: {probe.stdout!r}\nstderr: {probe.stderr!r}"
     )
 
 
@@ -324,3 +365,50 @@ def test_the_tracked_showcase_is_resynced_after_restore():
     script = SCRIPT.read_text(encoding="utf-8")
     assert "checkout -q -- workspace/knowledge-showcase" in script
     assert "checkout -q -- workspace/.factory" not in script
+
+
+# ── Браузер тестера внутри контейнера ──────────────────────────────────────
+#
+# Прогон игры на площадке ведёт Playwright. Сам браузер он качает себе в
+# ~/.cache/ms-playwright — это том factory-home, он переживает деплои. А
+# системные библиотеки к нему ставит пакетный менеджер и только от root,
+# которого у фабрики в контейнере не бывает никогда.
+#
+# Без них Chromium стартует ровно один раз и умирает с кодом 127
+# (`error while loading shared libraries: libglib-2.0.so.0`), а фабрика
+# показывает «Вход не состоялся» — про окно, которого не было ни секунды.
+# Поставить их постфактум нельзя даже руками по ssh: контейнер пересоздаётся
+# каждым деплоем. Значит, единственное место — сборка образа.
+
+def test_the_image_installs_chromium_system_libraries():
+    """Слой с зависимостями браузера обязан быть в образе."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert "playwright" in text and "install-deps" in text, (
+        "в образе нет системных библиотек Chromium — прогон на площадке и вход "
+        "в Яндекс упрутся в `error while loading shared libraries`"
+    )
+
+
+def test_browser_libraries_are_installed_as_root():
+    """Ставятся до `USER factory`: apt от обычного пользователя не работает."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert text.index("install-deps") < text.index("\nUSER factory"), (
+        "слой install-deps оказался после смены пользователя — apt там уже не пройдёт"
+    )
+
+
+def test_the_pinned_playwright_matches_the_tester():
+    """Набор зависимостей у браузера свой в каждой версии Playwright.
+
+    Образ ставит библиотеки одной версией, а тестер потом качает браузер
+    другой — и расхождение всплывает как тот же самый отказ запуска, но уже
+    без внятной причины. Версия закреплена рядом с версиями агентов, тем же
+    способом; здесь проверяется, что её вообще не забыли закрепить.
+    """
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    pinned = re.search(r"ARG PLAYWRIGHT_VERSION=(\S+)", text)
+    assert pinned, "версия Playwright для системных библиотек не закреплена"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", pinned.group(1)), (
+        f"ожидалась точная версия, а не «{pinned.group(1)}»: `latest` здесь означает "
+        "молчаливое расхождение с тестером в первый же день"
+    )

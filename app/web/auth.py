@@ -267,26 +267,17 @@ def _persist_env(key: str, value: str) -> None:
     """
     Точечно правит один ключ в .env.
 
-    Свой маленький писатель, а не `service.persist_env_value`, потому что
-    сервис импортирует auth: обратный импорт замкнул бы круг.
+    Не `service.persist_env_value`, потому что сервис импортирует auth и
+    обратный импорт замкнул бы круг. Сама правка — общая (`app/envfile.py`):
+    у неё нет зависимостей, замыкать нечего, а свой маленький писатель здесь
+    правил только первое вхождение ключа — при дубликате в файле побеждало
+    оставшееся ниже старое значение, и смена пароля молча не срабатывала.
     """
+    from app import envfile
     from app.config import BASE_DIR
 
-    path = BASE_DIR / ".env"
-    lines: List[str] = []
-    if path.exists():
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            lines = []
-    for index, line in enumerate(lines):
-        if line.strip().startswith(f"{key}="):
-            lines[index] = f"{key}={value}"
-            break
-    else:
-        lines.append(f"{key}={value}")
     try:
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        envfile.update(BASE_DIR / ".env", {key: value})
     except OSError:
         pass
     os.environ[key] = value

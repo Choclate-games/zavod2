@@ -35,8 +35,8 @@ import yaml
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 from app import acceptance, chat_store, library, notify, project_meta, recent, sandbox, snapshots, uploads
-from app import (archive, bridge_package, builds, db, gametest, gate_stats, github_access,
-                 pkgstore, sysinfo, yandex_auth)
+from app import (archive, bridge_package, builds, db, envfile, gametest, gate_stats,
+                 github_access, pkgstore, sysinfo, yandex_auth)
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
@@ -3684,14 +3684,10 @@ class FactoryService:
 
     def save_settings(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         env_path = BASE_DIR / ".env"
+        # Только то, что просили изменить: остальное в файле не трогается вовсе.
+        # Раньше сюда вычитывался весь `.env` и записывался обратно голым
+        # списком пар — вместе с комментариями, разделами и шапкой.
         env_lines: Dict[str, str] = {}
-        if env_path.exists():
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    stripped = line.strip()
-                    if stripped and not stripped.startswith("#") and "=" in stripped:
-                        key, value = stripped.split("=", 1)
-                        env_lines[key.strip()] = value.strip()
 
         agents = payload.get("agents") or {}
         for key, values in agents.items():
@@ -3779,9 +3775,7 @@ class FactoryService:
         for key, value in env_lines.items():
             os.environ[key] = value
 
-        with open(env_path, "w", encoding="utf-8") as f:
-            for key, value in env_lines.items():
-                f.write(f"{key}={value}\n")
+        envfile.update(env_path, env_lines)
 
         bus.publish("settings.changed")
         return {"status": "success", "message": "✅ Настройки сохранены в .env!"}
@@ -3973,23 +3967,8 @@ class FactoryService:
 
     def persist_env_value(self, key: str, value: str) -> None:
         """Точечно дописывает один ключ в .env, не трогая остальные настройки."""
-        env_path = BASE_DIR / ".env"
-        lines: List[str] = []
-        replaced = False
-        if env_path.exists():
-            try:
-                lines = env_path.read_text(encoding="utf-8").splitlines()
-            except OSError:
-                lines = []
-        for index, line in enumerate(lines):
-            if line.strip().startswith(f"{key}="):
-                lines[index] = f"{key}={value}"
-                replaced = True
-                break
-        if not replaced:
-            lines.append(f"{key}={value}")
         try:
-            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            envfile.update(BASE_DIR / ".env", {key: value})
         except OSError:
             pass
         os.environ[key] = value

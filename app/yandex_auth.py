@@ -274,7 +274,7 @@ def login(
         on_log("Окно закроется само, как только вход состоится.\n")
         args = ["auth", PLATFORM, "-p", cfg.profile, "--no-prompt", "--wait", str(wait_seconds)]
 
-    code, _tail = gametest._run(  # noqa: SLF001 — общий запуск процессов тестера
+    code, tail = gametest._run(  # noqa: SLF001 — общий запуск процессов тестера
         [gametest._npx(), "tsx", "src/cli.ts", *args],
         tool_dir, on_log, stop_check, wait_seconds + 120,
     )
@@ -284,6 +284,16 @@ def login(
         return {"ok": True, "message": "Вход выполнен, сессия сохранена.", "session": current}
     if code == -2:
         return {"ok": False, "message": "Вход прерван.", "session": current}
+
+    # Браузер, который не смог стартовать, — не «человек не успел войти».
+    # Проверяем до таймаута: без этого нехватка системных библиотек выглядела
+    # как «вход не состоялся за 900 с», хотя окна не было ни секунды.
+    blocked = gametest.browser_blocker(tail)
+    if blocked:
+        gametest.forget_browsers(tool_dir)
+        on_log(f"❌ {blocked}\n")
+        return {"ok": False, "message": blocked, "session": current}
+
     if code == -3:
         return {"ok": False, "message": f"Вход не состоялся за {wait_seconds} с.", "session": current}
     return {"ok": False, "message": "Вход не состоялся — сессия не сохранена.", "session": current}

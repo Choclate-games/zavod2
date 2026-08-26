@@ -275,6 +275,58 @@ def _git() -> str:
     return shutil.which("git") or "git"
 
 
+def _browser_install_cmd() -> List[str]:
+    """Чем ставить Chromium.
+
+    Сам браузер ставится всегда, системные библиотеки к нему — только если мы
+    root. `--with-deps` зовёт пакетный менеджер, и без root он не проходит: под
+    обычным пользователем это гарантированно провалившийся apt перед установкой,
+    которая и так бы прошла.
+
+    В контейнере фабрики (`Dockerfile`, пользователь `factory`) root не бывает
+    никогда — библиотеки туда кладёт сборка образа. Ветка с root остаётся для
+    запуска на голой машине, где фабрику подняли из-под администратора.
+    """
+    if os.name != "nt" and getattr(os, "geteuid", lambda: 1)() == 0:
+        return [_npx(), "playwright", "install", "--with-deps", "chromium"]
+    return [_npx(), "playwright", "install", "chromium"]
+
+
+# Строка, которой Linux сообщает, что исполняемому файлу не хватает библиотеки.
+_MISSING_LIB = re.compile(r"error while loading shared libraries:\s*([^\s:]+)")
+
+
+def browser_blocker(tail: str) -> str:
+    """Почему Chromium не запустился. Пустая строка — дело не в браузере.
+
+    Отдельная проверка, потому что этот отказ ни на что не похож: Playwright
+    рапортует «браузер установлен», процесс стартует и умирает с кодом 127, а
+    наверх приходит «прогон не удался» без единого слова о причине. Лечится же
+    он одной командой — и её надо назвать, а не заставлять искать по логам.
+    """
+    found = _MISSING_LIB.search(tail or "")
+    if not found:
+        return ""
+    return (
+        f"Chromium установлен, но не запускается: системе не хватает библиотеки "
+        f"{found.group(1)}. Сам браузер Playwright кладёт, а системные библиотеки "
+        f"ставятся пакетным менеджером и только от root. В контейнере фабрики их "
+        f"кладёт сборка образа (Dockerfile, слой `playwright install-deps`) — "
+        f"значит, образ собран до появления этого слоя: разверните фабрику заново "
+        f"(push в main пересобирает образ). На машине без контейнера: "
+        f"sudo npx playwright install-deps chromium"
+    )
+
+
+def forget_browsers(tool_dir: Path) -> None:
+    """Забыть отметку «браузеры поставлены», чтобы следующий заход поставил их
+    заново — уже с системными зависимостями."""
+    try:
+        (Path(tool_dir) / "node_modules" / ".gametest-browsers").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def ensure_tool(cfg: Settings, on_log: LogFn = lambda _line: None,
                 stop_check: Optional[StopFn] = None) -> tuple[Optional[Path], str]:
     """Готовит `tools/gametest` к запуску. Возвращает каталог и причину отказа.
@@ -317,8 +369,7 @@ def ensure_tool(cfg: Settings, on_log: LogFn = lambda _line: None,
         stamp = target / "node_modules" / ".gametest-browsers"
         if not stamp.exists():
             on_log("🌐 Ставлю Chromium для тестера\n")
-            code, _tail = _run([_npx(), "playwright", "install", "chromium"],
-                               target, on_log, stop_check, INSTALL_TIMEOUT)
+            code, _tail = _run(_browser_install_cmd(), target, on_log, stop_check, INSTALL_TIMEOUT)
             if code != 0:
                 return None, f"установка Chromium не удалась (код {code})"
             try:

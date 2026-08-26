@@ -901,6 +901,11 @@ def get_settings() -> Dict[str, Any]:
 @app.post("/api/settings")
 async def save_settings(request: Request) -> Dict[str, Any]:
     payload = await _body(request)
+    # Пустой разбор — это либо «нечего менять», либо тело, которое не прочиталось.
+    # Отвечать «✅ Настройки сохранены» во втором случае нельзя: не сохранилось
+    # ничего, а человек уходит с экрана уверенным, что сохранил.
+    if not payload and (await request.body()):
+        return {"status": "error", "message": "❌ Запрос не разобран — настройки не сохранены."}
     try:
         return service.save_settings(payload)
     except Exception as exc:
