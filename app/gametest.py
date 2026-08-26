@@ -351,6 +351,72 @@ def _cli(tool_dir: Path, args: List[str], timeout: int = 120) -> tuple[int, str]
     return proc.returncode, f"{proc.stdout or ''}{proc.stderr or ''}"
 
 
+def list_models(cfg: Settings, provider: str = "", key: str = "",
+                base_url: str = "") -> Dict[str, object]:
+    """Каталог моделей провайдера — спрашиваем у самого провайдера, через тестер.
+
+    Вписывать имя модели руками означает помнить его наизусть: каталог подписки
+    opencode Go меняется чаще любого нашего справочника, и опечатка в имени
+    видна только на разборе прогона — то есть через полчаса после старта.
+
+    Ключ и адрес уходят временным конфигом, а не переменными окружения: у
+    провайдера может быть свой адрес API, а другого способа передать его команде
+    `models` нет.
+    """
+    tool_dir = cfg.tool_dir
+    if not (tool_dir / "src" / "cli.ts").exists():
+        return {"ok": False, "models": [],
+                "message": f"тестер не установлен ({tool_dir}) — он поставится при первом прогоне"}
+
+    provider = (provider or cfg.llm_provider or "opencode").strip()
+    key_env = cfg.llm_key_env or "LLM_API_KEY"
+    payload: Dict[str, object] = {"llm": {"provider": provider, "apiKeyEnv": key_env}}
+    llm = payload["llm"]
+    assert isinstance(llm, dict)
+    if base_url:
+        llm["baseUrl"] = base_url
+
+    env = os.environ.copy()
+    if key:
+        env[key_env] = key
+
+    temp = tool_dir / ".factory-models.json"
+    try:
+        temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        proc = subprocess.run(
+            [_npx(), "tsx", "src/cli.ts", "models", "-c", str(temp), "--json"],
+            cwd=str(tool_dir), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180, env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "models": [], "message": f"не удалось спросить каталог: {exc}"}
+    finally:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    # Ответ — последняя строка stdout: перед ним туда же пишет лог установки tsx.
+    for line in reversed((proc.stdout or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            break
+        if data.get("error"):
+            return {"ok": False, "models": [], "provider": provider,
+                    "message": str(data["error"])}
+        models = [str(item.get("id") or "") for item in data.get("models") or []
+                  if isinstance(item, dict) and item.get("id")]
+        return {"ok": True, "models": models, "provider": provider, "message": ""}
+
+    tail = ((proc.stderr or "") or (proc.stdout or "")).strip().splitlines()
+    return {"ok": False, "models": [], "provider": provider,
+            "message": tail[-1] if tail else f"тестер не ответил (код {proc.returncode})"}
+
+
 def missing_features(tool_dir: Path) -> List[str]:
     """Чего не хватает установленному тестеру, чтобы им управляла фабрика.
 

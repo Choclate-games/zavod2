@@ -2668,18 +2668,8 @@ function renderSettings() {
   (fish.models || []).forEach((m) => fishModel.appendChild(new Option(m.label, m.key)));
   fishModel.value = fish.model || fish.free_model || "";
 
-  const knowledge = settings.knowledge || {};
-  $("set-knowledge-repo").value = knowledge.repo || "";
-  $("set-knowledge-ref").value = knowledge.ref || "main";
-  $("set-knowledge-token").value = knowledge.token || "";
-
   fillGametest(settings.gametest || {});
-
-  const bridge = settings.bridge || {};
-  $("set-bridge-source").value = bridge.source || "";
-  $("bridge-hint").textContent = bridge.tag
-    ? `Сейчас: ${bridge.name} ${bridge.tag} из ${bridge.repo}`
-    : "";
+  fillGithub(settings.github || {});
 
   const defaults = $("set-default-agent");
   defaults.innerHTML = "";
@@ -2708,7 +2698,6 @@ const GAMETEST_CHECK_LABELS = {
 function fillGametest(gt) {
   $("gt-dir").textContent = gt.dir || "tools/gametest";
   $("gt-enabled").checked = !!gt.enabled;
-  $("gt-update").checked = !!gt.update;
   $("gt-install-browsers").checked = !!gt.install_browsers;
 
   const mode = $("gt-mode");
@@ -2727,9 +2716,6 @@ function fillGametest(gt) {
   $("gt-jobs").value = gt.jobs ?? 3;
   $("gt-play-ms").value = gt.play_ms ?? 45000;
   $("gt-timeout").value = gt.timeout ?? 2700;
-  $("gt-repo").value = gt.repo || "";
-  $("gt-ref").value = gt.ref || "main";
-  $("gt-token").value = gt.token || "";
 
   const checks = $("gt-checks");
   checks.innerHTML = "";
@@ -2749,12 +2735,58 @@ function fillGametest(gt) {
   provider.innerHTML = "";
   (llm.providers || []).forEach((p) => provider.appendChild(new Option(p, p)));
   provider.value = llm.provider || "opencode";
-  $("gt-llm-model").value = llm.model || "";
+  setGametestModels([], llm.model || "");
   $("gt-llm-key-env").value = llm.key_env || "LLM_API_KEY";
   $("gt-llm-key").value = llm.key || "";
   $("gt-llm-base-url").value = llm.base_url || "";
 
-  renderYandexSession(gt.session || {}, gt.login || {});
+  const login = gt.login || {};
+  renderYandexSession(gt.session || {}, login);
+  // Вход живёт в процессе фабрики, а не во вкладке браузера: страницу могли
+  // перезагрузить или открыть с другого устройства, пока код на экране висел.
+  showYandexScreen(!!login.running && login.mode === "remote");
+  if (login.running && !yandexPoll) yandexPoll = setInterval(pollYandex, 900);
+}
+
+/**
+ * Наполняет список моделей, не теряя выбранную.
+ *
+ * Пока каталог не спросили, в списке ровно одна строка — та модель, что уже
+ * настроена. Затирать её списком провайдера нельзя: имя может быть вписано
+ * руками, и после «🔄» оно исчезло бы вместе с настройкой.
+ */
+function setGametestModels(models, current) {
+  const box = $("gt-llm-model");
+  const keep = current === undefined ? box.value : current;
+  box.innerHTML = "";
+  box.appendChild(new Option("по умолчанию у провайдера", ""));
+  (models || []).forEach((id) => box.appendChild(new Option(id, id)));
+  if (keep && ![...box.options].some((o) => o.value === keep)) {
+    box.appendChild(new Option(keep, keep));
+  }
+  box.value = keep || "";
+}
+
+async function loadGametestModels() {
+  const button = $("btn-gt-models");
+  const note = $("gt-models-msg");
+  button.disabled = true;
+  button.textContent = "⏳";
+  note.textContent = " Спрашиваю каталог…";
+  const query = new URLSearchParams({
+    provider: $("gt-llm-provider").value,
+    key: $("gt-llm-key").value.trim(),
+    base_url: $("gt-llm-base-url").value.trim(),
+  });
+  const res = await api(`/api/gametest/models?${query}`);
+  button.disabled = false;
+  button.textContent = "🔄";
+  if (res.ok) {
+    setGametestModels(res.models || []);
+    note.textContent = ` Каталог ${res.provider}: моделей ${(res.models || []).length}.`;
+  } else {
+    note.textContent = ` Каталог не пришёл: ${res.message || "провайдер не ответил"}.`;
+  }
 }
 
 function collectGametest() {
@@ -2764,7 +2796,6 @@ function collectGametest() {
   });
   return {
     enabled: $("gt-enabled").checked,
-    update: $("gt-update").checked,
     install_browsers: $("gt-install-browsers").checked,
     mode: $("gt-mode").value,
     viewports: $("gt-viewports").value,
@@ -2773,9 +2804,6 @@ function collectGametest() {
     jobs: Number($("gt-jobs").value) || 3,
     play_ms: Number($("gt-play-ms").value) || 0,
     timeout: Number($("gt-timeout").value) || 2700,
-    repo: $("gt-repo").value.trim(),
-    ref: $("gt-ref").value.trim(),
-    token: $("gt-token").value.trim(),
     checks,
     llm: {
       enabled: $("gt-llm-enabled").checked,
@@ -2788,10 +2816,94 @@ function collectGametest() {
   };
 }
 
+/* ── GitHub ────────────────────────────────────────────────────────────
+ *
+ * Три адреса, с которых фабрика что-то берёт, и общий токен на всех.
+ * Отдельной вкладкой, потому что раньше эти поля стояли по разным карточкам:
+ * токен один, а править его приходилось в трёх местах, и какое из них
+ * виновато в отказе — было не видно.
+ */
+
+function fillGithub(gh) {
+  const knowledge = gh.knowledge || {};
+  const tester = gh.tester || {};
+  const bridge = gh.bridge || {};
+
+  $("gh-token").value = gh.token || "";
+  $("gh-knowledge-repo").value = knowledge.repo || "";
+  $("gh-knowledge-ref").value = knowledge.ref || "main";
+  $("gh-knowledge-token").value = knowledge.token || "";
+  $("gh-tester-repo").value = tester.repo || "";
+  $("gh-tester-ref").value = tester.ref || "main";
+  $("gh-tester-token").value = tester.token || "";
+  $("gh-tester-update").checked = !!tester.update;
+  $("gh-tester-dir").textContent = tester.dir || "tools/gametest";
+  $("gh-bridge-source").value = bridge.source || "";
+  $("gh-bridge-hint").textContent = bridge.tag
+    ? `Сейчас: ${bridge.name} ${bridge.tag} из ${bridge.repo}`
+    : "";
+}
+
+function collectGithub() {
+  return {
+    token: $("gh-token").value.trim(),
+    knowledge: {
+      repo: $("gh-knowledge-repo").value.trim(),
+      ref: $("gh-knowledge-ref").value.trim(),
+      token: $("gh-knowledge-token").value.trim(),
+    },
+    tester: {
+      repo: $("gh-tester-repo").value.trim(),
+      ref: $("gh-tester-ref").value.trim(),
+      token: $("gh-tester-token").value.trim(),
+      update: $("gh-tester-update").checked,
+    },
+    bridge: { source: $("gh-bridge-source").value.trim() },
+  };
+}
+
+async function checkGithub() {
+  const button = $("btn-github-check");
+  const report = $("gh-report");
+  button.disabled = true;
+  button.textContent = "⏳ Спрашиваю GitHub…";
+  report.innerHTML = "";
+  const res = await api("/api/github/check", { body: collectGithub() });
+  button.disabled = false;
+  button.textContent = "🔌 Проверить доступ";
+
+  const who = res.identity || {};
+  const head = el("div", "small");
+  head.textContent = who.ok
+    ? `✅ Токен принят${who.login ? ` — ${who.login}` : ""}. ${who.message || ""}`.trim()
+    : `${who.anonymous ? "·" : "❌"} ${who.message || "токен не проверен"}`;
+  report.appendChild(head);
+
+  (res.checks || []).forEach((item) => {
+    const row = el("div", `github-row ${item.ok ? "ok" : "bad"}`);
+    const where = [item.repo, item.ref].filter(Boolean).join(" @ ");
+    row.appendChild(el("b", "", `${item.ok ? "✅" : "❌"} ${esc(item.title)}`));
+    row.appendChild(el("span", "mono small", esc(where)));
+    if (item.private) row.appendChild(el("span", "small muted", "приватный"));
+    if (item.message) row.appendChild(el("span", "small", esc(item.message)));
+    report.appendChild(row);
+  });
+}
+
+async function saveGithub() {
+  const res = await api("/api/settings", { body: { github: collectGithub() } });
+  $("gh-msg").textContent = res.message || "";
+  setTimeout(() => { $("gh-msg").textContent = ""; }, 4000);
+  state.boot.settings = await api("/api/settings");
+  fillGithub(state.boot.settings.github || {});
+}
+
 function renderYandexSession(session, login) {
   const box = $("yandex-session");
   if (login && login.running) {
-    box.textContent = "⏳ Окно браузера открыто на машине фабрики — войдите в аккаунт.";
+    box.textContent = login.mode === "window"
+      ? "⏳ Окно браузера открыто на машине фабрики — войдите в аккаунт."
+      : "⏳ Браузер открыт — сканируйте код ниже приложением Яндекса.";
     return;
   }
   if (!session.available) {
@@ -2807,34 +2919,102 @@ function renderYandexSession(session, login) {
   }
 }
 
-let yandexPoll = null;
+/* ── Живой экран страницы входа ────────────────────────────────────────
+ *
+ * Браузер работает на машине фабрики (мини-ПК без монитора), а страницу входа
+ * человек видит здесь: кадр приходит картинкой, клик по картинке уходит обратно
+ * в тот же браузер. Пароль при этом набирать не нужно и не стоит — на первом же
+ * кадре Яндекс показывает QR-код, который сканируют телефоном.
+ */
 
-async function pollYandex() {
-  const data = await api("/api/yandex/status");
-  renderYandexSession(data.session || {}, data.login || {});
-  const running = data.login && data.login.running;
-  if (!running) {
-    clearInterval(yandexPoll);
-    yandexPoll = null;
-    const message = (data.login && data.login.message) || "";
-    if (message) {
-      $("yandex-msg").textContent = message;
-      setTimeout(() => { $("yandex-msg").textContent = ""; }, 6000);
-    }
+let yandexPoll = null;
+let yandexFrameSeen = -1;
+
+function showYandexScreen(on) {
+  $("yandex-remote").classList.toggle("hidden", !on);
+  if (!on) {
+    yandexFrameSeen = -1;
+    $("yandex-frame").removeAttribute("src");
+    $("yandex-remote-wait").classList.remove("hidden");
   }
 }
 
-async function startYandexLogin() {
+/**
+ * Кадр тянется по номеру из состояния, а не по таймеру вслепую: браузер иначе
+ * отдаёт закешированную картинку, и страница выглядит замершей ровно тогда,
+ * когда на ней что-то происходит.
+ */
+function drawYandexFrame(screen) {
+  if (typeof screen.frame === "number" && screen.frame !== yandexFrameSeen && screen.available) {
+    yandexFrameSeen = screen.frame;
+    $("yandex-frame").src = `/api/yandex/frame?n=${screen.frame}`;
+    $("yandex-remote-wait").classList.add("hidden");
+  }
+  $("yandex-remote-url").textContent = screen.url || "";
+  if (screen.width && screen.height) {
+    $("yandex-frame").dataset.width = screen.width;
+    $("yandex-frame").dataset.height = screen.height;
+  }
+}
+
+/** Клик по картинке → клик в браузере фабрики, в CSS-пикселях его страницы. */
+async function clickYandexFrame(event) {
+  const image = $("yandex-frame");
+  const width = Number(image.dataset.width || 0);
+  const height = Number(image.dataset.height || 0);
+  const box = image.getBoundingClientRect();
+  if (!width || !height || !box.width) return;
+  await api("/api/yandex/input", {
+    body: {
+      type: "click",
+      x: Math.round(((event.clientX - box.left) / box.width) * width),
+      y: Math.round(((event.clientY - box.top) / box.height) * height),
+    },
+  });
+}
+
+/**
+ * Один опрос на всё: и кадр, и ход входа.
+ *
+ * Ходит в `/screen`, а не в `/status`: за состоянием сессии `/status` идёт к
+ * тестеру, а тот запускается отдельным процессом Node и отвечает секунды —
+ * раз в секунду такое спрашивать нельзя. О сессии спрашиваем один раз, когда
+ * вход закончился: только тогда ответ и меняется.
+ */
+async function pollYandex() {
+  const data = await api("/api/yandex/screen");
+  const login = data.login || {};
+  drawYandexFrame(data.screen || {});
+  if (login.running) {
+    renderYandexSession({}, login);
+    showYandexScreen(login.mode === "remote");
+    return;
+  }
+  clearInterval(yandexPoll);
+  yandexPoll = null;
+  showYandexScreen(false);
+  if (login.message) {
+    $("yandex-msg").textContent = login.message;
+    setTimeout(() => { $("yandex-msg").textContent = ""; }, 8000);
+  }
+  const full = await api("/api/yandex/status");
+  renderYandexSession(full.session || {}, full.login || {});
+}
+
+async function startYandexLogin(mode) {
   $("yandex-msg").textContent = "";
-  const res = await api("/api/yandex/login", { method: "POST" });
-  renderYandexSession(res.session || {}, res.state || { running: true });
+  const res = await api("/api/yandex/login", { body: { mode } });
+  const login = res.state || { running: true, mode };
+  renderYandexSession(res.session || {}, login);
   if (!res.ok) {
     $("yandex-msg").textContent = res.message || "";
     return;
   }
-  // Вход занимает минуты: пароль, иногда СМС, иногда капча. Держать запрос
-  // открытым всё это время нельзя, поэтому состояние опрашивается.
-  if (!yandexPoll) yandexPoll = setInterval(pollYandex, 3000);
+  $("yandex-msg").textContent = res.message || "";
+  showYandexScreen(mode === "remote");
+  // Вход занимает минуты: сканирование, иногда подтверждение на телефоне.
+  // Держать запрос открытым всё это время нельзя, поэтому состояние опрашивается.
+  if (!yandexPoll) yandexPoll = setInterval(pollYandex, 900);
 }
 
 async function saveSettings() {
@@ -2852,13 +3032,7 @@ async function saveSettings() {
       reset_game_on_launch: $("set-reset-launch").checked,
       allow_template_mixing: $("set-template-mixing").checked,
       fish_audio: { api_key: $("set-fish-key").value.trim(), model: $("set-fish-model").value },
-      knowledge: {
-        repo: $("set-knowledge-repo").value.trim(),
-        ref: $("set-knowledge-ref").value.trim(),
-        token: $("set-knowledge-token").value.trim(),
-      },
       gametest: collectGametest(),
-      bridge: { source: $("set-bridge-source").value.trim() },
     },
   });
   $("settings-msg").textContent = res.message || "";
@@ -3365,13 +3539,31 @@ function bindCommon() {
   $("btn-refresh-quota").onclick = loadQuota;
   bindStorage();
   $("btn-save-settings").onclick = saveSettings;
-  $("btn-yandex-login").onclick = startYandexLogin;
+  $("btn-gt-models").onclick = loadGametestModels;
+  $("btn-github-check").onclick = checkGithub;
+  $("btn-github-save").onclick = saveGithub;
+  $("btn-yandex-login").onclick = () => startYandexLogin("remote");
+  $("btn-yandex-window").onclick = () => startYandexLogin("window");
   $("btn-yandex-logout").onclick = async () => {
     const res = await api("/api/yandex/logout", { method: "POST" });
     $("yandex-msg").textContent = res.message || "";
     renderYandexSession(res.session || {}, {});
     setTimeout(() => { $("yandex-msg").textContent = ""; }, 4000);
   };
+  $("yandex-frame").onclick = clickYandexFrame;
+  $("btn-yandex-reload").onclick = () => api("/api/yandex/input", { body: { type: "reload" } });
+  $("btn-yandex-back").onclick = () => api("/api/yandex/input", { body: { type: "back" } });
+  $("btn-yandex-cancel").onclick = async () => {
+    const res = await api("/api/yandex/stop", { method: "POST" });
+    $("yandex-msg").textContent = res.message || "";
+  };
+  $("btn-yandex-type").onclick = async () => {
+    const field = $("yandex-keys");
+    if (!field.value) return;
+    await api("/api/yandex/input", { body: { type: "text", value: field.value } });
+    field.value = "";
+  };
+  $("btn-yandex-enter").onclick = () => api("/api/yandex/input", { body: { type: "key", value: "Enter" } });
   $("btn-activity-clear").onclick = clearActivity;
   $("btn-fish-test").onclick = async () => {
     const btn = $("btn-fish-test");

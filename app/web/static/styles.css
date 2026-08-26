@@ -2092,3 +2092,72 @@ textarea {
   overflow: hidden;
 }
 .terminal-host .xterm { height: 100%; }
+
+/* ── Живой экран страницы входа ────────────────────────────────────────
+ * Браузер работает на машине фабрики, а его картинка приходит сюда кадрами.
+ * Ширина ограничена размером окна того браузера (480 CSS-пикселей): растянуть
+ * кадр можно, но QR-код на растянутом PNG сканируется хуже, чем на честном. */
+.remote-screen {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.remote-bar { gap: 10px; }
+.remote-bar .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-stage {
+  position: relative;
+  align-self: center;
+  width: 100%;
+  max-width: 480px;
+  min-height: 120px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.remote-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Клик по картинке уходит в тот браузер — курсор обязан об этом сказать. */
+  cursor: crosshair;
+}
+.remote-wait {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.remote-keys { gap: 8px; }
+.remote-keys input { flex: 1; }
+
+/* ── Отчёт о доступе к GitHub ──────────────────────────────────────────── */
+.github-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.github-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+}
+.github-row.ok { background: var(--ok-bg); }
+.github-row.bad { background: var(--err-bg); }

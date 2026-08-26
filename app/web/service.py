@@ -35,7 +35,8 @@ import yaml
 _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 from app import acceptance, chat_store, library, notify, project_meta, recent, sandbox, snapshots, uploads
-from app import archive, bridge_package, builds, db, gametest, gate_stats, pkgstore, sysinfo, yandex_auth
+from app import (archive, bridge_package, builds, db, gametest, gate_stats, github_access,
+                 pkgstore, sysinfo, yandex_auth)
 from app.build_loop import build_game
 from app.chat_jobs import ChatJobManager
 from app.studio_jobs import StudioJob, StudioJobManager
@@ -3608,6 +3609,41 @@ class FactoryService:
                 "tag": bridge_package.tag(),
                 "docs": bridge_package.docs_url(),
             },
+            "github": self._github_payload(),
+        }
+
+    def _github_payload(self) -> Dict[str, Any]:
+        """Всё, что фабрика берёт с GitHub, — в одном месте.
+
+        Раньше эти поля стояли по разным карточкам настроек: репозиторий базы
+        знаний — в одной, репозиторий тестера — в середине длинной формы
+        прогона, адрес моста — в третьей. Токен у них при этом общий и берётся
+        по цепочке запасных вариантов, так что отказ в одном месте лечился
+        правкой в другом, и найти это место было нечем.
+        """
+        cfg = gametest.settings()
+        return {
+            # Общий токен: его берут все три адреса, если своего у них нет.
+            "token": os.getenv("GITHUB_TOKEN", ""),
+            "knowledge": {
+                "repo": config.knowledge_repo or "",
+                "ref": config.knowledge_ref or "main",
+                "token": config.knowledge_token or "",
+            },
+            "tester": {
+                "repo": cfg.repo,
+                "ref": cfg.ref,
+                "token": os.getenv("GAMETEST_TOKEN", ""),
+                "dir": str(cfg.tool_dir),
+                "update": cfg.update,
+            },
+            "bridge": {
+                "name": bridge_package.package_name(),
+                "source": bridge_package.package_source(),
+                "repo": bridge_package.repo(),
+                "tag": bridge_package.tag(),
+                "docs": bridge_package.docs_url(),
+            },
         }
 
     def _gametest_payload(self) -> Dict[str, Any]:
@@ -3625,12 +3661,8 @@ class FactoryService:
             "play_ms": cfg.play_ms,
             "timeout": cfg.timeout,
             "profile": cfg.profile,
-            "update": cfg.update,
             "install_browsers": cfg.install_browsers,
-            "repo": cfg.repo,
-            "ref": cfg.ref,
             "dir": str(cfg.tool_dir),
-            "token": os.getenv("GAMETEST_TOKEN", ""),
             "checks": dict(cfg.checks),
             "llm": {
                 "enabled": cfg.llm_enabled,
@@ -3730,6 +3762,7 @@ class FactoryService:
             env_lines["ZAVOD_KNOWLEDGE_TOKEN"] = token
 
         self._save_gametest(payload.get("gametest") or {}, env_lines)
+        self._save_github(payload.get("github") or {}, env_lines)
 
         bridge_cfg = payload.get("bridge") or {}
         if "source" in bridge_cfg:
@@ -3780,17 +3813,15 @@ class FactoryService:
             env_lines[key] = str(max(low, min(high, value)))
 
         flag("enabled", "GAMETEST_ENABLED")
-        flag("update", "GAMETEST_UPDATE")
         flag("install_browsers", "GAMETEST_INSTALL_BROWSERS")
         text("mode", "GAMETEST_YANDEX_MODE", ["auto", "dev", "draft"], "auto")
         text("viewports", "GAMETEST_VIEWPORTS", ["smoke", "default"], "smoke")
         text("orientation", "GAMETEST_ORIENTATION", ["both", "landscape", "portrait"], "both")
         text("block_on", "GAMETEST_BLOCK_ON", ["blocker", "major", "minor"], "major")
         text("profile", "GAMETEST_PROFILE")
-        text("repo", "GAMETEST_REPO")
-        text("ref", "GAMETEST_REF")
         text("dir", "GAMETEST_DIR")
-        text("token", "GAMETEST_TOKEN")
+        # Репозиторий, ветка и токен тестера живут на вкладке GitHub: они про
+        # доступ, а не про то, как гонять прогон.
         number("jobs", "GAMETEST_JOBS", 1, 16)
         # Ноль здесь осмыслен: «не играть перед проверкой сохранений».
         number("play_ms", "GAMETEST_PLAY_MS", 0, 600_000)
@@ -3819,14 +3850,88 @@ class FactoryService:
         if "key" in llm:
             env_lines[key_env] = str(llm.get("key") or "").strip()
 
+    def _save_github(self, block: Dict[str, Any], env_lines: Dict[str, str]) -> None:
+        """Вкладка GitHub: три адреса и токены к ним.
+
+        Пишет ровно те же переменные, что и разбросанные по форме поля раньше, —
+        вкладка сводит их вместе, а не заводит второй источник истины.
+        """
+        if not block:
+            return
+
+        if "token" in block:
+            token = str(block.get("token") or "").strip()
+            env_lines["GITHUB_TOKEN"] = token
+
+        knowledge = block.get("knowledge") or {}
+        if "repo" in knowledge:
+            repo = str(knowledge.get("repo") or "").strip()
+            config.knowledge_repo = repo
+            env_lines["KNOWLEDGE_REPO"] = repo
+        if "ref" in knowledge:
+            ref = str(knowledge.get("ref") or "").strip() or "main"
+            config.knowledge_ref = ref
+            env_lines["KNOWLEDGE_REF"] = ref
+        if "token" in knowledge:
+            token = str(knowledge.get("token") or "").strip()
+            config.knowledge_token = token
+            env_lines["ZAVOD_KNOWLEDGE_TOKEN"] = token
+
+        tester = block.get("tester") or {}
+        if "repo" in tester:
+            env_lines["GAMETEST_REPO"] = str(tester.get("repo") or "").strip()
+        if "ref" in tester:
+            env_lines["GAMETEST_REF"] = str(tester.get("ref") or "").strip()
+        if "token" in tester:
+            env_lines["GAMETEST_TOKEN"] = str(tester.get("token") or "").strip()
+        if "update" in tester:
+            env_lines["GAMETEST_UPDATE"] = "1" if tester.get("update") else "0"
+
+        bridge = block.get("bridge") or {}
+        if "source" in bridge:
+            source = str(bridge.get("source") or "").strip()
+            env_lines["BRIDGE_PACKAGE_SOURCE"] = source
+            os.environ["BRIDGE_PACKAGE_SOURCE"] = source
+            bridge_package.reset_cache()
+
+    def github_check(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Спрашивает у GitHub, работает ли каждый из трёх адресов.
+
+        Проверяется то, что вписано в форму прямо сейчас, а не сохранённое:
+        иначе «сохранил — проверил — не работает» превращается в три шага
+        вместо одного, а неверный токен успевает уехать в `.env`.
+        """
+        block = payload or {}
+        shared = str(block.get("token") or "").strip() or os.getenv("GITHUB_TOKEN", "")
+        knowledge = block.get("knowledge") or {}
+        tester = block.get("tester") or {}
+        bridge = block.get("bridge") or {}
+        targets = [
+            {"kind": "repo", "title": "База знаний",
+             "repo": str(knowledge.get("repo") or config.knowledge_repo or ""),
+             "ref": str(knowledge.get("ref") or config.knowledge_ref or "main"),
+             "token": str(knowledge.get("token") or "")},
+            {"kind": "repo", "title": "Тестер площадки",
+             "repo": str(tester.get("repo") or gametest.DEFAULT_REPO),
+             "ref": str(tester.get("ref") or "main"),
+             "token": str(tester.get("token") or "")},
+            {"kind": "release", "title": "Мост площадки",
+             "repo": bridge_package.repo(),
+             "ref": bridge_package.tag(),
+             "token": str(bridge.get("token") or "")},
+        ]
+        return github_access.check(targets, shared)
+
     # ------------------------------------------------------------- вход в Яндекс
 
     def yandex_state(self) -> Dict[str, Any]:
         cfg = gametest.settings()
-        return {"session": yandex_auth.session(cfg), "login": yandex_auth.state()}
+        return {"session": yandex_auth.session(cfg),
+                "login": yandex_auth.state(),
+                "screen": yandex_auth.screen()}
 
-    def yandex_login(self) -> Dict[str, Any]:
-        result = yandex_auth.start_login()
+    def yandex_login(self, mode: str = yandex_auth.MODE_REMOTE) -> Dict[str, Any]:
+        result = yandex_auth.start_login(mode=mode)
         result["session"] = yandex_auth.session()
         return result
 
@@ -3834,6 +3939,26 @@ class FactoryService:
         result = yandex_auth.forget()
         result["session"] = yandex_auth.session()
         return result
+
+    def yandex_screen(self) -> Dict[str, Any]:
+        """Только ход входа и кадр. Состояние сессии сюда не входит намеренно:
+        за ним идут к тестеру, а это отдельный процесс на несколько секунд."""
+        return {"login": yandex_auth.state(), "screen": yandex_auth.screen()}
+
+    def yandex_frame(self) -> Optional[bytes]:
+        return yandex_auth.frame()
+
+    def yandex_input(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Клик или нажатие клавиши — в браузер, который держит страницу входа."""
+        return yandex_auth.send(command or {})
+
+    def yandex_stop(self) -> Dict[str, Any]:
+        return yandex_auth.stop()
+
+    def gametest_models(self, provider: str = "", key: str = "",
+                        base_url: str = "") -> Dict[str, Any]:
+        """Каталог моделей провайдера, который разбирает прогон на площадке."""
+        return gametest.list_models(gametest.settings(), provider, key, base_url)
 
     def persist_env_value(self, key: str, value: str) -> None:
         """Точечно дописывает один ключ в .env, не трогая остальные настройки."""

@@ -6,9 +6,13 @@
 чего прогон на черновике и затевается.
 
 Автоматизировать сам вход нельзя: капча, СМС, двухфакторка. Поэтому фабрика
-делает единственное уместное — открывает окно браузера человеку, а сессию
-хранит. Здесь проверяется, что она при этом не врёт о состоянии входа и что
-настройки прогона доезжают до `.env`, а не остаются в форме.
+делает единственное уместное — открывает браузер человеку, а сессию хранит.
+Браузеров при этом два: окно на машине фабрики и показ той же страницы кадрами
+в веб-интерфейс. Второй и есть рабочий — фабрика живёт на мини-ПК без монитора.
+
+Здесь проверяется, что она не врёт о состоянии входа, что режим без экрана не
+упирается в отсутствие экрана, и что настройки доезжают до `.env`, а не
+остаются в форме.
 """
 import os
 
@@ -69,7 +73,7 @@ def test_an_expired_session_is_not_a_login(tmp_path, monkeypatch):
     assert data["expired"] is True
 
 
-def test_login_refuses_a_machine_without_a_screen(monkeypatch, tmp_path):
+def test_the_window_login_refuses_a_machine_without_a_screen(monkeypatch, tmp_path):
     """Окно браузера открывается там, где крутится фабрика.
 
     Без этой проверки человек нажимает «Войти», ждёт минуту и получает
@@ -78,9 +82,54 @@ def test_login_refuses_a_machine_without_a_screen(monkeypatch, tmp_path):
     monkeypatch.setattr(yandex_auth, "_headless_host", lambda: "нет графической сессии")
     called = {"n": 0}
     monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: called.__setitem__("n", 1) or (None, ""))
-    result = yandex_auth.login(cfg=_Cfg(tmp_path))
+    result = yandex_auth.login(cfg=_Cfg(tmp_path), mode=yandex_auth.MODE_WINDOW)
     assert result["ok"] is False
     assert called["n"] == 0, "инструмент не ставится ради входа, который всё равно не показать"
+
+
+def test_the_remote_login_does_not_need_a_screen(monkeypatch, tmp_path):
+    """Показ кадрами и придуман ради машины без монитора.
+
+    Отсутствие дисплея закрывало вход целиком, хотя мешает оно ровно одному
+    режиму из двух: фабрика живёт на мини-ПК, и «войти в Яндекс» не работало
+    там годами именно поэтому.
+    """
+    monkeypatch.setattr(yandex_auth, "_headless_host", lambda: "нет графической сессии")
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(yandex_auth, "supports_remote", lambda _dir: True)
+    seen: dict = {}
+    monkeypatch.setattr(gametest, "_run",
+                        lambda cmd, *a, **k: (seen.setdefault("cmd", cmd), (0, ""))[1])
+    monkeypatch.setattr(yandex_auth, "session", lambda *a, **k: {"signedIn": True})
+
+    result = yandex_auth.login(cfg=_Cfg(tmp_path), mode=yandex_auth.MODE_REMOTE)
+    assert result["ok"] is True
+    assert "auth-remote" in seen["cmd"], "вход кадрами идёт своей командой тестера"
+
+
+def test_an_old_tester_says_so_instead_of_failing_blankly(monkeypatch, tmp_path):
+    """Версия без `auth-remote` отвечает «unknown command».
+
+    Вход при этом выглядит сорвавшимся без объяснимой причины, а лечится он
+    обновлением тестера — про это и надо сказать.
+    """
+    monkeypatch.setattr(gametest, "ensure_tool", lambda *a, **k: (tmp_path, ""))
+    monkeypatch.setattr(yandex_auth, "supports_remote", lambda _dir: False)
+    monkeypatch.setattr(gametest, "_run", lambda *a, **k: pytest.fail("тестер не должен запускаться"))
+
+    result = yandex_auth.login(cfg=_Cfg(tmp_path), mode=yandex_auth.MODE_REMOTE)
+    assert result["ok"] is False
+    assert "auth-remote" in result["message"]
+
+
+def test_input_is_refused_while_nothing_is_running():
+    """Очередь команд открыта ровно на время входа.
+
+    Она уходит в браузер, который держит открытой страницу входа в аккаунт;
+    принимать туда клики в остальное время незачем.
+    """
+    assert yandex_auth.send({"type": "click", "x": 1, "y": 1})["ok"] is False
+    assert yandex_auth.send({"type": "нажми что-нибудь"})["ok"] is False
 
 
 def test_forget_removes_the_saved_session(tmp_path):
@@ -154,3 +203,79 @@ def test_an_unknown_provider_does_not_reach_env(clean_env, tmp_path, monkeypatch
     web_service.service._save_gametest(
         {"llm": {"provider": "чужой", "key_env": "LLM_API_KEY"}}, env_lines)
     assert env_lines["GAMETEST_LLM_PROVIDER"] == "opencode"
+
+
+# --------------------------------------------------------------- вкладка GitHub
+
+def test_the_github_tab_writes_every_address_it_owns(clean_env):
+    """Три адреса с GitHub стоят вместе, но переменные у них прежние.
+
+    Вкладка сводит поля в одно место, а не заводит второй источник истины:
+    иначе одна и та же настройка жила бы в двух переменных сразу.
+    """
+    from app.web import service as web_service
+
+    env_lines: dict = {}
+    web_service.service._save_github({
+        "token": "общий",
+        "knowledge": {"repo": "EdikN/zavod2", "ref": "main", "token": "свой"},
+        "tester": {"repo": "Choclate-games/AI_Tester", "ref": "dev", "token": "", "update": True},
+        "bridge": {"source": "https://example.invalid/bridge.tgz"},
+    }, env_lines)
+
+    assert env_lines["GITHUB_TOKEN"] == "общий"
+    assert env_lines["ZAVOD_KNOWLEDGE_TOKEN"] == "свой"
+    assert env_lines["KNOWLEDGE_REPO"] == "EdikN/zavod2"
+    assert env_lines["GAMETEST_REPO"] == "Choclate-games/AI_Tester"
+    assert env_lines["GAMETEST_REF"] == "dev"
+    assert env_lines["GAMETEST_TOKEN"] == ""
+    assert env_lines["GAMETEST_UPDATE"] == "1"
+    assert env_lines["BRIDGE_PACKAGE_SOURCE"] == "https://example.invalid/bridge.tgz"
+
+
+def test_the_run_settings_no_longer_own_the_tester_repo(clean_env):
+    """Репозиторий тестера переехал на вкладку GitHub целиком.
+
+    Пока обе формы писали одну переменную, порядок сохранения решал, чьё
+    значение доживёт до `.env`, — и пустое поле забытой формы затирало адрес.
+    """
+    from app.web import service as web_service
+
+    env_lines: dict = {}
+    web_service.service._save_gametest(
+        {"repo": "чужой/репозиторий", "ref": "чужая-ветка", "token": "чужой", "update": True},
+        env_lines)
+    assert "GAMETEST_REPO" not in env_lines
+    assert "GAMETEST_REF" not in env_lines
+    assert "GAMETEST_TOKEN" not in env_lines
+    assert "GAMETEST_UPDATE" not in env_lines
+
+
+def test_a_private_repo_is_reported_as_invisible_not_missing(monkeypatch):
+    """404 на приватном репозитории означает «нет доступа», а не «нет такого».
+
+    GitHub намеренно не подтверждает существование приватных репозиториев, и
+    «репозиторий не найден» отправляло бы искать опечатку там, где на самом
+    деле не хватает прав.
+    """
+    from app import github_access
+
+    monkeypatch.setattr(github_access, "_get", lambda path, token: (404, {"message": "Not Found"}))
+    result = github_access.repo("Choclate-games/AI_Tester", "main", "токен", "Тестер")
+    assert result["ok"] is False
+    assert "нет к нему доступа" in result["message"]
+
+
+def test_a_wrong_branch_is_named_as_such(monkeypatch):
+    """Ветка, которой нет, — самая частая причина «клонирование не удалось»."""
+    from app import github_access
+
+    def fake(path, token):
+        if path.startswith("/repos/") and "/branches/" not in path and "/tags/" not in path:
+            return 200, {"private": True, "default_branch": "main"}
+        return 404, {"message": "Not Found"}
+
+    monkeypatch.setattr(github_access, "_get", fake)
+    result = github_access.repo("Choclate-games/AI_Tester", "мастер", "токен", "Тестер")
+    assert result["ok"] is False
+    assert "мастер" in result["message"] and "main" in result["message"]

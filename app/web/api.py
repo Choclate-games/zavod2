@@ -907,12 +907,27 @@ async def save_settings(request: Request) -> Dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+# -- GitHub ------------------------------------------------------------------
+
+@app.post("/api/github/check")
+async def github_check(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    try:
+        return service.github_check(payload)
+    except Exception as exc:  # noqa: BLE001 — отказ проверки не должен ронять вкладку
+        return {"ok": False, "identity": {"ok": False, "message": str(exc)}, "checks": []}
+
+
 # -- Вход в аккаунт Яндекса --------------------------------------------------
 #
-# Окно браузера открывается на машине, где крутится фабрика: автоматизировать
-# вход нельзя (капча, СМС, двухфакторка), а показать его через веб-интерфейс
-# на другом устройстве — тем более. Поэтому запрос только запускает вход и
-# сразу возвращается, а ход дела читается опросом состояния.
+# Автоматизировать вход нельзя: капча, СМС, двухфакторка. Поэтому браузер
+# открывается настоящий, а человек входит руками — запрос только запускает
+# вход и сразу возвращается, ход дела читается опросом состояния.
+#
+# Режим `remote` показывает страницу входа кадрами прямо в интерфейсе фабрики,
+# и клики уходят обратно в тот же браузер. Это единственный вход, который
+# работает с телефона или с ноутбука: сама фабрика живёт на мини-ПК без
+# монитора, и окно браузера на нём не видит никто.
 
 @app.get("/api/yandex/status")
 def yandex_status() -> Dict[str, Any]:
@@ -920,13 +935,51 @@ def yandex_status() -> Dict[str, Any]:
 
 
 @app.post("/api/yandex/login")
-def yandex_login() -> Dict[str, Any]:
-    return service.yandex_login()
+async def yandex_login(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.yandex_login(str(payload.get("mode") or "remote"))
 
 
 @app.post("/api/yandex/logout")
 def yandex_logout() -> Dict[str, Any]:
     return service.yandex_logout()
+
+
+@app.get("/api/yandex/screen")
+def yandex_screen() -> Dict[str, Any]:
+    """Ход входа и номер свежего кадра — без вопросов к тестеру.
+
+    Пока код на экране, страница опрашивает это раз в секунду. `/status`
+    для такого не годится: он спрашивает о сессии сам тестер, а тот
+    запускается отдельным процессом Node и отвечает секунды.
+    """
+    return service.yandex_screen()
+
+
+@app.get("/api/yandex/frame")
+def yandex_frame() -> Response:
+    """Свежий кадр страницы входа. Кадр меняется дважды в секунду — не кешируем."""
+    data = service.yandex_frame()
+    if data is None:
+        raise HTTPException(status_code=404, detail="кадра ещё нет")
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/yandex/input")
+async def yandex_input(request: Request) -> Dict[str, Any]:
+    payload = await _body(request)
+    return service.yandex_input(payload)
+
+
+@app.post("/api/yandex/stop")
+def yandex_stop() -> Dict[str, Any]:
+    return service.yandex_stop()
+
+
+@app.get("/api/gametest/models")
+def gametest_models(provider: str = "", key: str = "", base_url: str = "") -> Dict[str, Any]:
+    return service.gametest_models(provider, key, base_url)
 
 
 @app.post("/api/settings/notifications")

@@ -394,6 +394,7 @@
     <section class="view" id="view-settings">
       <div class="doc-tabs" id="settings-tabs">
         <button class="tab active" data-settings-tab="config">⚙️ Конфигурация</button>
+        <button class="tab" data-settings-tab="github">🐙 GitHub</button>
         <button class="tab" data-settings-tab="quota">📊 Квоты агентов</button>
         <button class="tab" data-settings-tab="storage">🗜 Хранилище</button>
         <button class="tab" data-settings-tab="access">🔐 Доступ</button>
@@ -495,7 +496,18 @@
           <label class="check"><input type="checkbox" id="gt-llm-enabled" /> Разбирать находки моделью</label>
           <div class="row">
             <label class="field">Провайдер<select id="gt-llm-provider"></select></label>
-            <label class="field">Модель<input type="text" id="gt-llm-model" placeholder="пусто — по умолчанию для провайдера" /></label>
+            <label class="field">Модель
+              <span class="row">
+                <select id="gt-llm-model" style="flex:1"></select>
+                <button class="btn small" id="btn-gt-models" type="button" title="Спросить каталог у провайдера">🔄</button>
+              </span>
+            </label>
+          </div>
+          <div class="dim">
+            Список берётся у самого провайдера: каталог подписки меняется чаще любого нашего
+            справочника. Модель обязана уметь смотреть картинки — разбор идёт по скриншотам
+            прогона. Пусто = модель провайдера по умолчанию.
+            <span id="gt-models-msg"></span>
           </div>
           <div class="row">
             <label class="field">Переменная с ключом<input type="text" id="gt-llm-key-env" placeholder="LLM_API_KEY" /></label>
@@ -503,28 +515,105 @@
             <label class="field">Свой адрес API<input type="text" id="gt-llm-base-url" placeholder="пусто — адрес провайдера" /></label>
           </div>
 
-          <div class="small muted" style="margin-top:10px">Откуда берётся сам тестер</div>
-          <div class="row">
-            <label class="field">Репозиторий<input type="text" id="gt-repo" placeholder="Choclate-games/AI_Tester" /></label>
-            <label class="field">Ветка<input type="text" id="gt-ref" placeholder="main" /></label>
-            <label class="field">Токен GitHub<input type="password" id="gt-token" placeholder="пусто — берётся ZAVOD_KNOWLEDGE_TOKEN" /></label>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="gt-install-browsers" /> Ставить Chromium для тестера</label>
+          <div class="dim">
+            Откуда берётся сам тестер — на вкладке <b>🐙 GitHub</b>.
           </div>
-          <label class="check"><input type="checkbox" id="gt-update" /> Обновлять тестер перед каждым прогоном</label>
-          <label class="check"><input type="checkbox" id="gt-install-browsers" /> Ставить Chromium для тестера</label>
 
           <div class="small muted" style="margin-top:10px">Вход в аккаунт Яндекса</div>
           <div class="dim">
             Нужен режиму <code>draft</code>: без входа Яндекс отдаёт черновик гостю — игрок не
-            авторизован, облачного хранилища нет, покупки не начинаются. Окно браузера
-            откроется <b>на той машине, где работает фабрика</b>: автоматизировать вход нельзя,
-            там капча и двухфакторка.
+            авторизован, облачного хранилища нет, покупки не начинаются.
+            Страница входа откроется <b>прямо здесь</b>: браузер работает на машине фабрики,
+            а сюда идут его кадры и возвращаются клики. Сканируйте QR-код приложением
+            Яндекса — пароль никуда не передаётся.
           </div>
           <div class="row">
-            <button class="btn small" id="btn-yandex-login">🔐 Войти в Яндекс</button>
+            <button class="btn small" id="btn-yandex-login">🔐 Войти по QR-коду</button>
+            <button class="btn small" id="btn-yandex-window" title="Окно откроется на машине фабрики — годится, только если вы сидите за ней">🖥 Окном на машине фабрики</button>
             <button class="btn small" id="btn-yandex-logout">Забыть сессию</button>
             <span class="small" id="yandex-msg"></span>
           </div>
           <div class="small" id="yandex-session"></div>
+
+          <!-- Живой экран браузера: кадр + клики обратно -->
+          <div class="remote-screen hidden" id="yandex-remote">
+            <div class="row spread remote-bar">
+              <span class="small mono" id="yandex-remote-url"></span>
+              <span class="row">
+                <button class="btn small" id="btn-yandex-reload" title="Перезагрузить страницу">🔄</button>
+                <button class="btn small" id="btn-yandex-back" title="Назад">◀</button>
+                <button class="btn small danger" id="btn-yandex-cancel">✖ Прервать</button>
+              </span>
+            </div>
+            <div class="remote-stage">
+              <img id="yandex-frame" alt="Страница входа Яндекса" />
+              <div class="remote-wait" id="yandex-remote-wait">Поднимаю браузер…</div>
+            </div>
+            <div class="row remote-keys">
+              <input type="text" id="yandex-keys" placeholder="набрать текст в поле на странице" />
+              <button class="btn small" id="btn-yandex-type">⌨️ Ввести</button>
+              <button class="btn small" id="btn-yandex-enter">⏎ Enter</button>
+            </div>
+            <div class="dim">
+              Кликайте прямо по картинке — клик уйдёт в тот браузер. Текст набирается в поле
+              выше и уходит в то поле страницы, которое сейчас в фокусе (сначала кликните по нему).
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── GitHub: всё, что фабрика берёт из репозиториев ──────────────── -->
+      <div class="panel grow scroll settings-tab-panel hidden" id="settings-panel-github">
+        <h2>🐙 GitHub</h2>
+        <p class="dim" style="margin:4px 0 12px">
+          С GitHub фабрика берёт три вещи: базу знаний для готовых игр, тестер площадки и мост
+          Playgama. Раньше эти поля стояли по разным карточкам, а токен у них общий — и отказ в
+          одном месте лечился правкой в другом. Здесь они вместе, и кнопка внизу спрашивает у
+          GitHub, работает ли каждый адрес на самом деле.
+        </p>
+
+        <div class="settings-card">
+          <h3>🔑 Общий токен</h3>
+          <div class="dim">
+            Берётся всеми тремя адресами, у которых нет своего. Нужен приватным репозиториям;
+            для публичных не обязателен, но без него GitHub быстро упирается в лимит запросов.
+            Права: <code>repo</code> (classic) либо доступ на чтение содержимого нужных
+            репозиториев (fine-grained). Пишется в <code>GITHUB_TOKEN</code>.
+          </div>
+          <label class="field">GITHUB_TOKEN
+            <input type="password" id="gh-token" placeholder="ghp_… или github_pat_…" />
+          </label>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>📚 База знаний в готовой игре</h3>
+          <div class="dim">
+            Пакет игры носит манифест и <code>scripts/fetch-knowledge.mjs</code>, а не копии
+            документов: рецепты подтягиваются из репозитория базы. В папку игры токен не попадает
+            никогда — живёт в <code>.env</code> фабрики и уходит кодовому агенту переменной
+            окружения.
+          </div>
+          <div class="row">
+            <label class="field">Репозиторий<input type="text" id="gh-knowledge-repo" placeholder="EdikN/zavod2" /></label>
+            <label class="field">Ветка или тег<input type="text" id="gh-knowledge-ref" placeholder="main" /></label>
+            <label class="field">Свой токен<input type="password" id="gh-knowledge-token" placeholder="пусто — общий сверху" /></label>
+          </div>
+        </div>
+
+        <div class="settings-card" style="margin-top:14px">
+          <h3>🎮 Тестер площадки</h3>
+          <div class="dim">
+            Прогон игры на настоящей странице Яндекса ведёт отдельный инструмент. Фабрика
+            клонирует его себе при первом прогоне в <code id="gh-tester-dir" class="mono"></code>.
+            Репозиторий приватный, поэтому без токена клонирование не начнётся вовсе.
+          </div>
+          <div class="row">
+            <label class="field">Репозиторий<input type="text" id="gh-tester-repo" placeholder="Choclate-games/AI_Tester" /></label>
+            <label class="field">Ветка<input type="text" id="gh-tester-ref" placeholder="main" /></label>
+            <label class="field">Свой токен<input type="password" id="gh-tester-token" placeholder="пусто — общий сверху" /></label>
+          </div>
+          <label class="check"><input type="checkbox" id="gh-tester-update" /> Обновлять тестер перед каждым прогоном</label>
         </div>
 
         <div class="settings-card" style="margin-top:14px">
@@ -536,29 +625,18 @@
             меняется только адрес установки, импорты в играх не меняются.
           </div>
           <label class="field">Адрес тарбола релиза
-            <input type="text" id="set-bridge-source" placeholder="https://github.com/EdikN/bridge/releases/download/..." />
+            <input type="text" id="gh-bridge-source" placeholder="https://github.com/EdikN/bridge/releases/download/..." />
           </label>
-          <div class="small" id="bridge-hint"></div>
+          <div class="small" id="gh-bridge-hint"></div>
         </div>
 
         <div class="settings-card" style="margin-top:14px">
-          <h3>📚 База знаний в готовой игре</h3>
-          <div class="dim">
-            Пакет игры носит манифест и <code>scripts/fetch-knowledge.mjs</code>, а не копии документов:
-            рецепты подтягиваются из репозитория базы. Токен нужен, только если репозиторий приватный.
-            В папку игры он не попадает никогда — живёт в <code>.env</code> фабрики и уходит кодовому
-            агенту переменной окружения.
+          <div class="row">
+            <button class="btn ok" id="btn-github-check">🔌 Проверить доступ</button>
+            <button class="btn ok" id="btn-github-save">💾 Сохранить в .env</button>
+            <span class="small" id="gh-msg"></span>
           </div>
-          <label class="field">Репозиторий базы (<code>владелец/репозиторий</code>)
-            <input type="text" id="set-knowledge-repo" placeholder="EdikN/zavod2" />
-          </label>
-          <label class="field">Ветка или тег
-            <input type="text" id="set-knowledge-ref" placeholder="main" />
-          </label>
-          <label class="field">ZAVOD_KNOWLEDGE_TOKEN
-            <input type="password" id="set-knowledge-token" placeholder="токен GitHub — только для приватного репозитория" />
-          </label>
-          <div class="dim">Сохраняется кнопкой «💾 СОХРАНИТЬ НАСТРОЙКИ В .ENV» выше.</div>
+          <div id="gh-report" class="github-report"></div>
         </div>
       </div>
 
