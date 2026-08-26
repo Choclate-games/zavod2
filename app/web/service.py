@@ -3635,6 +3635,11 @@ class FactoryService:
                 "ref": cfg.ref,
                 "token": os.getenv("GAMETEST_TOKEN", ""),
                 "dir": str(cfg.tool_dir),
+                # Тестер может уже лежать на диске — своим клоном, рядом с фабрикой.
+                # Тогда ни репозиторий, ни токен не нужны вовсе, и говорить про
+                # «задайте GAMETEST_TOKEN» человеку, у которого инструмент есть,
+                # значит гнать его чинить то, что не сломано.
+                "installed": (cfg.tool_dir / "src" / "cli.ts").exists(),
                 "update": cfg.update,
             },
             "bridge": {
@@ -3878,6 +3883,12 @@ class FactoryService:
             env_lines["ZAVOD_KNOWLEDGE_TOKEN"] = token
 
         tester = block.get("tester") or {}
+        if "dir" in tester:
+            # Пустое поле означает «каталог по умолчанию»: стирать GAMETEST_DIR
+            # в пустую строку нельзя — `Path("")` указывает на текущий каталог
+            # процесса, и тестер начал бы ставиться в корень фабрики.
+            folder = str(tester.get("dir") or "").strip()
+            env_lines["GAMETEST_DIR"] = folder or str(gametest.DEFAULT_TOOL_DIR)
         if "repo" in tester:
             env_lines["GAMETEST_REPO"] = str(tester.get("repo") or "").strip()
         if "ref" in tester:

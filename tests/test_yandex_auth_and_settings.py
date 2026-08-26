@@ -219,7 +219,8 @@ def test_the_github_tab_writes_every_address_it_owns(clean_env):
     web_service.service._save_github({
         "token": "общий",
         "knowledge": {"repo": "EdikN/zavod2", "ref": "main", "token": "свой"},
-        "tester": {"repo": "Choclate-games/AI_Tester", "ref": "dev", "token": "", "update": True},
+        "tester": {"dir": "D:/AI_Tester", "repo": "Choclate-games/AI_Tester",
+                   "ref": "dev", "token": "", "update": True},
         "bridge": {"source": "https://example.invalid/bridge.tgz"},
     }, env_lines)
 
@@ -230,7 +231,22 @@ def test_the_github_tab_writes_every_address_it_owns(clean_env):
     assert env_lines["GAMETEST_REF"] == "dev"
     assert env_lines["GAMETEST_TOKEN"] == ""
     assert env_lines["GAMETEST_UPDATE"] == "1"
+    assert env_lines["GAMETEST_DIR"] == "D:/AI_Tester"
     assert env_lines["BRIDGE_PACKAGE_SOURCE"] == "https://example.invalid/bridge.tgz"
+
+
+def test_an_empty_tester_folder_falls_back_to_the_default(clean_env):
+    """Пустое поле каталога — это «куда по умолчанию», а не «в текущий каталог».
+
+    `Path("")` указывает на рабочий каталог процесса, и тестер начал бы
+    ставиться прямо в корень фабрики.
+    """
+    from app import gametest as gt
+    from app.web import service as web_service
+
+    env_lines: dict = {}
+    web_service.service._save_github({"tester": {"dir": "   "}}, env_lines)
+    assert env_lines["GAMETEST_DIR"] == str(gt.DEFAULT_TOOL_DIR)
 
 
 def test_the_run_settings_no_longer_own_the_tester_repo(clean_env):

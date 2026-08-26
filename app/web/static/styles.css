@@ -2161,3 +2161,14 @@ textarea {
 }
 .github-row.ok { background: var(--ok-bg); }
 .github-row.bad { background: var(--err-bg); }
+
+/* Журнал входа: до первого кадра здесь вся видимая жизнь панели — установка
+   тестера, зависимости, Chromium — и причина, если кадра так и не будет. */
+#yandex-remote-log {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#yandex-remote-log:empty { display: none; }

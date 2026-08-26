@@ -2745,7 +2745,10 @@ function fillGametest(gt) {
   // Вход живёт в процессе фабрики, а не во вкладке браузера: страницу могли
   // перезагрузить или открыть с другого устройства, пока код на экране висел.
   showYandexScreen(!!login.running && login.mode === "remote");
-  if (login.running && !yandexPoll) yandexPoll = setInterval(pollYandex, 900);
+  if (login.running) {
+    renderYandexLog(login);
+    if (!yandexPoll) yandexPoll = setInterval(pollYandex, 900);
+  }
 }
 
 /**
@@ -2837,7 +2840,10 @@ function fillGithub(gh) {
   $("gh-tester-ref").value = tester.ref || "main";
   $("gh-tester-token").value = tester.token || "";
   $("gh-tester-update").checked = !!tester.update;
-  $("gh-tester-dir").textContent = tester.dir || "tools/gametest";
+  $("gh-tester-dir").value = tester.dir || "";
+  $("gh-tester-state").textContent = tester.installed
+    ? "✅ Тестер на месте — репозиторий и токен ниже не нужны."
+    : "· Тестера в этом каталоге нет — он приедет из репозитория ниже, для этого нужен токен.";
   $("gh-bridge-source").value = bridge.source || "";
   $("gh-bridge-hint").textContent = bridge.tag
     ? `Сейчас: ${bridge.name} ${bridge.tag} из ${bridge.repo}`
@@ -2853,6 +2859,7 @@ function collectGithub() {
       token: $("gh-knowledge-token").value.trim(),
     },
     tester: {
+      dir: $("gh-tester-dir").value.trim(),
       repo: $("gh-tester-repo").value.trim(),
       ref: $("gh-tester-ref").value.trim(),
       token: $("gh-tester-token").value.trim(),
@@ -2930,13 +2937,40 @@ function renderYandexSession(session, login) {
 let yandexPoll = null;
 let yandexFrameSeen = -1;
 
+/**
+ * Панель живёт, пока идёт вход, — и остаётся на экране, когда он не задался.
+ *
+ * Закрывать её по итогу нельзя: до первого кадра проходят клонирование тестера,
+ * `npm install` и установка Chromium, и любая из трёх причин отказа видна
+ * только в журнале. Панель, исчезнувшая вместе с ним, оставляет ровно то, что
+ * и было: «нажал — ничего не работает».
+ */
 function showYandexScreen(on) {
   $("yandex-remote").classList.toggle("hidden", !on);
-  if (!on) {
-    yandexFrameSeen = -1;
-    $("yandex-frame").removeAttribute("src");
-    $("yandex-remote-wait").classList.remove("hidden");
+}
+
+function resetYandexScreen() {
+  yandexFrameSeen = -1;
+  const frame = $("yandex-frame");
+  frame.removeAttribute("src");
+  frame.classList.add("hidden");
+  $("yandex-remote-wait").classList.remove("hidden");
+  $("yandex-remote-wait").textContent = "Поднимаю браузер…";
+  $("yandex-remote-log").textContent = "";
+  $("yandex-remote-url").textContent = "";
+}
+
+/** Журнал входа: что фабрика делает прямо сейчас и на чём споткнулась. */
+function renderYandexLog(login) {
+  const box = $("yandex-remote-log");
+  const lines = (login.log || []).slice(-12);
+  // Итог обычно уже есть в журнале, но со значком: сравниваем вхождением,
+  // иначе одна и та же причина печатается дважды подряд.
+  if (login.message && !lines.some((line) => line.includes(login.message))) {
+    lines.push(login.message);
   }
+  box.textContent = lines.join("\n");
+  box.scrollTop = box.scrollHeight;
 }
 
 /**
@@ -2947,10 +2981,12 @@ function showYandexScreen(on) {
 function drawYandexFrame(screen) {
   if (typeof screen.frame === "number" && screen.frame !== yandexFrameSeen && screen.available) {
     yandexFrameSeen = screen.frame;
-    $("yandex-frame").src = `/api/yandex/frame?n=${screen.frame}`;
+    const frame = $("yandex-frame");
+    frame.src = `/api/yandex/frame?n=${screen.frame}`;
+    frame.classList.remove("hidden");
     $("yandex-remote-wait").classList.add("hidden");
   }
-  $("yandex-remote-url").textContent = screen.url || "";
+  if (screen.url) $("yandex-remote-url").textContent = screen.url;
   if (screen.width && screen.height) {
     $("yandex-frame").dataset.width = screen.width;
     $("yandex-frame").dataset.height = screen.height;
@@ -2985,18 +3021,16 @@ async function pollYandex() {
   const data = await api("/api/yandex/screen");
   const login = data.login || {};
   drawYandexFrame(data.screen || {});
+  renderYandexLog(login);
   if (login.running) {
     renderYandexSession({}, login);
-    showYandexScreen(login.mode === "remote");
     return;
   }
   clearInterval(yandexPoll);
   yandexPoll = null;
-  showYandexScreen(false);
-  if (login.message) {
-    $("yandex-msg").textContent = login.message;
-    setTimeout(() => { $("yandex-msg").textContent = ""; }, 8000);
-  }
+  // Панель остаётся: в журнале лежит причина, по которой кадра так и не было.
+  $("yandex-remote-wait").textContent = login.ok ? "Вход выполнен." : "Вход не состоялся.";
+  $("yandex-msg").textContent = login.message || "";
   const full = await api("/api/yandex/status");
   renderYandexSession(full.session || {}, full.login || {});
 }
@@ -3005,16 +3039,21 @@ async function startYandexLogin(mode) {
   $("yandex-msg").textContent = "";
   const res = await api("/api/yandex/login", { body: { mode } });
   const login = res.state || { running: true, mode };
+  const running = res.ok || !!login.running;
+  // «Вход уже идёт» — не отказ: к идущему входу надо подключиться, а не ругаться
+  // на человека, нажавшего кнопку дважды, пока ставился тестер.
+  $("yandex-msg").textContent = res.message || "";
   renderYandexSession(res.session || {}, login);
-  if (!res.ok) {
-    $("yandex-msg").textContent = res.message || "";
+  if (!running) {
+    showYandexScreen(false);
     return;
   }
-  $("yandex-msg").textContent = res.message || "";
-  showYandexScreen(mode === "remote");
-  // Вход занимает минуты: сканирование, иногда подтверждение на телефоне.
-  // Держать запрос открытым всё это время нельзя, поэтому состояние опрашивается.
+  if (res.ok) resetYandexScreen();
+  showYandexScreen(login.mode === "remote" || mode === "remote");
+  // Вход занимает минуты: до первого кадра ставится сам тестер, потом человек
+  // сканирует код. Держать запрос открытым всё это время нельзя — опрашиваем.
   if (!yandexPoll) yandexPoll = setInterval(pollYandex, 900);
+  pollYandex();
 }
 
 async function saveSettings() {

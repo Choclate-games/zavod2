@@ -247,16 +247,24 @@ def login(
         if blocked:
             return {"ok": False, "message": blocked}
 
+    on_log(f"🔎 Готовлю тестер в {cfg.tool_dir}\n")
+    on_log("Если его там ещё нет — это клонирование, npm install и Chromium: несколько минут.\n")
     tool_dir, reason = gametest.ensure_tool(cfg, on_log, stop_check)
     if not tool_dir:
+        # Про токен говорим адресом настройки, а не именем переменной: теперь
+        # у неё есть своё поле, и отсылать человека править .env руками незачем.
+        if "токена нет" in reason:
+            reason += ". Задать его: Настройки → 🐙 GitHub → «Тестер площадки»"
+        on_log(f"❌ {reason}\n")
         return {"ok": False, "message": reason}
 
     if mode == MODE_REMOTE:
         if not supports_remote(tool_dir):
-            return {"ok": False, "message": (
-                "установленный тестер не умеет показывать вход кадрами (нет команды "
-                "`auth-remote`) — обновите его галочкой «Обновлять тестер перед каждым "
-                "прогоном» или войдите окном на машине фабрики")}
+            message = ("установленный тестер не умеет показывать вход кадрами (нет команды "
+                       "`auth-remote`) — включите «Обновлять тестер перед каждым прогоном» "
+                       "в Настройки → 🐙 GitHub или войдите окном на машине фабрики")
+            on_log(f"❌ {message}\n")
+            return {"ok": False, "message": message}
         on_log("🔐 Открываю страницу входа Яндекса — сейчас появится QR-код.\n")
         on_log("Отсканируйте его приложением Яндекса; пароль вводить не нужно.\n")
         args = ["auth-remote", PLATFORM, "-p", cfg.profile,

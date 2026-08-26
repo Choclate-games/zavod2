@@ -547,9 +547,15 @@
               </span>
             </div>
             <div class="remote-stage">
-              <img id="yandex-frame" alt="Страница входа Яндекса" />
+              <!-- Картинки нет, пока не пришёл первый кадр: <img> без src браузер
+                   рисует сломанной иконкой, и это выглядит как отказ вместо ожидания. -->
+              <img id="yandex-frame" class="hidden" alt="Страница входа Яндекса" />
               <div class="remote-wait" id="yandex-remote-wait">Поднимаю браузер…</div>
             </div>
+            <!-- Что делает фабрика прямо сейчас. До первого кадра проходит и клонирование
+                 тестера, и npm install, и установка Chromium — минуты, за которые панель
+                 иначе молчит. Сюда же попадает причина отказа. -->
+            <pre class="log small" id="yandex-remote-log"></pre>
             <div class="row remote-keys">
               <input type="text" id="yandex-keys" placeholder="набрать текст в поле на странице" />
               <button class="btn small" id="btn-yandex-type">⌨️ Ввести</button>
@@ -604,10 +610,16 @@
         <div class="settings-card" style="margin-top:14px">
           <h3>🎮 Тестер площадки</h3>
           <div class="dim">
-            Прогон игры на настоящей странице Яндекса ведёт отдельный инструмент. Фабрика
-            клонирует его себе при первом прогоне в <code id="gh-tester-dir" class="mono"></code>.
-            Репозиторий приватный, поэтому без токена клонирование не начнётся вовсе.
+            Прогон игры на настоящей странице Яндекса ведёт отдельный инструмент. Если его нет
+            в каталоге ниже, фабрика клонирует его туда при первом обращении — а репозиторий
+            приватный, и без токена клонирование не начнётся вовсе.
+            <b>Если тестер уже есть на этой машине</b> — своим клоном, рядом с фабрикой, —
+            укажите его каталог, и ни репозиторий, ни токен не понадобятся.
           </div>
+          <label class="field">Каталог тестера
+            <input type="text" id="gh-tester-dir" placeholder="tools/gametest — по умолчанию, внутри фабрики" />
+          </label>
+          <div class="small" id="gh-tester-state"></div>
           <div class="row">
             <label class="field">Репозиторий<input type="text" id="gh-tester-repo" placeholder="Choclate-games/AI_Tester" /></label>
             <label class="field">Ветка<input type="text" id="gh-tester-ref" placeholder="main" /></label>
